@@ -10,49 +10,80 @@
 #include "StdInc.h"
 #include "CMapInfo.h"
 
-#include "../filesystem/ResourceID.h"
+#include "../filesystem/ResourcePath.h"
 #include "../StartInfo.h"
 #include "../GameConstants.h"
 #include "CMapService.h"
+#include "CMapHeader.h"
+#include "MapFormat.h"
 
+#include "../campaign/CampaignHandler.h"
 #include "../filesystem/Filesystem.h"
-#include "../serializer/CMemorySerializer.h"
-#include "../CGeneralTextHandler.h"
+#include "../GameLibrary.h"
 #include "../rmg/CMapGenOptions.h"
+#include "../rmg/CRmgTemplate.h"
+#include "../serializer/CLegacyLoadFile.h"
+#include "../serializer/CLoadFile.h"
+#include "../serializer/CMemorySerializer.h"
+#include "../texts/CGeneralTextHandler.h"
+#include "../texts/TextOperations.h"
 #include "../CCreatureHandler.h"
-#include "../CHeroHandler.h"
-#include "../CModHandler.h"
+#include "../IGameSettings.h"
+#include "../CConfigHandler.h"
 
 CMapInfo::CMapInfo()
-	: scenarioOptionsOfSave(nullptr), amountOfPlayersOnMap(0), amountOfHumanControllablePlayers(0),	amountOfHumanPlayersInSave(0), isRandomMap(false)
+	: isRandomMap(false)
 {
 
 }
 
-CMapInfo::~CMapInfo()
-{
-	vstd::clear_pointer(scenarioOptionsOfSave);
-}
+CMapInfo::~CMapInfo() = default;
+
 
 void CMapInfo::mapInit(const std::string & fname)
 {
 	fileURI = fname;
 	CMapService mapService;
-	mapHeader = mapService.loadMapHeader(ResourceID(fname, EResType::MAP));
-	countPlayers();
+	ResourcePath resource = ResourcePath(fname, EResType::MAP);
+	originalFileURI = resource.getOriginalName();
+	mapHeader = mapService.loadMapHeader(resource);
+	mapHeader->registerMapStrings();
+	lastWrite = CResourceHandler::get()->getLastWriteTime(resource);
+	date = TextOperations::getFormattedDateTimeLocal(lastWrite);
 }
 
-void CMapInfo::saveInit(ResourceID file)
+void CMapInfo::saveInit(const ResourcePath & file)
 {
-	CLoadFile lf(*CResourceHandler::get()->getResourceName(file), MINIMAL_SERIALIZATION_VERSION);
-	lf.checkMagicBytes(SAVEGAME_MAGIC);
+	const auto saveFileName = CResourceHandler::get()->getResourceName(file);
+	if(!saveFileName)
+		throw std::runtime_error("Error: saved game '" + file.getOriginalName() + "' not found!");
 
-	mapHeader = make_unique<CMapHeader>();
-	lf >> *(mapHeader.get()) >> scenarioOptionsOfSave;
-	fileURI = file.getName();
-	countPlayers();
-	std::time_t time = boost::filesystem::last_write_time(*CResourceHandler::get()->getResourceName(file));
-	date = std::asctime(std::localtime(&time));
+	const auto & saveFile = *saveFileName;
+
+	mapHeader = std::make_unique<CMapHeader>();
+	scenarioOptionsOfSave = std::make_unique<StartInfo>();
+
+	if(CLoadFile::readVersion(saveFile) < ESerializationVersion::SAVE_CHUNKS)
+	{
+		CLegacyLoadFile lf(saveFile, nullptr);
+		lf.loadHeader(*mapHeader, *scenarioOptionsOfSave);
+	}
+	else
+	{
+		CLoadFile lf(saveFile);
+		auto header = lf.openChunk(SaveFileFormat::CHUNK_HEADER, nullptr);
+		header->iser & *mapHeader;
+		header->iser & *scenarioOptionsOfSave;
+		if(!header->isFullyRead())
+			throw std::runtime_error("Error: saved game '" + file.getOriginalName() + "' contains unexpected data after map header!");
+	}
+	mapHeader->registerMapStrings();
+
+	fileURI = file.getName(); // Name without file extension
+	originalFileURI = file.getOriginalName(); // Same as file.getName() but keep letter case
+	lastWrite = CResourceHandler::get()->getLastWriteTime(file);
+	date = TextOperations::getFormattedDateTimeLocal(lastWrite);
+
 	// We absolutely not need this data for lobby and server will read it from save
 	// FIXME: actually we don't want them in CMapHeader!
 	mapHeader->triggeredEvents.clear();
@@ -60,61 +91,81 @@ void CMapInfo::saveInit(ResourceID file)
 
 void CMapInfo::campaignInit()
 {
-	campaignHeader = std::unique_ptr<CCampaignHeader>(new CCampaignHeader(CCampaignHandler::getHeader(fileURI)));
+	ResourcePath resource = ResourcePath(fileURI, EResType::CAMPAIGN);
+	originalFileURI = resource.getOriginalName();
+	campaign = CampaignHandler::getHeader(fileURI);
+	lastWrite = CResourceHandler::get()->getLastWriteTime(resource);
+	date = TextOperations::getFormattedDateTimeLocal(lastWrite);
 }
 
-void CMapInfo::countPlayers()
+void CMapInfo::randomMapInit(const CMapGenOptions & options)
 {
-	for(int i=0; i<PlayerColor::PLAYER_LIMIT_I; i++)
+	isRandomMap = true;
+	mapHeader = std::make_unique<CMapHeader>();
+	mapHeader->version = EMapFormat::VCMI;
+	mapHeader->name = options.getMapName();
+	mapHeader->description.appendTextID("core.genrltxt.741");
+
+	if(options.getWaterContent() != EWaterContent::RANDOM)
+		mapHeader->banWaterHeroes(options.getWaterContent() != EWaterContent::NONE);
+
+	const auto * temp = options.getMapTemplate();
+	if(temp)
 	{
-		if(mapHeader->players[i].canHumanPlay)
+		if(!temp->getDescription().empty())
 		{
-			amountOfPlayersOnMap++;
-			amountOfHumanControllablePlayers++;
+			mapHeader->description.appendRawString("\n\n");
+			mapHeader->description.appendTextID(temp->getDescriptionTextID());
 		}
-		else if(mapHeader->players[i].canComputerPlay)
-		{
-			amountOfPlayersOnMap++;
-		}
+
+		for(const auto & hero : temp->getBannedHeroes())
+			mapHeader->allowedHeroes.erase(hero);
+
+		for(const auto & hero : temp->getEnabledHeroes())
+			mapHeader->allowedHeroes.insert(hero);
 	}
 
-	if(scenarioOptionsOfSave)
-		for (auto i = scenarioOptionsOfSave->playerInfos.cbegin(); i != scenarioOptionsOfSave->playerInfos.cend(); i++)
-			if(i->second.isControlledByHuman())
-				amountOfHumanPlayersInSave++;
-}
+	mapHeader->difficulty = EMapDifficulty::NORMAL;
+	mapHeader->height = options.getHeight();
+	mapHeader->width = options.getWidth();
+	mapHeader->mapLayers = options.getLevelMapLayers();
+	mapHeader->howManyTeams = options.getMaxPlayersCount();
 
-std::string CMapInfo::getName() const
-{
-	if(campaignHeader && campaignHeader->name.length())
-		return campaignHeader->name;
-	else if(mapHeader && mapHeader->name.length())
-		return mapHeader->name;
-	else
-		return VLC->generaltexth->allTexts[508];
-}
-
-std::string CMapInfo::getNameForList() const
-{
-	if(scenarioOptionsOfSave)
+	for(auto & player : mapHeader->players)
 	{
-		// TODO: this could be handled differently
-		std::vector<std::string> path;
-		boost::split(path, fileURI, boost::is_any_of("\\/"));
-		return path[path.size()-1];
+		player.canComputerPlay = false;
+		player.canHumanPlay = false;
 	}
-	else
+
+	for(const auto & [color, settings] : options.getPlayersSettings())
 	{
-		return getName();
+		PlayerInfo playerInfo;
+		playerInfo.isFactionRandom = settings.getStartingTown() == FactionID::RANDOM;
+		playerInfo.canComputerPlay = settings.getPlayerType() != EPlayerType::HUMAN;
+		playerInfo.canHumanPlay = settings.getPlayerType() != EPlayerType::COMP_ONLY;
+		playerInfo.team = settings.getTeam();
+		playerInfo.hasMainTown = true;
+		playerInfo.generateHeroAtMainTown = true;
+		mapHeader->players[color.getNum()] = playerInfo;
 	}
 }
 
-std::string CMapInfo::getDescription() const
+std::string CMapInfo::getNameTranslated(const ITranslator * translator) const
 {
-	if(campaignHeader)
-		return campaignHeader->description;
+	if(campaign && !campaign->getNameTranslated(translator).empty())
+		return campaign->getNameTranslated(translator);
+	else if(mapHeader && !mapHeader->name.empty())
+		return mapHeader->name.toString(translator);
 	else
-		return mapHeader->description;
+		return LIBRARY->generaltexth->allTexts[508];
+}
+
+std::string CMapInfo::getDescriptionTranslated(const ITranslator * translator) const
+{
+	if(campaign)
+		return campaign->getDescriptionTranslated(translator);
+	else
+		return mapHeader->description.toString(translator);
 }
 
 int CMapInfo::getMapSizeIconId() const
@@ -132,53 +183,14 @@ int CMapInfo::getMapSizeIconId() const
 		return 2;
 	case CMapHeader::MAP_SIZE_XLARGE:
 		return 3;
+	case CMapHeader::MAP_SIZE_HUGE:
+		return 4;
+	case CMapHeader::MAP_SIZE_XHUGE:
+		return 5;
+	case CMapHeader::MAP_SIZE_GIANT:
+		return 6;
 	default:
 		return 4;
 	}
 }
 
-std::pair<int, int> CMapInfo::getMapSizeFormatIconId() const
-{
-	int frame = -1, group = 0;
-	switch(mapHeader->version)
-	{
-	case EMapFormat::ROE:
-		frame = 0;
-		break;
-	case EMapFormat::AB:
-		frame = 1;
-		break;
-	case EMapFormat::SOD:
-		frame = 2;
-		break;
-	case EMapFormat::WOG:
-		frame = 3;
-		break;
-	case EMapFormat::VCMI:
-		frame = 0;
-		group = 1;
-		break;
-	default:
-		// Unknown version. Be safe and ignore that map
-		//logGlobal->warn("Warning: %s has wrong version!", currentItem->fileURI);
-		break;
-	}
-	return std::make_pair(frame, group);
-}
-
-std::string CMapInfo::getMapSizeName() const
-{
-	switch(mapHeader->width)
-	{
-	case CMapHeader::MAP_SIZE_SMALL:
-		return "S";
-	case CMapHeader::MAP_SIZE_MIDDLE:
-		return "M";
-	case CMapHeader::MAP_SIZE_LARGE:
-		return "L";
-	case CMapHeader::MAP_SIZE_XLARGE:
-		return "XL";
-	default:
-		return "C";
-	}
-}

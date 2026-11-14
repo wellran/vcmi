@@ -9,13 +9,13 @@
  */
 #pragma once
 
-class DLL_LINKAGE CStream : private boost::noncopyable
+class CStream : private boost::noncopyable
 {
 public:
 	/**
 	 * D-tor.
 	 */
-	virtual ~CStream() {}
+	virtual ~CStream() = default;
 
 	/**
 	 * Seeks to the specified position.

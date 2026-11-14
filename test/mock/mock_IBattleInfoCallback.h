@@ -16,26 +16,38 @@
 class IBattleInfoCallbackMock : public IBattleInfoCallback
 {
 public:
-	MOCK_CONST_METHOD0(getContextPool, scripting::Pool *());
-	MOCK_CONST_METHOD0(battleTerrainType, ETerrainType());
-	MOCK_CONST_METHOD0(battleGetBattlefieldType, BFieldType());
+	MOCK_CONST_METHOD0(getScriptContextPool, const scripting::Pool &());
 
-	MOCK_CONST_METHOD0(battleIsFinished, boost::optional<int>());
+	MOCK_CONST_METHOD0(battleTerrainType, TerrainId());
+	MOCK_CONST_METHOD0(battleGetBattlefieldType, BattleField());
+
+	MOCK_CONST_METHOD0(battleIsFinished, std::optional<BattleSide>());
 
 	MOCK_CONST_METHOD0(battleTacticDist, si8());
-	MOCK_CONST_METHOD0(battleGetTacticsSide, si8());
+	MOCK_CONST_METHOD0(battleGetTacticsSide, BattleSide());
 
 	MOCK_CONST_METHOD0(battleNextUnitId, uint32_t());
 
-	MOCK_CONST_METHOD1(battleGetUnitsIf, battle::Units(battle::UnitFilter));
+	MOCK_CONST_METHOD1(battleGetUnitsIf, battle::Units(const battle::UnitFilter &));
 
 	MOCK_CONST_METHOD1(battleGetUnitByID, const battle::Unit *(uint32_t));
-	MOCK_CONST_METHOD2(battleGetUnitByPos, const battle::Unit *(BattleHex, bool));
+	MOCK_CONST_METHOD2(battleGetUnitByPos, const battle::Unit *(const BattleHex&, bool));
 	MOCK_CONST_METHOD0(battleActiveUnit, const battle::Unit *());
 
-	MOCK_CONST_METHOD2(battleGetAllObstaclesOnPos, std::vector<std::shared_ptr<const CObstacleInstance>>(BattleHex, bool));
-	MOCK_CONST_METHOD1(getAllAffectedObstaclesByStack, std::vector<std::shared_ptr<const CObstacleInstance>>(const battle::Unit *));
+	MOCK_CONST_METHOD0(getBonusBearer, IBonusBearer*());
+	MOCK_CONST_METHOD0(getBattle, IBattleInfo*());
+	MOCK_CONST_METHOD0(getPlayerID, std::optional<PlayerColor>());
 
+	MOCK_CONST_METHOD3(battleGetAllObstaclesOnPos, std::vector<std::shared_ptr<const CObstacleInstance>>(const BattleHex&, bool, std::optional<BattleSide>));
+	MOCK_CONST_METHOD2(getAllAffectedObstaclesByStack, std::vector<std::shared_ptr<const CObstacleInstance>>(const battle::Unit *, const BattleHexArray &));
+
+	MOCK_CONST_METHOD0(hasFortifications, bool());
+	MOCK_CONST_METHOD0(hasMoat, bool());
+	MOCK_CONST_METHOD1(battleGetWallState, EWallState(EWallPart));
+	MOCK_CONST_METHOD1(isWallPartAttackable, bool(EWallPart));
+	MOCK_CONST_METHOD1(wallPartToBattleHex, BattleHex(EWallPart));
+	MOCK_CONST_METHOD1(battleHexToWallPart, EWallPart(const BattleHex &));
+	MOCK_CONST_METHOD1(getTowerShooterHex, BattleHex(EWallPart));
 };
 
 

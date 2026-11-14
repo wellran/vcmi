@@ -10,119 +10,182 @@
 #pragma once
 
 #include "CWindowObject.h"
+#include "../gui/TextAlignment.h"
 #include "../../lib/FunctionList.h"
 
-struct SDL_Surface;
-struct Rect;
-class CAnimImage;
-class CLabel;
-class CAnimation;
-class CComponent;
-class CSelectableComponent;
+class CGObjectInstance;
+class CGTownInstance;
+class CGHeroInstance;
 class CGGarrison;
+class CGCreature;
+class CGTeleport;
+class CGObelisk;
+
+class CComponent;
+class CComponentBox;
+class CSelectableComponent;
 class CTextBox;
 class CButton;
+class CFilledTexture;
+class FilledTexturePlayerColored;
+class TransparentFilledRectangle;
+class CMinimapInstance;
+class CLabel;
 class CSlider;
-class CArmyTooltip;
-
-// Window GUI class
-class CSimpleWindow : public WindowBase
-{
-public:
-	SDL_Surface * bitmap; //background
-	void show(SDL_Surface * to) override;
-	CSimpleWindow():bitmap(nullptr){};
-	virtual ~CSimpleWindow();
-};
 
 /// text + comp. + ok button
-class CInfoWindow : public CSimpleWindow
+class CInfoWindow : public WindowBase
 {
 public:
-	typedef std::vector<std::pair<std::string, CFunctionList<void()> > > TButtonsInfo;
-	typedef std::vector<std::shared_ptr<CComponent>> TCompsInfo;
-	QueryID ID; //for identification
+	using TButtonsInfo = std::vector<std::pair<AnimationPath, CFunctionList<void()>>>;
+	using TCompsInfo = std::vector<std::shared_ptr<CComponent>>;
+	QuestionID ID; //for identification
+	std::shared_ptr<CFilledTexture> backgroundTexture;
 	std::shared_ptr<CTextBox> text;
+	std::shared_ptr<CComponentBox> components;
 	std::vector<std::shared_ptr<CButton>> buttons;
-	TCompsInfo components;
 
-	virtual void close();
+	uint32_t closeTimeLeft = 0; // ms, 0 keeps the window open until a button is pressed
 
-	void show(SDL_Surface * to) override;
-	void showAll(SDL_Surface * to) override;
+	void close() override;
+	void showAll(Canvas & to) override;
+	void tick(uint32_t msPassed) override;
+
+	/// closes the window on its own, as if nobody had answered
+	void closeAfter(uint32_t ms);
+
 	void sliderMoved(int to);
 
-	CInfoWindow(std::string Text, PlayerColor player, const TCompsInfo & comps = TCompsInfo(), const TButtonsInfo & Buttons = TButtonsInfo());
+	CInfoWindow(const std::string & Text, PlayerColor player, const TCompsInfo & comps = TCompsInfo(), const TButtonsInfo & Buttons = TButtonsInfo());
 	CInfoWindow();
 	~CInfoWindow();
 
-	//use only before the game starts! (showYesNoDialog in LOCPLINT must be used then)
-	static void showInfoDialog( const std::string & text, const TCompsInfo & components, PlayerColor player = PlayerColor(1));
-	static void showYesNoDialog( const std::string & text, const TCompsInfo & components, const CFunctionList<void()> & onYes, const CFunctionList<void()> & onNo, PlayerColor player = PlayerColor(1));
+	//use only before the game starts! (showYesNoDialog in GAME->interface() must be used then)
+	static void showInfoDialog(const std::string & text, const TCompsInfo & components, PlayerColor player = PlayerColor(1));
+	/// questionID must be set when this dialog is an answer to a question asked by server, so that this window does not get closed without answering
+	static void showYesNoDialog(const std::string & text, const TCompsInfo & components, const CFunctionList<void()> & onYes, const CFunctionList<void()> & onNo, PlayerColor player = PlayerColor(1), uint32_t timeoutMs = 0, QuestionID questionID = QuestionID::NONE);
 	static std::shared_ptr<CInfoWindow> create(const std::string & text, PlayerColor playerID = PlayerColor(1), const TCompsInfo & components = TCompsInfo());
 
 	/// create text from title and description: {title}\n\n description
-	static std::string genText(std::string title, std::string description);
+	static std::string genText(const std::string & title, const std::string & description);
 };
 
 /// popup displayed on R-click
 class CRClickPopup : public WindowBase
 {
 public:
-	virtual void close();
-	void clickRight(tribool down, bool previousState) override;
+	bool isPopupWindow() const override;
 
-	CRClickPopup();
-	virtual ~CRClickPopup();
-
-	static std::shared_ptr<WindowBase> createInfoWin(Point position, const CGObjectInstance * specific);
-	static void createAndPush(const std::string & txt, const CInfoWindow::TCompsInfo &comps = CInfoWindow::TCompsInfo());
-	static void createAndPush(const std::string & txt, std::shared_ptr<CComponent> component);
-	static void createAndPush(const CGObjectInstance * obj, const Point & p, EAlignment alignment = BOTTOMRIGHT);
+	static std::shared_ptr<WindowBase> createCustomInfoWindow(Point position, const CGObjectInstance * specific);
+	static void createAndPush(const std::string & txt, const CInfoWindow::TCompsInfo & comps = CInfoWindow::TCompsInfo());
+	static void createAndPush(const std::string & txt, const std::shared_ptr<CComponent> & component);
+	static void createAndPush(const CGObjectInstance * obj, const Point & p, ETextAlignment alignment = ETextAlignment::BOTTOMRIGHT);
 };
 
 /// popup displayed on R-click
 class CRClickPopupInt : public CRClickPopup
 {
 	std::shared_ptr<CIntObject> inner;
+
+	Point dragDistance;
+
 public:
-	CRClickPopupInt(std::shared_ptr<CIntObject> our);
-	virtual ~CRClickPopupInt();
+	CRClickPopupInt(const std::shared_ptr<CIntObject> & our);
+	~CRClickPopupInt();
+
+	void mouseDraggedPopup(const Point & cursorPosition, const Point & lastUpdateDistance) override;
 };
 
-class CInfoPopup : public CRClickPopup
+/// adventure map popup
+class AdventureMapPopup : public CWindowObject
 {
-public:
-	bool free; //TODO: comment me
-	SDL_Surface * bitmap; //popup background
-	void close() override;
-	void show(SDL_Surface * to) override;
-	CInfoPopup(SDL_Surface * Bitmap, int x, int y, bool Free=false);
-	CInfoPopup(SDL_Surface * Bitmap, const Point &p, EAlignment alignment, bool Free=false);
-	CInfoPopup(SDL_Surface * Bitmap = nullptr, bool Free = false);
+	Point dragDistance;
 
-	void init(int x, int y);
-	~CInfoPopup();
+public:
+	template<typename... Args>
+		requires (sizeof...(Args) != 1 || (!std::is_base_of_v<AdventureMapPopup, std::remove_cvref_t<Args>> && ...))
+	AdventureMapPopup(Args&&... args);
+	void mouseDraggedPopup(const Point & cursorPosition, const Point & lastUpdateDistance) override;
 };
 
-/// popup on adventure map for town\hero objects
-class CInfoBoxPopup : public CWindowObject
+/// popup on adventure map for town\hero and other objects with customized popup content
+class CInfoBoxPopup : public AdventureMapPopup
 {
-	std::shared_ptr<CArmyTooltip> tooltip;
-	Point toScreen(Point pos);
+	std::shared_ptr<CIntObject> tooltip;
+
 public:
 	CInfoBoxPopup(Point position, const CGTownInstance * town);
 	CInfoBoxPopup(Point position, const CGHeroInstance * hero);
 	CInfoBoxPopup(Point position, const CGGarrison * garr);
+	CInfoBoxPopup(Point position, const CGCreature * creature);
 };
 
 /// component selection window
 class CSelWindow : public CInfoWindow
 {
 public:
-	void selectionChange(unsigned to);
 	void madeChoice(); //looks for selected component and calls callback
-	CSelWindow(const std::string & text, PlayerColor player, int charperline, const std::vector<std::shared_ptr<CSelectableComponent>> & comps, const std::vector<std::pair<std::string,CFunctionList<void()> > > &Buttons, QueryID askID);
+	void madeChoiceAndClose();
+	CSelWindow(const std::string & text, PlayerColor player, int charperline, const std::vector<std::shared_ptr<CSelectableComponent>> & comps, const std::vector<std::pair<AnimationPath,CFunctionList<void()> > > &Buttons, QuestionID questionID);
+};
 
-	//notification - this class inherits important destructor from CInfoWindow
+class MinimapWithIcons : public CIntObject
+{
+	std::shared_ptr<TransparentFilledRectangle> background1;
+	std::shared_ptr<TransparentFilledRectangle> background2;
+
+	std::shared_ptr<CMinimapInstance> map1;
+	std::shared_ptr<CMinimapInstance> map2;
+
+	std::vector<std::shared_ptr<CPicture>> iconsOverlay;
+	std::shared_ptr<CSlider> slider;
+
+	std::vector<std::pair<const int3, const ImagePath>> icons;
+public:
+	MinimapWithIcons(const Point & position);
+
+	void recreate();
+	void addIcon(const int3 & coordinates, const ImagePath & image);
+};
+
+class TeleporterPopup : public AdventureMapPopup
+{
+	std::shared_ptr<FilledTexturePlayerColored> filledBackground;
+	std::shared_ptr<MinimapWithIcons> minimap;
+	std::shared_ptr<CLabel> labelTitle;
+
+public:
+	TeleporterPopup(const Point & position, const CGTeleport * teleporter);
+};
+
+class KeymasterPopup : public AdventureMapPopup
+{
+	std::shared_ptr<FilledTexturePlayerColored> filledBackground;
+	std::shared_ptr<MinimapWithIcons> minimap;
+	std::shared_ptr<CLabel> labelTitle;
+	std::shared_ptr<CLabel> labelDescription;
+
+public:
+	KeymasterPopup(const Point & position, const CGObjectInstance * keyObject);
+};
+
+class ObeliskPopup : public AdventureMapPopup
+{
+	std::shared_ptr<FilledTexturePlayerColored> filledBackground;
+	std::shared_ptr<MinimapWithIcons> minimap;
+	std::shared_ptr<CLabel> labelTitle;
+	std::shared_ptr<CLabel> labelDescription;
+
+public:
+	ObeliskPopup(const Point & position, const CGObelisk * obelisk);
+};
+
+class SearchPopup : public AdventureMapPopup
+{
+	std::shared_ptr<FilledTexturePlayerColored> filledBackground;
+	std::shared_ptr<MinimapWithIcons> minimap;
+	std::shared_ptr<CLabel> labelTitle;
+
+public:
+	SearchPopup(std::vector<const CGObjectInstance *> objs);
 };

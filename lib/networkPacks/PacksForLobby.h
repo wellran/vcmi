@@ -1,0 +1,543 @@
+/*
+ * PacksForLobby.h, part of VCMI engine
+ *
+ * Authors: listed in file AUTHORS in main folder
+ *
+ * License: GNU General Public License v2.0 or later
+ * Full text of license available in license.txt file, in main folder
+ *
+ */
+#pragma once
+
+#include "StartInfo.h"
+#include "NetPacksBase.h"
+#include "../mapping/ScenarioList.h"
+#include "../modding/ModVerificationInfo.h"
+#include "../serializer/ESerializationVersion.h"
+#include "../texts/MetaString.h"
+
+class CServerHandler;
+class CVCMIServer;
+
+class CMapInfo;
+struct StartInfo;
+class CMapGenOptions;
+struct ClientPlayer;
+
+struct DLL_LINKAGE CLobbyPackToPropagate : public CPackForLobby
+{
+};
+
+struct DLL_LINKAGE CLobbyPackToServer : public CPackForLobby
+{
+	bool isForServer() const override;
+};
+
+struct DLL_LINKAGE LobbyClientConnected : public CLobbyPackToPropagate
+{
+	// Set by client before sending pack to server
+	std::string uuid;
+	std::vector<std::string> names;
+	EStartMode mode = EStartMode::INVALID;
+	// Changed by server before announcing pack
+	GameConnectionID clientId = GameConnectionID::INVALID;
+	GameConnectionID hostClientId = GameConnectionID::INVALID;
+	ESerializationVersion version = ESerializationVersion::CURRENT;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler & h)
+	{
+		h & uuid;
+		h & names;
+		h & mode;
+
+		h & clientId;
+		h & hostClientId;
+		h & version;
+	}
+};
+
+struct DLL_LINKAGE LobbyClientDisconnected : public CLobbyPackToPropagate
+{
+	GameConnectionID clientId = GameConnectionID::INVALID;
+	bool shutdownServer = false;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & clientId;
+		h & shutdownServer;
+	}
+};
+
+struct DLL_LINKAGE LobbyChatMessage : public CLobbyPackToPropagate
+{
+	std::string playerName;
+	MetaString message;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & playerName;
+		h & message;
+	}
+};
+
+struct DLL_LINKAGE LobbyGuiAction : public CLobbyPackToPropagate
+{
+	enum EAction : ui8 {
+		NONE, NO_TAB, OPEN_OPTIONS, OPEN_SCENARIO_LIST, OPEN_RANDOM_MAP_OPTIONS, OPEN_TURN_OPTIONS, OPEN_EXTRA_OPTIONS, BATTLE_MODE
+	} action = NONE;
+
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & action;
+	}
+};
+
+struct DLL_LINKAGE LobbyLoadProgress : public CLobbyPackToPropagate
+{
+	unsigned char progress;
+	
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & progress;
+	}
+};
+
+struct DLL_LINKAGE LobbyRestartGame : public CLobbyPackToPropagate
+{
+	void visitTyped(ICPackVisitor & visitor) override;
+	
+	template <typename Handler> void serialize(Handler &h)
+	{
+	}
+};
+
+/// Sent by host after a won campaign scenario; the server returns to lobby with the next scenario of its campaign
+struct DLL_LINKAGE LobbyNextCampaignScenario : public CLobbyPackToPropagate
+{
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+	}
+};
+
+struct DLL_LINKAGE LobbyPrepareStartGame : public CLobbyPackToPropagate
+{
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+	}
+};
+
+struct DLL_LINKAGE LobbyStartGame : public CLobbyPackToPropagate
+{
+	// Set by server
+	std::shared_ptr<StartInfo> initializedStartInfo;
+	std::shared_ptr<CGameState> initializedGameState;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		if (!h.saving)
+			h.loadingGamestate = true;
+		h & initializedStartInfo;
+		h & initializedGameState;
+		if (!h.saving)
+			h.loadingGamestate = false;
+	}
+};
+
+/// Sent by host to load the quick save of the running game; the server finds the file and checks that it belongs to this game
+struct DLL_LINKAGE LobbyQuickLoadGame : public CLobbyPackToPropagate
+{
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+	}
+};
+
+/// Sent by host to check whether the quick save of the running game can be loaded
+struct DLL_LINKAGE LobbyRequestQuickLoadInfo : public CLobbyPackToServer
+{
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+	}
+};
+
+/// Server response to LobbyRequestQuickLoadInfo or to a rejected LobbyQuickLoadGame, sent only to the requesting client
+struct DLL_LINKAGE LobbyQuickLoadInfo : public CPackForLobby
+{
+	std::string error; ///< reason why the quick save can not be loaded, empty if it can
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & error;
+	}
+};
+
+/// Sent by client to query current lobby state without joining as a player
+struct DLL_LINKAGE LobbyQueryState : public CLobbyPackToServer
+{
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler & h)
+	{
+	}
+};
+
+/// Server response to LobbyQueryState with compatibility info for preview
+struct DLL_LINKAGE LobbyModsCheck : public CPackForLobby
+{
+	std::string vcmiVersion;
+	ModCompatibilityInfo mods;
+	std::string hostAccountDisplayName;
+	std::vector<std::string> participantNames;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler & h)
+	{
+		h & vcmiVersion;
+		h & mods;
+		h & hostAccountDisplayName;
+		h & participantNames;
+	}
+};
+
+struct DLL_LINKAGE LobbyUpdateState : public CLobbyPackToPropagate
+{
+	LobbyState state;
+	bool firstState = false; // Used on client-side only, true for the first state received after connecting
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & state;
+	}
+};
+
+/// Map info of the selected map, save or campaign, sent on map change and to a newly connected client.
+/// Separate from LobbyUpdateState, which is sent on every change in lobby, since it contains the whole map header
+struct DLL_LINKAGE LobbyUpdateMapInfo : public CPackForLobby
+{
+	std::shared_ptr<CMapInfo> mapInfo;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & mapInfo;
+	}
+};
+
+/// Sent by host to request maps or saved games of a folder on the server
+struct DLL_LINKAGE LobbyRequestScenarioList : public CLobbyPackToServer
+{
+	ScenarioListEntry::EType type = ScenarioListEntry::EType::MAP;
+	std::string folder; ///< relative to Maps/ or Saves/
+	ELoadMode loadMode = ELoadMode::NONE; ///< saves that can not be loaded in this mode are not listed
+	bool selectLast = false; ///< ignore folder, list folder of the map last selected, or of the save last written or loaded in this load mode
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & type;
+		h & folder;
+		h & loadMode;
+		h & selectLast;
+	}
+};
+
+/// Server response to LobbyRequestScenarioList, sent only to the requesting client
+struct DLL_LINKAGE LobbyScenarioList : public CPackForLobby
+{
+	ScenarioList list;
+	std::string selectedFile; ///< file URI of the entry to select, set only for selectLast requests
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & list;
+		h & selectedFile;
+	}
+};
+
+/// Sent by host to request map info of a saved game without selecting it, for the in-game save screen
+struct DLL_LINKAGE LobbyRequestScenarioInfo : public CLobbyPackToServer
+{
+	ScenarioSelection selection;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & selection;
+	}
+};
+
+/// Server response to LobbyRequestScenarioInfo, sent only to the requesting client
+struct DLL_LINKAGE LobbyScenarioInfo : public CPackForLobby
+{
+	ScenarioSelection selection;
+	std::shared_ptr<CMapInfo> mapInfo; ///< null if the file could not be loaded
+	std::string error; ///< reason why the file could not be loaded
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & selection;
+		h & mapInfo;
+		h & error;
+	}
+};
+
+/// Sent by host to select a map, saved game or campaign; the server loads its own copy and sends it in LobbyUpdateMapInfo
+struct DLL_LINKAGE LobbySetMap : public CLobbyPackToServer
+{
+	ScenarioSelection selection;
+	std::shared_ptr<CMapGenOptions> mapGenOpts; ///< set only for random maps
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & selection;
+		h & mapGenOpts;
+	}
+};
+
+/// Sent by host to start a campaign; the server loads its own copy of the campaign file
+struct DLL_LINKAGE LobbySetCampaign : public CLobbyPackToServer
+{
+	std::string fileURI;
+	std::string campaignSet; ///< campaign set the campaign was started from, empty for the custom campaign list
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & fileURI;
+		h & campaignSet;
+	}
+};
+
+struct DLL_LINKAGE LobbySetCampaignMap : public CLobbyPackToServer
+{
+	CampaignScenarioID mapId = CampaignScenarioID::NONE;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & mapId;
+	}
+};
+
+struct DLL_LINKAGE LobbySetCampaignBonus : public CLobbyPackToServer
+{
+	int bonusId = -1;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & bonusId;
+	}
+};
+
+struct DLL_LINKAGE LobbySetBattleOnlyModeStartInfo : public CLobbyPackToPropagate
+{
+	std::shared_ptr<BattleOnlyModeStartInfo> startInfo;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & startInfo;
+	}
+};
+
+struct DLL_LINKAGE LobbyChangePlayerOption : public CLobbyPackToServer
+{
+	enum EWhat : ui8 {UNKNOWN, TOWN, HERO, BONUS, TOWN_ID, HERO_ID, BONUS_ID};
+	ui8 what = UNKNOWN;
+	int32_t value = 0;
+	PlayerColor color = PlayerColor::CANNOT_DETERMINE;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & what;
+		h & value;
+		h & color;
+	}
+};
+
+struct DLL_LINKAGE LobbySetPlayer : public CLobbyPackToServer
+{
+	PlayerColor clickedColor = PlayerColor::CANNOT_DETERMINE;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & clickedColor;
+	}
+};
+
+struct DLL_LINKAGE LobbySetPlayerName : public CLobbyPackToServer
+{
+	PlayerColor color = PlayerColor::CANNOT_DETERMINE;
+	std::string name = "";
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & color;
+		h & name;
+	}
+};
+
+struct DLL_LINKAGE LobbySetPlayerHandicap : public CLobbyPackToServer
+{
+	PlayerColor color = PlayerColor::CANNOT_DETERMINE;
+	Handicap handicap = Handicap();
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & color;
+		h & handicap;
+	}
+};
+
+struct DLL_LINKAGE LobbySetSimturns : public CLobbyPackToServer
+{
+	SimturnsInfo simturnsInfo;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & simturnsInfo;
+	}
+};
+
+struct DLL_LINKAGE LobbySetTurnTime : public CLobbyPackToServer
+{
+	TurnTimerInfo turnTimerInfo;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & turnTimerInfo;
+	}
+};
+
+struct DLL_LINKAGE LobbySetExtraOptions : public CLobbyPackToServer
+{
+	ExtraOptionsInfo extraOptionsInfo;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & extraOptionsInfo;
+	}
+};
+
+struct DLL_LINKAGE LobbySetDifficulty : public CLobbyPackToServer
+{
+	ui8 difficulty = 0;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & difficulty;
+	}
+};
+
+struct DLL_LINKAGE LobbyForceSetPlayer : public CLobbyPackToServer
+{
+	PlayerConnectionID targetConnectedPlayer = PlayerConnectionID::INVALID;
+	PlayerColor targetPlayerColor = PlayerColor::CANNOT_DETERMINE;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler & h)
+	{
+		h & targetConnectedPlayer;
+		h & targetPlayerColor;
+	}
+};
+
+struct DLL_LINKAGE LobbyShowMessage : public CLobbyPackToPropagate
+{
+	MetaString message;
+	
+	void visitTyped(ICPackVisitor & visitor) override;
+	
+	template <typename Handler> void serialize(Handler & h)
+	{
+		h & message;
+	}
+};
+
+struct DLL_LINKAGE LobbyPvPAction : public CLobbyPackToServer
+{
+	enum EAction : ui8 {
+		NONE, COIN, RANDOM_TOWN, RANDOM_TOWN_VS
+	};
+
+	EAction action = NONE;
+	std::vector<FactionID> bannedTowns;
+
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & action;
+		h & bannedTowns;
+	}
+};
+
+/// Sent by host to delete saved games, save folders or random maps
+struct DLL_LINKAGE LobbyDelete : public CLobbyPackToServer
+{
+	std::vector<ResourcePath> files; ///< of type SAVEGAME, DIRECTORY under Saves/, or MAP under Maps/RandomMaps/
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & files;
+	}
+};

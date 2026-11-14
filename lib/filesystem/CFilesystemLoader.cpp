@@ -11,29 +11,40 @@
 #include "CFilesystemLoader.h"
 
 #include "CFileInputStream.h"
-#include "FileStream.h"
 
-namespace bfs = boost::filesystem;
+#include "../ExceptionsCommon.h"
+#include "../texts/TextOperations.h"
 
-CFilesystemLoader::CFilesystemLoader(std::string _mountPoint, bfs::path baseDirectory, size_t depth, bool initial):
-    baseDirectory(std::move(baseDirectory)),
-    mountPoint(std::move(_mountPoint)),
-    fileList(listFiles(mountPoint, depth, initial))
+CFilesystemLoader::CFilesystemLoader(std::string _mountPoint, boost::filesystem::path baseDirectory, size_t depth, bool initial):
+	baseDirectory(std::move(baseDirectory)),
+	mountPoint(std::move(_mountPoint)),
+	recursiveDepth(depth),
+	initial(initial)
 {
+	try {
+		fileList = listFiles(mountPoint, depth, initial);
+	}
+	catch (const boost::filesystem::filesystem_error & e) {
+		throw DataLoadingException("Failed to load content of '" + TextOperations::filesystemPathToUtf8(baseDirectory) + "'. Reason: " + e.what());
+	}
+
 	logGlobal->trace("File system loaded, %d files found", fileList.size());
 }
 
-std::unique_ptr<CInputStream> CFilesystemLoader::load(const ResourceID & resourceName) const
+std::unique_ptr<CInputStream> CFilesystemLoader::load(const ResourcePath & resourceName) const
 {
-	assert(fileList.count(resourceName));
-	bfs::path file = baseDirectory / fileList.at(resourceName);
-	logGlobal->trace("loading %s", file.string());
-	return make_unique<CFileInputStream>(file);
+	std::shared_lock lock(fileListGuard);
+
+	assert(fileList.contains(resourceName));
+	boost::filesystem::path file = baseDirectory / fileList.at(resourceName);
+	logGlobal->trace("loading %s", TextOperations::filesystemPathToUtf8(file));
+	return std::make_unique<CFileInputStream>(file);
 }
 
-bool CFilesystemLoader::existsResource(const ResourceID & resourceName) const
+bool CFilesystemLoader::existsResource(const ResourcePath & resourceName) const
 {
-	return fileList.count(resourceName);
+	std::shared_lock lock(fileListGuard);
+	return fileList.contains(resourceName);
 }
 
 std::string CFilesystemLoader::getMountPoint() const
@@ -41,24 +52,30 @@ std::string CFilesystemLoader::getMountPoint() const
 	return mountPoint;
 }
 
-boost::optional<boost::filesystem::path> CFilesystemLoader::getResourceName(const ResourceID & resourceName) const
+std::optional<boost::filesystem::path> CFilesystemLoader::getResourceName(const ResourcePath & resourceName) const
 {
 	assert(existsResource(resourceName));
 
+	std::shared_lock lock(fileListGuard);
 	return baseDirectory / fileList.at(resourceName);
 }
 
-void CFilesystemLoader::updateFilteredFiles(std::function<bool(const std::string &)> filter) const
+bool CFilesystemLoader::updateFilteredFiles(std::function<bool(const std::string &)> filter)
 {
-	if (filter(mountPoint))
-	{
-		fileList = listFiles(mountPoint, 1, false);
-	}
+	if (!filter(mountPoint))
+		return false;
+
+	std::lock_guard lock(fileListGuard);
+	auto newFileList = listFiles(mountPoint, recursiveDepth, initial);
+	bool changed = newFileList != fileList;
+	fileList = std::move(newFileList);
+	return changed;
 }
 
-std::unordered_set<ResourceID> CFilesystemLoader::getFilteredFiles(std::function<bool(const ResourceID &)> filter) const
+std::unordered_set<ResourcePath> CFilesystemLoader::getFilteredFiles(std::function<bool(const ResourcePath &)> filter) const
 {
-	std::unordered_set<ResourceID> foundID;
+	std::unordered_set<ResourcePath> foundID;
+	std::shared_lock lock(fileListGuard);
 
 	for (auto & file : fileList)
 	{
@@ -68,9 +85,11 @@ std::unordered_set<ResourceID> CFilesystemLoader::getFilteredFiles(std::function
 	return foundID;
 }
 
-bool CFilesystemLoader::createResource(std::string filename, bool update)
+bool CFilesystemLoader::createResource(const std::string & requestedFilename, bool update)
 {
-	ResourceID resID(filename);
+	std::string filename = requestedFilename;
+	ResourcePath resID(filename);
+	std::lock_guard lock(fileListGuard);
 
 	if (fileList.find(resID) != fileList.end())
 		return true;
@@ -82,56 +101,121 @@ bool CFilesystemLoader::createResource(std::string filename, bool update)
 	}
 
 	filename = filename.substr(mountPoint.size());
+	boost::filesystem::path filePath = TextOperations::Utf8TofilesystemPath(filename);
+
+	if (filePath.has_root_path() || std::any_of(filePath.begin(), filePath.end(), [](const boost::filesystem::path & part){ return part == ".."; }))
+	{
+		logGlobal->error("Can't create file outside of mount point %s: %s", mountPoint, requestedFilename);
+		return false;
+	}
 
 	if (!update)
 	{
-		if (!FileStream::CreateFile(baseDirectory / filename))
+		// create folders if not exists
+		boost::filesystem::path p((baseDirectory / filePath).c_str());
+		boost::filesystem::create_directories(p.parent_path());
+
+		// create file, if not exists
+		std::ofstream file((baseDirectory / filePath).c_str(), std::ofstream::binary);
+
+		if (!file.is_open())
 			return false;
 	}
-	fileList[resID] = filename;
+	fileList[resID] = filePath;
 	return true;
 }
 
-std::unordered_map<ResourceID, bfs::path> CFilesystemLoader::listFiles(const std::string &mountPoint, size_t depth, bool initial) const
+bool CFilesystemLoader::removeResource(const ResourcePath & resourceName)
 {
-	static const EResType::Type initArray[] = {
+	std::lock_guard lock(fileListGuard);
+	auto resource = fileList.find(resourceName);
+	if(resource == fileList.end())
+		return false;
+
+	boost::system::error_code error;
+	boost::filesystem::remove(baseDirectory / resource->second, error);
+	if(error)
+	{
+		logGlobal->error("Failed to remove resource %s: %s", resourceName.getOriginalName(), error.message());
+		return false;
+	}
+
+	fileList.erase(resource);
+	return true;
+}
+
+std::unordered_map<ResourcePath, boost::filesystem::path> CFilesystemLoader::listFiles(const std::string &mountPoint, size_t depth, bool initial) const
+{
+	static const EResType initArray[] = {
 		EResType::DIRECTORY,
-		EResType::TEXT,
+		EResType::JSON,
+		EResType::TEXT, // mod descriptions
 		EResType::ARCHIVE_LOD,
 		EResType::ARCHIVE_VID,
 		EResType::ARCHIVE_SND,
 		EResType::ARCHIVE_ZIP };
-	static const std::set<EResType::Type> initialTypes(initArray, initArray + ARRAY_COUNT(initArray));
+	static const std::set<EResType> initialTypes(initArray, initArray + std::size(initArray));
+	std::unordered_map<ResourcePath, boost::filesystem::path> fileList;
 
-	assert(bfs::is_directory(baseDirectory));
-	std::unordered_map<ResourceID, bfs::path> fileList;
+	if(!boost::filesystem::exists(baseDirectory))
+		return fileList;
 
-	std::vector<bfs::path> path; //vector holding relative path to our file
+	if(!boost::filesystem::is_directory(baseDirectory))
+		return fileList;
 
-	bfs::recursive_directory_iterator enddir;
-	bfs::recursive_directory_iterator it(baseDirectory, bfs::symlink_option::recurse);
+	std::vector<boost::filesystem::path> path; //vector holding relative path to our file
+
+	boost::filesystem::recursive_directory_iterator enddir;
+#if BOOST_VERSION >= 107200 // 1.72
+	boost::filesystem::recursive_directory_iterator it(baseDirectory, boost::filesystem::directory_options::follow_directory_symlink | boost::filesystem::directory_options::skip_permission_denied);
+#else
+	boost::filesystem::recursive_directory_iterator it(baseDirectory, boost::filesystem::symlink_option::recurse);
+#endif
 
 	for(; it != enddir; ++it)
 	{
-		EResType::Type type;
+		EResType type;
+#if BOOST_VERSION >= 107200
+		const auto currentDepth = it.depth();
+#else
+		const auto currentDepth = it.level();
+#endif
 
-		if (bfs::is_directory(it->status()))
+		// entries can not always be accessed, for example due to permissions or symlink loops
+		boost::system::error_code statusError;
+		const auto status = it->status(statusError);
+		if (statusError)
 		{
-			path.resize(it.level() + 1);
+			logGlobal->warn("Skipping %s: %s", TextOperations::filesystemPathToUtf8(it->path()), statusError.message());
+#if BOOST_VERSION >= 107200
+			it.disable_recursion_pending();
+#else
+			it.no_push();
+#endif
+			continue;
+		}
+
+		if (boost::filesystem::is_directory(status))
+		{
+			path.resize(currentDepth + 1);
 			path.back() = it->path().filename();
 			// don't iterate into directory if depth limit reached
-			it.no_push(depth <= it.level());
+#if BOOST_VERSION >= 107200
+			it.disable_recursion_pending(depth <= currentDepth);
+#else
+			it.no_push(depth <= currentDepth);
+#endif
 
 			type = EResType::DIRECTORY;
 		}
 		else
-			type = EResTypeHelper::getTypeFromExtension(it->path().extension().string());
+			type = EResTypeHelper::getTypeFromExtension(TextOperations::filesystemPathToUtf8(it->path().extension()));
 
 		if (!initial || vstd::contains(initialTypes, type))
 		{
 			//reconstruct relative filename (not possible via boost AFAIK)
-			bfs::path filename;
-			const size_t iterations = std::min((size_t)it.level(), path.size());
+			boost::filesystem::path filename;
+			const size_t iterations = std::min(static_cast<size_t>(currentDepth), path.size());
 			if (iterations)
 			{
 				filename = path.front();
@@ -143,23 +227,38 @@ std::unordered_map<ResourceID, bfs::path> CFilesystemLoader::listFiles(const std
 				filename = it->path().filename();
 
 			std::string resName;
-			if (bfs::path::preferred_separator != '/')
+			std::string filenameUtf8 = TextOperations::filesystemPathToUtf8(filename);
+
+			if (boost::filesystem::path::preferred_separator != '/')
 			{
 				// resource names are using UNIX slashes (/)
 				resName.reserve(resName.size() + filename.native().size());
 				resName = mountPoint;
-				for (const char c : filename.string())
-					if (c != bfs::path::preferred_separator)
+				for (const char c : filenameUtf8)
+					if (c != boost::filesystem::path::preferred_separator)
 						resName.push_back(c);
 					else
 						resName.push_back('/');
 			}
 			else
-				resName = mountPoint + filename.string();
+				resName = mountPoint + filenameUtf8;
 
-			fileList[ResourceID(resName, type)] = std::move(filename);
+			fileList[ResourcePath(resName, type)] = std::move(filename);
 		}
 	}
 
 	return fileList;
+}
+
+std::string CFilesystemLoader::getFullFileURI(const ResourcePath& resourceName) const
+{
+	auto filePath = getResourceName(resourceName);
+	auto path = boost::filesystem::canonical(*filePath);
+	return TextOperations::filesystemPathToUtf8(path);
+}
+
+std::time_t CFilesystemLoader::getLastWriteTime(const ResourcePath& resourceName) const
+{
+	auto resourcePath = getResourceName(resourceName);
+	return  boost::filesystem::last_write_time(*resourcePath);
 }

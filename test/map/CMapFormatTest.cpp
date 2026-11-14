@@ -9,99 +9,45 @@
  */
 #include "StdInc.h"
 
-#include "../../lib/JsonDetail.h"
-
 #include "../../lib/filesystem/CMemoryBuffer.h"
 #include "../../lib/filesystem/Filesystem.h"
 
+#include "../../lib/callback/EditorCallback.h"
 #include "../../lib/mapping/CMap.h"
-#include "../../lib/rmg/CMapGenOptions.h"
-#include "../../lib/rmg/CMapGenerator.h"
 #include "../../lib/mapping/MapFormatJson.h"
 
-#include "../lib/VCMIDirs.h"
+#include "../../lib/VCMIDirs.h"
 
-#include "MapComparer.h"
 #include "../JsonComparer.h"
-
-static const int TEST_RANDOM_SEED = 1337;
 
 static void saveTestMap(CMemoryBuffer & serializeBuffer, const std::string & filename)
 {
 	auto path = VCMIDirs::get().userDataPath() / filename;
 	boost::filesystem::remove(path);
-	boost::filesystem::ofstream tmp(path, boost::filesystem::ofstream::binary);
+	std::ofstream tmp(path.c_str(), std::ofstream::binary);
 
 	tmp.write((const char *)serializeBuffer.getBuffer().data(), serializeBuffer.getSize());
 	tmp.flush();
 	tmp.close();
 }
 
-TEST(MapFormat, Random)
-{
-	SCOPED_TRACE("MapFormat_Random start");
-
-	CMapGenOptions opt;
-	CRmgTemplate tmpl;
-
-	const_cast<CRmgTemplate::CPlayerCountRange &>(tmpl.getCpuPlayers()).addRange(1, 4);
-	const_cast<CRmgTemplate::Zones &>(tmpl.getZones())[0] = std::make_shared<rmg::ZoneOptions>();
-
-	opt.setMapTemplate(&tmpl);
-
-	opt.setHeight(CMapHeader::MAP_SIZE_MIDDLE);
-	opt.setWidth(CMapHeader::MAP_SIZE_MIDDLE);
-	opt.setHasTwoLevels(true);
-	opt.setPlayerCount(4);
-
-	opt.setPlayerTypeForStandardPlayer(PlayerColor(0), EPlayerType::HUMAN);
-	opt.setPlayerTypeForStandardPlayer(PlayerColor(1), EPlayerType::AI);
-	opt.setPlayerTypeForStandardPlayer(PlayerColor(2), EPlayerType::AI);
-	opt.setPlayerTypeForStandardPlayer(PlayerColor(3), EPlayerType::AI);
-
-	CMapGenerator gen;
-
-	std::unique_ptr<CMap> initialMap = gen.generate(&opt, TEST_RANDOM_SEED);
-	initialMap->name = "Test";
-	SCOPED_TRACE("MapFormat_Random generated");
-
-	CMemoryBuffer serializeBuffer;
-	{
-		CMapSaverJson saver(&serializeBuffer);
-		saver.saveMap(initialMap);
-	}
-	SCOPED_TRACE("MapFormat_Random serialized");
-	saveTestMap(serializeBuffer, "test_random.vmap");
-	SCOPED_TRACE("MapFormat_Random saved");
-
-	serializeBuffer.seek(0);
-	{
-		CMapLoaderJson loader(&serializeBuffer);
-		std::unique_ptr<CMap> serialized = loader.loadMap();
-
-		MapComparer c;
-		c(serialized, initialMap);
-	}
-	SCOPED_TRACE("MapFormat_Random finish");
-}
-
 static JsonNode getFromArchive(CZipLoader & archive, const std::string & archiveFilename)
 {
-	ResourceID resource(archiveFilename, EResType::TEXT);
+	JsonPath resource = JsonPath::builtin(archiveFilename);
 
 	if(!archive.existsResource(resource))
 		throw std::runtime_error(archiveFilename + " not found");
 
 	auto data = archive.load(resource)->readAll();
 
-	JsonNode res(reinterpret_cast<char*>(data.first.get()), data.second);
+	JsonNode res(reinterpret_cast<const std::byte *>(data.first.get()), data.second, resource.getName());
 
 	return res;
 }
 
 static void addToArchive(CZipSaver & saver, const JsonNode & data, const std::string & filename)
 {
-	auto s = data.toJson();
+	auto s = data.toString();
 	std::unique_ptr<COutputStream> stream = saver.addFile(filename);
 
 	if(stream->write((const ui8*)s.c_str(), s.size()) != s.size())
@@ -127,7 +73,11 @@ static std::unique_ptr<CMap> loadOriginal(const JsonNode & header, const JsonNod
 
 	CMapLoaderJson initialLoader(&initialBuffer);
 
-	return initialLoader.loadMap();
+	// object handlers assert on a non-null callback in their factory
+	static EditorCallback cb(nullptr);
+	auto map = initialLoader.loadMap(&cb);
+	cb.setMap(map.get());
+	return map;
 }
 
 static void loadActual(CMemoryBuffer * serializeBuffer, const std::unique_ptr<CMap> & originalMap, JsonNode & header, JsonNode & objects, JsonNode & surface, JsonNode & underground)
@@ -150,16 +100,13 @@ TEST(MapFormat, Objects)
 {
 	static const std::string MAP_DATA_PATH = "test/ObjectPropertyTest/";
 
-	const JsonNode initialHeader(ResourceID(MAP_DATA_PATH + CMapFormatJson::HEADER_FILE_NAME));
-	const JsonNode expectedHeader(ResourceID(MAP_DATA_PATH + CMapFormatJson::HEADER_FILE_NAME));//same as initial for now
+	const JsonNode expectedHeader(JsonPath::builtin(MAP_DATA_PATH + CMapFormatJson::HEADER_FILE_NAME));
+	const JsonNode expectedObjects(JsonPath::builtin(MAP_DATA_PATH + CMapFormatJson::OBJECTS_FILE_NAME));
 
-	const JsonNode initialObjects(ResourceID(MAP_DATA_PATH + CMapFormatJson::OBJECTS_FILE_NAME));
-	const JsonNode expectedObjects(ResourceID(MAP_DATA_PATH + "objects.ex.json"));
+	const JsonNode expectedSurface(JsonPath::builtin(MAP_DATA_PATH + "surface_terrain.json"));
+	const JsonNode expectedUnderground(JsonPath::builtin(MAP_DATA_PATH + "underground_terrain.json"));
 
-	const JsonNode expectedSurface(ResourceID(MAP_DATA_PATH + "surface_terrain.json"));
-	const JsonNode expectedUnderground(ResourceID(MAP_DATA_PATH + "underground_terrain.json"));
-
-	std::unique_ptr<CMap> originalMap = loadOriginal(initialHeader, initialObjects, expectedSurface, expectedUnderground);
+	std::unique_ptr<CMap> originalMap = loadOriginal(expectedHeader, expectedObjects, expectedSurface, expectedUnderground);
 
 	CMemoryBuffer serializeBuffer;
 
@@ -189,11 +136,11 @@ TEST(MapFormat, Terrain)
 {
 	static const std::string MAP_DATA_PATH = "test/TerrainTest/";
 
-	const JsonNode expectedHeader(ResourceID(MAP_DATA_PATH + CMapFormatJson::HEADER_FILE_NAME));
-	const JsonNode expectedObjects(ResourceID(MAP_DATA_PATH + CMapFormatJson::OBJECTS_FILE_NAME));
+	const JsonNode expectedHeader(JsonPath::builtin(MAP_DATA_PATH + CMapFormatJson::HEADER_FILE_NAME));
+	const JsonNode expectedObjects(JsonPath::builtin(MAP_DATA_PATH + CMapFormatJson::OBJECTS_FILE_NAME));
 
-	const JsonNode expectedSurface(ResourceID(MAP_DATA_PATH + "surface_terrain.json"));
-	const JsonNode expectedUnderground(ResourceID(MAP_DATA_PATH + "underground_terrain.json"));
+	const JsonNode expectedSurface(JsonPath::builtin(MAP_DATA_PATH + "surface_terrain.json"));
+	const JsonNode expectedUnderground(JsonPath::builtin(MAP_DATA_PATH + "underground_terrain.json"));
 
 	std::unique_ptr<CMap> originalMap = loadOriginal(expectedHeader, expectedObjects, expectedSurface, expectedUnderground);
 

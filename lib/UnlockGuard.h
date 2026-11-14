@@ -43,7 +43,7 @@ namespace vstd
 	}
 
 
-	//similar to boost::lock_guard but UNlocks for the scope + assertions
+	//similar to std::lock_guard but UNlocks for the scope + assertions
 	template<typename Mutex, typename LockingPolicy = detail::unlock_policy<Mutex> >
 	class unlock_guard : LockingPolicy
 	{
@@ -88,29 +88,10 @@ namespace vstd
 		return unlock_guard<Mutex, detail::unlock_policy<Mutex> >(m_);
 	}
 	template<typename Mutex>
-	unlock_guard<Mutex, detail::unlock_policy<Mutex> > makeEmptyGuard(Mutex &)
-	{
-		return unlock_guard<Mutex, detail::unlock_policy<Mutex> >();
-	}
-	template<typename Mutex>
-	unlock_guard<Mutex, detail::unlock_policy<Mutex> > makeUnlockGuardIf(Mutex &m_, bool shallUnlock)
-	{
-		return shallUnlock 
-			? makeUnlockGuard(m_)
-			: unlock_guard<Mutex, detail::unlock_policy<Mutex> >();
-	}
-	template<typename Mutex>
 	unlock_guard<Mutex, detail::unlock_shared_policy<Mutex> > makeUnlockSharedGuard(Mutex &m_)
 	{
 		return unlock_guard<Mutex, detail::unlock_shared_policy<Mutex> >(m_);
 	}
-	template<typename Mutex>
-	unlock_guard<Mutex, detail::unlock_shared_policy<Mutex> > makeUnlockSharedGuardIf(Mutex &m_, bool shallUnlock)
-	{
-		return shallUnlock 
-			? makeUnlockSharedGuard(m_)
-			: unlock_guard<Mutex, detail::unlock_shared_policy<Mutex> >();
-	}
 
-	typedef unlock_guard<boost::shared_mutex, detail::unlock_shared_policy<boost::shared_mutex> > unlock_shared_guard;
+	using unlock_shared_guard = unlock_guard<std::shared_mutex, detail::unlock_shared_policy<std::shared_mutex>>;
 }

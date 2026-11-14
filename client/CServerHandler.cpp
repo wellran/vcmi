@@ -8,303 +8,434 @@
  *
  */
 #include "StdInc.h"
-
 #include "CServerHandler.h"
-#include "Client.h"
-#include "CGameInfo.h"
+
 #include "CPlayerInterface.h"
-#include "gui/CGuiHandler.h"
+#include "Client.h"
+#include "GameChatHandler.h"
+#include "GameEngine.h"
+#include "GameInstance.h"
+#include "LobbyClientNetPackVisitors.h"
+#include "ServerRunner.h"
+#include "Discord.h"
+
+#include "globalLobby/GlobalLobbyClient.h"
+#include "globalLobby/GlobalLobbyRoomWindow.h"
+
+#include "gui/WindowHandler.h"
 
 #include "lobby/CSelectionBase.h"
 #include "lobby/CLobbyScreen.h"
+#include "lobby/CBonusSelection.h"
+
+#include "adventureMap/AdventureMapInterface.h"
+
+#include "netlag/NetworkLagCompensator.h"
+#include "replay/GameplayReplayer.h"
+
+#include "render/SDL_Extensions.h"
+
+#include "media/CMusicHandler.h"
+#include "media/IVideoPlayer.h"
 
 #include "mainmenu/CMainMenu.h"
+#include "mainmenu/CPrologEpilogVideo.h"
+#include "mainmenu/CHighScoreScreen.h"
 
-#ifndef VCMI_ANDROID
-#include "../lib/Interprocess.h"
-#else
-#include "../lib/CAndroidVMHelper.h"
-#endif
+#include "windows/InfoWindows.h"
+#include "windows/GUIClasses.h"
+
 #include "../lib/CConfigHandler.h"
-#include "../lib/CGeneralTextHandler.h"
+#include "../lib/GameLibrary.h"
+#include "../lib/texts/CGeneralTextHandler.h"
+#include "../lib/ConditionalWait.h"
 #include "../lib/CThreadHelper.h"
-#include "../lib/NetPacks.h"
 #include "../lib/StartInfo.h"
+#include "../lib/TurnTimerInfo.h"
 #include "../lib/VCMIDirs.h"
-#include "../lib/mapping/CCampaignHandler.h"
+#include "../lib/campaign/CampaignState.h"
+#include "../lib/gameState/CGameState.h"
+#include "../lib/gameState/HighScore.h"
+#include "../lib/CPlayerState.h"
 #include "../lib/mapping/CMap.h"
 #include "../lib/mapping/CMapInfo.h"
+#include "../lib/mapObjects/CGTownInstance.h"
 #include "../lib/mapObjects/MiscObjects.h"
+#include "../lib/modding/ModIncompatibility.h"
 #include "../lib/rmg/CMapGenOptions.h"
-#include "../lib/registerTypes/RegisterTypes.h"
-#include "../lib/serializer/Connection.h"
-#include "../lib/serializer/CMemorySerializer.h"
+#include "../lib/serializer/GameConnection.h"
+#include "../lib/UnlockGuard.h"
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/uuid/uuid_generators.hpp>
-#include "../lib/serializer/Cast.h"
 
 #include <vcmi/events/EventBus.h>
 
-template<typename T> class CApplyOnLobby;
 
-#ifdef VCMI_ANDROID
-extern std::atomic_bool androidTestServerReadyFlag;
-#endif
-
-class CBaseForLobbyApply
+CServerHandler::~CServerHandler()
 {
-public:
-	virtual bool applyOnLobbyHandler(CServerHandler * handler, void * pack) const = 0;
-	virtual void applyOnLobbyScreen(CLobbyScreen * lobby, CServerHandler * handler, void * pack) const = 0;
-	virtual ~CBaseForLobbyApply(){};
-	template<typename U> static CBaseForLobbyApply * getApplier(const U * t = nullptr)
-	{
-		return new CApplyOnLobby<U>();
-	}
-};
+	if (serverRunner)
+		serverRunner->shutdown();
+	stopNetwork();
 
-template<typename T> class CApplyOnLobby : public CBaseForLobbyApply
+	if (serverRunner)
+		serverRunner->wait();
+	serverRunner.reset();
+	waitForNetworkThread();
+}
+
+void CServerHandler::stopNetwork()
 {
-public:
-	bool applyOnLobbyHandler(CServerHandler * handler, void * pack) const override
-	{
-		T * ptr = static_cast<T *>(pack);
-		logNetwork->trace("\tImmidiately apply on lobby: %s", typeList.getTypeInfo(ptr)->name());
-		return ptr->applyOnLobbyHandler(handler);
-	}
+	networkHandler->stop();
+}
 
-	void applyOnLobbyScreen(CLobbyScreen * lobby, CServerHandler * handler, void * pack) const override
-	{
-		T * ptr = static_cast<T *>(pack);
-		logNetwork->trace("\tApply on lobby from queue: %s", typeList.getTypeInfo(ptr)->name());
-		ptr->applyOnLobbyScreen(lobby, handler);
-	}
-};
-
-template<> class CApplyOnLobby<CPack>: public CBaseForLobbyApply
+void CServerHandler::waitForNetworkThread()
 {
-public:
-	bool applyOnLobbyHandler(CServerHandler * handler, void * pack) const override
+	if (threadNetwork.joinable())
 	{
-		logGlobal->error("Cannot apply plain CPack!");
-		assert(0);
-		return false;
-	}
+		if(threadNetwork.get_id() == std::this_thread::get_id())
+			return;
 
-	void applyOnLobbyScreen(CLobbyScreen * lobby, CServerHandler * handler, void * pack) const override
-	{
-		logGlobal->error("Cannot apply plain CPack!");
-		assert(0);
+		//ENGINE->interfaceMutex must have been locked by the current thread, otherwise an unlock will cause undefined behavior
+		if(ENGINE)
+		{
+			auto unlockInterface = vstd::makeUnlockGuard(ENGINE->interfaceMutex);
+			threadNetwork.join();
+		}
+		else
+		{
+			threadNetwork.join();
+		}
 	}
-};
+}
 
-extern std::string NAME;
+void CServerHandler::endNetwork()
+{
+	if (client)
+		client->endNetwork();
+	stopNetwork();
+	waitForNetworkThread();
+}
 
 CServerHandler::CServerHandler()
-	: state(EClientState::NONE), mx(std::make_shared<boost::recursive_mutex>()), client(nullptr), loadMode(0), campaignStateToSend(nullptr), campaignServerRestartLock(false)
+	: networkHandler(INetworkHandler::createHandler())
+	, lobbyClient(std::make_unique<GlobalLobbyClient>())
+	, gameChat(std::make_unique<GameChatHandler>())
+	, threadNetwork(&CServerHandler::threadRunNetwork, this)
+	, state(EClientState::NONE)
+	, serverPort(0)
+	, screenType(ESelectionScreen::unknown)
+	, serverMode(EServerMode::NONE)
+	, loadMode(ELoadMode::NONE)
+	, hotseatMode(false)
+	, battleMode(false)
+	, client(nullptr)
 {
 	uuid = boost::uuids::to_string(boost::uuids::random_generator()());
-	applier = std::make_shared<CApplier<CBaseForLobbyApply>>();
-	registerTypesLobbyPacks(*applier);
 }
 
-void CServerHandler::resetStateForLobby(const StartInfo::EMode mode, const std::vector<std::string> * names)
+void CServerHandler::threadRunNetwork()
 {
-	hostClientId = -1;
-	state = EClientState::NONE;
-	th = make_unique<CStopWatch>();
-	packsForLobbyScreen.clear();
-	c.reset();
+	setThreadName("runNetwork");
+	logGlobal->info("Starting network thread");
+	try {
+		networkHandler->run();
+	}
+	catch (const TerminationRequestedException &)
+	{
+		// VCMI can run SDL methods on network thread, leading to usage of thread-local storage by SDL
+		// Such storage needs to be cleaned up manually for threads that were not created by SDL
+		CSDL_Ext::cleanupThreadLocalStorage();
+		logGlobal->info("Terminating network thread");
+		return;
+	}
+	CSDL_Ext::cleanupThreadLocalStorage();
+	logGlobal->info("Ending network thread");
+}
+
+void CServerHandler::resetStateForLobby(EStartMode mode, ESelectionScreen screen, EServerMode newServerMode, const std::vector<std::string> & playerNames)
+{
+	hostClientId = GameConnectionID::INVALID;
+	setState(EClientState::NONE);
+	serverMode = newServerMode;
+	loadMode = ELoadMode::NONE;
+	scenarioToStart.reset();
+	campaignToStart.reset();
+	// si is replaced below - texts of the previous lobby must not shadow those of the next one
+	lobbyTextOverlays.clear();
+	hotseatMode = false;
+	battleMode = false;
+	th = std::make_unique<CStopWatch>();
+	closeConnection();
 	si = std::make_shared<StartInfo>();
-	playerNames.clear();
+	mi.reset();
+	localPlayerNames.clear();
 	si->difficulty = 1;
 	si->mode = mode;
-	myNames.clear();
-	if(names && !names->empty()) //if have custom set of player names - use it
-		myNames = *names;
+	screenType = screen;
+	localPlayerNames.clear();
+	if(!playerNames.empty()) //if have custom set of player names - use it
+		localPlayerNames = playerNames;
 	else
-		myNames.push_back(settings["general"]["playerName"].String());
-
-#ifndef VCMI_ANDROID
-	shm.reset();
-
-	if(!settings["session"]["disable-shm"].Bool())
 	{
-		std::string sharedMemoryName = "vcmi_memory";
-		if(settings["session"]["enable-shm-uuid"].Bool())
-		{
-			//used or automated testing when multiple clients start simultaneously
-			sharedMemoryName += "_" + uuid;
-		}
-		try
-		{
-			shm = std::make_shared<SharedMemory>(sharedMemoryName, true);
-		}
-		catch(...)
-		{
-			shm.reset();
-			logNetwork->error("Cannot open interprocess memory. Continue without it...");
-		}
+		std::string playerName = settings["general"]["playerName"].String();
+		if(playerName == "Player")
+			playerName = LIBRARY->generaltexth->translate("core.genrltxt.434");
+		localPlayerNames.push_back(playerName);
 	}
-#endif
+
+	gameChat->resetMatchState();
+	lobbyClient->resetMatchState();
 }
 
-void CServerHandler::startLocalServerAndConnect()
+GameChatHandler & CServerHandler::getGameChat()
 {
-	if(threadRunLocalServer)
-		threadRunLocalServer->join();
-
-	th->update();
-#ifdef VCMI_ANDROID
-	{
-		CAndroidVMHelper envHelper;
-		envHelper.callStaticVoidMethod(CAndroidVMHelper::NATIVE_METHODS_DEFAULT_CLASS, "startServer", true);
-	}
-#else
-	threadRunLocalServer = std::make_shared<boost::thread>(&CServerHandler::threadRunServer, this); //runs server executable;
-#endif
-	logNetwork->trace("Setting up thread calling server: %d ms", th->getDiff());
-
-	th->update();
-
-#ifndef VCMI_ANDROID
-	if(shm)
-		shm->sr->waitTillReady();
-#else
-	logNetwork->info("waiting for server");
-	while(!androidTestServerReadyFlag.load())
-	{
-		logNetwork->info("still waiting...");
-		boost::this_thread::sleep(boost::posix_time::milliseconds(1000));
-	}
-	logNetwork->info("waiting for server finished...");
-	androidTestServerReadyFlag = false;
-#endif
-	logNetwork->trace("Waiting for server: %d ms", th->getDiff());
-
-	th->update(); //put breakpoint here to attach to server before it does something stupid
-
-#ifndef VCMI_ANDROID
-	justConnectToServer(settings["server"]["server"].String(), shm ? shm->sr->port : 0);
-#else
-	justConnectToServer(settings["server"]["server"].String());
-#endif
-
-	logNetwork->trace("\tConnecting to the server: %d ms", th->getDiff());
+	return *gameChat;
 }
 
-void CServerHandler::justConnectToServer(const std::string & addr, const ui16 port)
+GlobalLobbyClient & CServerHandler::getGlobalLobby()
 {
-	state = EClientState::CONNECTING;
-	while(!c && state != EClientState::CONNECTION_CANCELLED)
-	{
-		try
-		{
-			logNetwork->info("Establishing connection...");
-			c = std::make_shared<CConnection>(
-					addr.size() ? addr : settings["server"]["server"].String(),
-					port ? port : getDefaultPort(),
-					NAME, uuid);
-		}
-		catch(...)
-		{
-			logNetwork->error("\nCannot establish connection! Retrying within 1 second");
-			boost::this_thread::sleep(boost::posix_time::seconds(1));
-		}
-	}
+	return *lobbyClient;
+}
 
-	if(state == EClientState::CONNECTION_CANCELLED)
+INetworkHandler & CServerHandler::getNetworkHandler()
+{
+	return *networkHandler;
+}
+
+void CServerHandler::startLocalServerAndConnect(bool connectToLobby)
+{
+	logNetwork->trace("\tLocal server startup has been requested");
+#ifdef VCMI_MOBILE
+	// mobile apps can't spawn separate processes - only thread mode is available
+	serverRunner.reset(new ServerThreadRunner());
+#else
+	if (settings["server"]["useProcess"].Bool())
+		serverRunner.reset(new ServerProcessRunner());
+	else
+		serverRunner.reset(new ServerThreadRunner());
+#endif
+
+	auto si = std::make_shared<StartInfo>();
+
+	if (loadMode == ELoadMode::TUTORIAL)
+		si->difficulty = static_cast<ui8>(EMapDifficulty::EASY);
+	else
+		si->difficulty = settings["general"]["lastDifficulty"].Integer();
+
+	logNetwork->trace("\tStarting local server");
+	serverRunner->start(loadMode == ELoadMode::MULTI, connectToLobby, si);
+	logNetwork->trace("\tConnecting to local server");
+	connectToServer(getLocalHostname(), getLocalPort());
+	logNetwork->trace("\tWaiting for connection");
+}
+
+void CServerHandler::connectToServer(const std::string & addr, const ui16 port)
+{
+	setState(EClientState::CONNECTING);
+	serverHostname = addr;
+	serverPort = port;
+
+	if (!isServerLocal())
+	{
+		Settings remoteAddress = settings.write["server"]["remoteHostname"];
+		remoteAddress->String() = addr;
+
+		Settings remotePort = settings.write["server"]["remotePort"];
+		remotePort->Integer() = port;
+
+		networkHandler->connectToRemote(*this, addr, port);
+	}
+	else
+	{
+		serverRunner->connect(*networkHandler, *this);
+	}
+}
+
+void CServerHandler::onConnectionFailed(const std::string & errorMessage)
+{
+	assert(getState() == EClientState::CONNECTING);
+	std::unique_lock<std::mutex> interfaceLock;
+	if(ENGINE)
+		interfaceLock = std::unique_lock<std::mutex>(ENGINE->interfaceMutex);
+
+	if (isServerLocal())
+	{
+		// retry - local server might be still starting up
+		logNetwork->debug("\nCannot establish connection. %s. Retrying...", errorMessage);
+		networkHandler->createTimer(*this, std::chrono::milliseconds(100));
+	}
+	else
+	{
+		// remote server refused connection - show error message
+		setState(EClientState::NONE);
+		CInfoWindow::showInfoDialog(LIBRARY->generaltexth->translate("vcmi.mainMenu.serverConnectionFailed"), {});
+	}
+}
+
+void CServerHandler::onTimer()
+{
+	std::unique_lock<std::mutex> interfaceLock;
+	if(ENGINE)
+		interfaceLock = std::unique_lock<std::mutex>(ENGINE->interfaceMutex);
+
+	if(getState() == EClientState::CONNECTION_CANCELLED)
+	{
 		logNetwork->info("Connection aborted by player!");
-	else
-		c->handler = std::make_shared<boost::thread>(&CServerHandler::threadHandleConnection, this);
-}
-
-void CServerHandler::applyPacksOnLobbyScreen()
-{
-	if(!c || !c->handler)
+		serverRunner->wait();
+		serverRunner.reset();
+		if (ENGINE && ENGINE->windows().topWindow<CSimpleJoinScreen>() != nullptr)
+			ENGINE->windows().popWindows(1);
 		return;
+	}
 
-	boost::unique_lock<boost::recursive_mutex> lock(*mx);
-	while(!packsForLobbyScreen.empty())
+	assert(isServerLocal());
+	serverRunner->connect(*networkHandler, *this);
+}
+
+void CServerHandler::onConnectionEstablished(const NetworkConnectionPtr & netConnection)
+{
+	assert(getState() == EClientState::CONNECTING);
+
+	std::unique_lock<std::mutex> interfaceLock;
+	if(ENGINE)
+		interfaceLock = std::unique_lock<std::mutex>(ENGINE->interfaceMutex);
+
+	if(getState() == EClientState::CONNECTION_CANCELLED && !isServerLocal())
 	{
-		CPackForLobby * pack = packsForLobbyScreen.front();
-		packsForLobbyScreen.pop_front();
-		CBaseForLobbyApply * apply = applier->getApplier(typeList.getTypeID(pack)); //find the applier
-		apply->applyOnLobbyScreen(static_cast<CLobbyScreen *>(SEL), this, pack);
-		GH.totalRedraw();
-		delete pack;
+		logNetwork->info("Connection aborted by player!");
+		netConnection->close();
+		return;
+	}
+
+	networkConnection = netConnection;
+
+	logNetwork->info("Connection established");
+
+	if (serverMode == EServerMode::LOBBY_GUEST)
+	{
+		// say hello to lobby to switch connection to proxy mode
+		getGlobalLobby().sendProxyConnectionLogin(netConnection);
+	}
+
+	logicConnection = std::make_shared<GameConnection>(netConnection);
+	logicConnection->uuid = uuid;
+	logicConnection->enterLobbyConnectionMode();
+
+	if(lobbyPreviewMode)
+	{
+		LobbyQueryState lqs;
+		sendLobbyPack(lqs);
+	}
+	else
+	{
+		sendClientConnecting();
 	}
 }
 
-void CServerHandler::stopServerConnection()
+void CServerHandler::applyPackOnLobbyScreen(CPackForLobby & pack)
 {
-	if(c->handler)
-	{
-		while(!c->handler->timed_join(boost::posix_time::milliseconds(50)))
-			applyPacksOnLobbyScreen();
-		c->handler->join();
-	}
+	ApplyOnLobbyScreenNetPackVisitor visitor(*this, dynamic_cast<CLobbyScreen *>(SEL));
+	pack.visit(visitor);
+	ENGINE->windows().totalRedraw();
 }
 
 std::set<PlayerColor> CServerHandler::getHumanColors()
 {
-	return clientHumanColors(c->connectionID);
+	return clientHumanColors(logicConnection->connectionID);
 }
-
 
 PlayerColor CServerHandler::myFirstColor() const
 {
-	return clientFirstColor(c->connectionID);
+	return clientFirstColor(logicConnection->connectionID);
 }
 
 bool CServerHandler::isMyColor(PlayerColor color) const
 {
-	return isClientColor(c->connectionID, color);
+	return isClientColor(logicConnection->connectionID, color);
 }
 
-ui8 CServerHandler::myFirstId() const
+PlayerConnectionID CServerHandler::myFirstId() const
 {
-	return clientFirstId(c->connectionID);
+	return clientFirstId(logicConnection->connectionID);
+}
+
+EClientState CServerHandler::getState() const
+{
+	return state;
+}
+
+void CServerHandler::setState(EClientState newState)
+{
+	if (newState == EClientState::CONNECTION_CANCELLED && serverRunner != nullptr)
+		serverRunner->shutdown();
+
+	state = newState;
 }
 
 bool CServerHandler::isServerLocal() const
 {
-	if(threadRunLocalServer)
-		return true;
-
-	return false;
+	return serverRunner != nullptr;
 }
 
 bool CServerHandler::isHost() const
 {
-	return c && hostClientId == c->connectionID;
+	return logicConnection && hostClientId == logicConnection->connectionID;
 }
 
 bool CServerHandler::isGuest() const
 {
-	return !c || hostClientId != c->connectionID;
+	return !logicConnection || hostClientId != logicConnection->connectionID;
 }
 
-ui16 CServerHandler::getDefaultPort()
+bool CServerHandler::hasRemoteClientInLobby() const
 {
-	if(settings["session"]["serverport"].Integer())
-		return static_cast<ui16>(settings["session"]["serverport"].Integer());
-	else
-		return static_cast<ui16>(settings["server"]["port"].Integer());
+	for(const auto & playerEntry : playerNames)
+	{
+		const auto connectionId = playerEntry.second.connection;
+		if(connectionId != GameConnectionID::INVALID && connectionId != hostClientId)
+			return true;
+	}
+
+	return false;
 }
 
-std::string CServerHandler::getDefaultPortStr()
+const std::string & CServerHandler::getLocalHostname() const
 {
-	return boost::lexical_cast<std::string>(getDefaultPort());
+	return settings["server"]["localHostname"].String();
+}
+
+ui16 CServerHandler::getLocalPort() const
+{
+	return settings["server"]["localPort"].Integer();
+}
+
+const std::string & CServerHandler::getRemoteHostname() const
+{
+	return settings["server"]["remoteHostname"].String();
+}
+
+ui16 CServerHandler::getRemotePort() const
+{
+	return settings["server"]["remotePort"].Integer();
+}
+
+const std::string & CServerHandler::getCurrentHostname() const
+{
+	return serverHostname;
+}
+
+ui16 CServerHandler::getCurrentPort() const
+{
+	return serverPort;
 }
 
 void CServerHandler::sendClientConnecting() const
 {
 	LobbyClientConnected lcc;
 	lcc.uuid = uuid;
-	lcc.names = myNames;
+	lcc.names = localPlayerNames;
 	lcc.mode = si->mode;
 	sendLobbyPack(lcc);
 }
@@ -312,12 +443,16 @@ void CServerHandler::sendClientConnecting() const
 void CServerHandler::sendClientDisconnecting()
 {
 	// FIXME: This is workaround needed to make sure client not trying to sent anything to non existed server
-	if(state == EClientState::DISCONNECTING)
+	if(getState() == EClientState::DISCONNECTING)
+	{
+		assert(0);
 		return;
+	}
 
-	state = EClientState::DISCONNECTING;
+	setState(EClientState::DISCONNECTING);
+	scenarioToStart.reset();
 	LobbyClientDisconnected lcd;
-	lcd.clientId = c->connectionID;
+	lcd.clientId = logicConnection->connectionID;
 	logNetwork->info("Connection has been requested to be closed.");
 	if(isServerLocal())
 	{
@@ -329,19 +464,23 @@ void CServerHandler::sendClientDisconnecting()
 		logNetwork->info("Sent leaving signal to the server");
 	}
 	sendLobbyPack(lcd);
+	networkConnection->close();
+	networkConnection.reset();
+	logicConnection.reset();
+	waitForServerShutdown();
 }
 
-void CServerHandler::setCampaignState(std::shared_ptr<CCampaignState> newCampaign)
+void CServerHandler::startCampaign(const std::string & fileURI, const std::string & campaignSet) const
 {
-	state = EClientState::LOBBY_CAMPAIGN;
 	LobbySetCampaign lsc;
-	lsc.ourCampaign = newCampaign;
+	lsc.fileURI = fileURI;
+	lsc.campaignSet = campaignSet;
 	sendLobbyPack(lsc);
 }
 
-void CServerHandler::setCampaignMap(int mapId) const
+void CServerHandler::setCampaignMap(CampaignScenarioID mapId) const
 {
-	if(state == EClientState::GAMEPLAY) // FIXME: UI shouldn't sent commands in first place
+	if(getState() == EClientState::GAMEPLAY) // FIXME: UI shouldn't sent commands in first place
 		return;
 
 	LobbySetCampaignMap lscm;
@@ -351,7 +490,7 @@ void CServerHandler::setCampaignMap(int mapId) const
 
 void CServerHandler::setCampaignBonus(int bonusId) const
 {
-	if(state == EClientState::GAMEPLAY) // FIXME: UI shouldn't sent commands in first place
+	if(getState() == EClientState::GAMEPLAY) // FIXME: UI shouldn't sent commands in first place
 		return;
 
 	LobbySetCampaignBonus lscb;
@@ -359,10 +498,17 @@ void CServerHandler::setCampaignBonus(int bonusId) const
 	sendLobbyPack(lscb);
 }
 
-void CServerHandler::setMapInfo(std::shared_ptr<CMapInfo> to, std::shared_ptr<CMapGenOptions> mapGenOpts) const
+void CServerHandler::setBattleOnlyModeStartInfo(std::shared_ptr<BattleOnlyModeStartInfo> startInfo) const
+{
+	LobbySetBattleOnlyModeStartInfo lsbomsui;
+	lsbomsui.startInfo = startInfo;
+	sendLobbyPack(lsbomsui);
+}
+
+void CServerHandler::selectScenario(const ScenarioSelection & selection, std::shared_ptr<CMapGenOptions> mapGenOpts) const
 {
 	LobbySetMap lsm;
-	lsm.mapInfo = to;
+	lsm.selection = selection;
 	lsm.mapGenOpts = mapGenOpts;
 	sendLobbyPack(lsm);
 }
@@ -374,11 +520,27 @@ void CServerHandler::setPlayer(PlayerColor color) const
 	sendLobbyPack(lsp);
 }
 
-void CServerHandler::setPlayerOption(ui8 what, ui8 dir, PlayerColor player) const
+void CServerHandler::setPlayerName(PlayerColor color, const std::string & name) const
+{
+	LobbySetPlayerName lspn;
+	lspn.color = color;
+	lspn.name = name;
+	sendLobbyPack(lspn);
+}
+
+void CServerHandler::setPlayerHandicap(PlayerColor color, Handicap handicap) const
+{
+	LobbySetPlayerHandicap lsph;
+	lsph.color = color;
+	lsph.handicap = handicap;
+	sendLobbyPack(lsph);
+}
+
+void CServerHandler::setPlayerOption(ui8 what, int32_t value, PlayerColor player) const
 {
 	LobbyChangePlayerOption lcpo;
 	lcpo.what = what;
-	lcpo.direction = dir;
+	lcpo.value = value;
 	lcpo.color = player;
 	sendLobbyPack(lcpo);
 }
@@ -390,12 +552,25 @@ void CServerHandler::setDifficulty(int to) const
 	sendLobbyPack(lsd);
 }
 
-void CServerHandler::setTurnLength(int npos) const
+void CServerHandler::setSimturnsInfo(const SimturnsInfo & info) const
 {
-	vstd::amin(npos, GameConstants::POSSIBLE_TURNTIME.size() - 1);
+	LobbySetSimturns pack;
+	pack.simturnsInfo = info;
+	sendLobbyPack(pack);
+}
+
+void CServerHandler::setTurnTimerInfo(const TurnTimerInfo & info) const
+{
 	LobbySetTurnTime lstt;
-	lstt.turnTime = GameConstants::POSSIBLE_TURNTIME[npos];
+	lstt.turnTimerInfo = info;
 	sendLobbyPack(lstt);
+}
+
+void CServerHandler::setExtraOptionsInfo(const ExtraOptionsInfo & info) const
+{
+	LobbySetExtraOptions lseo;
+	lseo.extraOptionsInfo = info;
+	sendLobbyPack(lseo);
 }
 
 void CServerHandler::sendMessage(const std::string & txt) const
@@ -404,26 +579,16 @@ void CServerHandler::sendMessage(const std::string & txt) const
 	readed.str(txt);
 	std::string command;
 	readed >> command;
-	if(command == "!passhost")
+	if(command == "!forcep")
 	{
-		std::string id;
-		readed >> id;
-		if(id.length())
-		{
-			LobbyChangeHost lch;
-			lch.newHostConnectionId = boost::lexical_cast<int>(id);
-			sendLobbyPack(lch);
-		}
-	}
-	else if(command == "!forcep")
-	{
-		std::string connectedId, playerColorId;
+		std::string connectedId;
+		std::string playerColorId;
 		readed >> connectedId;
 		readed >> playerColorId;
-		if(connectedId.length(), playerColorId.length()) // BUG https://bugs.vcmi.eu/view.php?id=3144
+		if(connectedId.length() && playerColorId.length())
 		{
-			ui8 connected = boost::lexical_cast<int>(connectedId);
-			auto color = PlayerColor(boost::lexical_cast<int>(playerColorId));
+			auto connected = static_cast<PlayerConnectionID>(std::stoi(connectedId));
+			auto color = PlayerColor(std::stoi(playerColorId));
 			if(color.isValidPlayer() && playerNames.find(connected) != playerNames.end())
 			{
 				LobbyForceSetPlayer lfsp;
@@ -435,10 +600,7 @@ void CServerHandler::sendMessage(const std::string & txt) const
 	}
 	else
 	{
-		LobbyChatMessage lcm;
-		lcm.message = txt;
-		lcm.playerName = playerNames.find(myFirstId())->second.name;
-		sendLobbyPack(lcm);
+		gameChat->sendMessageLobby(playerNames.find(myFirstId())->second.name, txt);
 	}
 }
 
@@ -449,82 +611,337 @@ void CServerHandler::sendGuiAction(ui8 action) const
 	sendLobbyPack(lga);
 }
 
-void CServerHandler::sendStartGame(bool allowOnlyAI) const
+void CServerHandler::sendRestartGame() const
 {
-	verifyStateBeforeStart(allowOnlyAI ? true : settings["session"]["onlyai"].Bool());
-	LobbyStartGame lsg;
-	if(client)
-	{
-		lsg.initializedStartInfo = std::make_shared<StartInfo>(* const_cast<StartInfo *>(client->getStartInfo(true)));
-		lsg.initializedStartInfo->mode = StartInfo::NEW_GAME;
-		lsg.initializedStartInfo->seedToBeUsed = lsg.initializedStartInfo->seedPostInit = 0;
-		* si = * lsg.initializedStartInfo;
-	}
-	sendLobbyPack(lsg);
+	if(si->campState && !si->campState->getCampaign().getLoadingBackground().empty())
+		ENGINE->windows().createAndPushWindow<CLoadingScreen>(si->campState->getCampaign().getLoadingBackground());
+	else
+		ENGINE->windows().createAndPushWindow<CLoadingScreen>();
+	
+	LobbyRestartGame endGame;
+	sendLobbyPack(endGame);
 }
 
-void CServerHandler::startGameplay()
+bool CServerHandler::validateGameStart(bool allowOnlyAI) const
 {
-	if(CMM)
-		CMM->disable();
-	client = new CClient();
+	try
+	{
+		verifyStateBeforeStart(allowOnlyAI ? true : settings["session"]["onlyai"].Bool());
+	}
+	catch(ModIncompatibility & e)
+	{
+		logGlobal->warn("Incompatibility exception during start scenario: %s", e.what());
+
+		showServerError(e.getFullErrorMsg());
+		return false;
+	}
+	catch(std::exception & e)
+	{
+		logGlobal->error("Exception during startScenario: %s", e.what());
+		MetaString message;
+		message.appendTextID("vcmi.lobby.system.unableStartMap");
+		message.appendRawString("\n");
+		message.appendTextID("vcmi.lobby.system.reason");
+		message.replaceRawString(e.what());
+		showServerError(message.toString(&GAME->translator()));
+		return false;
+	}
+
+	return true;
+}
+
+void CServerHandler::sendStartGame(bool allowOnlyAI, bool verify) const
+{
+	if(verify)
+		verifyStateBeforeStart(allowOnlyAI ? true : settings["session"]["onlyai"].Bool());
+
+	// sent first, so that the server prepares the game while loading screen is constructed
+	LobbyPrepareStartGame lpsg;
+	sendLobbyPack(lpsg);
+
+	LobbyStartGame lsg;
+	sendLobbyPack(lsg);
+
+	if(!settings["session"]["headless"].Bool())
+	{
+		if(si->campState && !si->campState->getCampaign().getLoadingBackground().empty())
+			ENGINE->windows().createAndPushWindow<CLoadingScreen>(si->campState->getCampaign().getLoadingBackground());
+		else
+			ENGINE->windows().createAndPushWindow<CLoadingScreen>();
+	}
+}
+
+void CServerHandler::startScenarioAfterConnection(const ScenarioSelection & selection)
+{
+	scenarioToStart = selection;
+}
+
+void CServerHandler::installLobbyTexts()
+{
+	lobbyTextOverlays.clear();
+
+	if(mi && mi->mapHeader)
+		lobbyTextOverlays.emplace_back(mi->mapHeader->texts);
+	if(mi && mi->campaign)
+		lobbyTextOverlays.emplace_back(mi->campaign->getTexts());
+	if(si && si->campState)
+		lobbyTextOverlays.emplace_back(si->campState->getCampaign().getTexts());
+}
+
+void CServerHandler::startGameplay(std::shared_ptr<CGameState> gameState)
+{
+	if(GAME->mainmenu())
+		GAME->mainmenu()->disable();
+
+	// map and campaign texts are inert data - the client is what makes them resolvable.
+	// Campaign overlays of earlier scenarios stay installed, so heroes transferred from
+	// them keep their names in later scenarios
+	gameplayTextOverlays.emplace_back(gameState->getMap().texts);
+	if(si->campState)
+	{
+		gameplayTextOverlays.emplace_back(si->campState->getCampaign().getTexts());
+		for(const auto & scenarioTexts : si->campState->getScenarioTexts())
+			gameplayTextOverlays.emplace_back(scenarioTexts.second);
+	}
+
+	gameplayReplayer = std::make_unique<GameplayReplayer>();
+
+	if (isGuest())
+		networkLagCompensator = std::make_unique<NetworkLagCompensator>(getNetworkHandler(), gameState);
 
 	switch(si->mode)
 	{
-	case StartInfo::NEW_GAME:
-		client->newGame();
+	case EStartMode::NEW_GAME:
+		client->newGame(gameState);
 		break;
-	case StartInfo::CAMPAIGN:
-		client->newGame();
+	case EStartMode::CAMPAIGN:
+		client->newGame(gameState);
 		break;
-	case StartInfo::LOAD_GAME:
-		client->loadGame();
+	case EStartMode::LOAD_GAME:
+		client->loadGame(gameState);
 		break;
 	default:
 		throw std::runtime_error("Invalid mode");
 	}
+
+	if(ENGINE)
+		ENGINE->discord().setPlayingStatus(si, &gameState->getMap(), howManyPlayerInterfaces());
+
 	// After everything initialized we can accept CPackToClient netpacks
-	c->enterGameplayConnectionMode(client->gameState());
-	state = EClientState::GAMEPLAY;
+	setState(EClientState::GAMEPLAY);
+
+	// lobby packs are not sent while starting
+	quickSaveAvailable = false;
+	if(isHost())
+	{
+		LobbyRequestQuickLoadInfo request;
+		sendLobbyPack(request);
+	}
 }
 
-void CServerHandler::endGameplay(bool closeConnection, bool restart)
+void CServerHandler::showHighScoresAndEndGameplay(PlayerColor player, bool victory, const StatisticDataSet & statistic)
 {
-	client->endGame();
-	vstd::clear_pointer(client);
-
-	if(closeConnection)
+	if(victory && client->gameState().getStartInfo()->campState)
 	{
-		// Game is ending
-		// Tell the network thread to reach a stable state
-		CSH->sendClientDisconnecting();
-		logNetwork->info("Closed connection.");
+		startCampaignScenario(client->gameState().getStartInfo()->campState, statistic);
 	}
-	if(!restart)
+	else
 	{
-		if(CMM)
+		HighScoreCalculation scenarioHighScores;
+		scenarioHighScores.parameters.push_back(HighScore::prepareHighScores(&client->gameState(), player, victory));
+		scenarioHighScores.isCampaign = false;
+
+		endGameplay();
+		GAME->mainmenu()->menu->switchToTab("main");
+		if(!ENGINE->isDemoData())
+			ENGINE->windows().createAndPushWindow<CHighScoreInputScreen>(victory, scenarioHighScores, statistic);
+	}
+}
+
+void CServerHandler::stopGameplay()
+{
+	// a running replay holds the live session hostage - it has to be gone before anything is torn down.
+	// Every caller of this method owns the interface mutex, which the replay thread needs to finish.
+	if(gameplayReplayer)
+	{
+		gameplayReplayer->requestStop();
+
+		if(ENGINE)
 		{
-			GH.terminate_cond->setn(false);
-			GH.curInt = CMM.get();
-			CMM->enable();
+			auto unlockInterface = vstd::makeUnlockGuard(ENGINE->interfaceMutex);
+			gameplayReplayer->waitForFinish();
 		}
 		else
 		{
-			GH.curInt = CMainMenu::create().get();
+			gameplayReplayer->waitForFinish();
 		}
+
+		gameplayReplayer.reset();
+	}
+
+	// nothing renders this map's texts any more, and the next game must not see them
+	gameplayTextOverlays.clear();
+
+	client->endNetwork();
+	client->finishGameplay();
+}
+
+void CServerHandler::destroyGameplay()
+{
+	client->endGame();
+	client.reset();
+}
+
+void CServerHandler::showMainMenu()
+{
+	if (GAME->mainmenu())
+	{
+		GAME->mainmenu()->enable();
+		GAME->mainmenu()->playMusic();
+		GAME->mainmenu()->makeActiveInterface();
+	}
+
+	if(ENGINE)
+		ENGINE->discord().setStatus("", "", {0, 0});
+}
+
+void CServerHandler::endGameplay()
+{
+	stopGameplay();
+
+	// Game is ending
+	// Tell the network thread to reach a stable state
+	sendClientDisconnecting();
+	logNetwork->info("Closed connection.");
+
+	destroyGameplay();
+	showMainMenu();
+}
+
+void CServerHandler::endCampaignScenario()
+{
+	// the connection stays open for the lobby of the next scenario
+	setState(EClientState::CAMPAIGN_SCENARIO_WON);
+	stopGameplay();
+	destroyGameplay();
+	showMainMenu();
+}
+
+bool CServerHandler::hasQuickSave() const
+{
+	return quickSaveAvailable;
+}
+
+void CServerHandler::onQuickSaveWritten()
+{
+	quickSaveAvailable = true;
+	if(adventureInt)
+		adventureInt->updateActiveState();
+}
+
+void CServerHandler::quickLoadGame()
+{
+	LobbyQuickLoadGame pack;
+	sendLobbyPack(pack);
+}
+
+void CServerHandler::restartGameplay()
+{
+	// Before the windows are destroyed, so that they do not send actions for the game being discarded
+	setState(EClientState::LOBBY);
+	stopGameplay();
+	destroyGameplay();
+
+	logicConnection->enterLobbyConnectionMode();
+}
+
+void CServerHandler::sendNextCampaignScenario() const
+{
+	LobbyNextCampaignScenario pack;
+	sendLobbyPack(pack);
+}
+
+void CServerHandler::openNextCampaignScenarioLobby()
+{
+	logicConnection->enterLobbyConnectionMode();
+
+	// the lobby of the next scenario is set up as for a client that has just connected
+	hostClientId = GameConnectionID::INVALID;
+	si = std::make_shared<StartInfo>();
+	mi.reset();
+	lobbyTextOverlays.clear();
+	setState(EClientState::LOBBY);
+
+	if(!settings["session"]["headless"].Bool())
+		ENGINE->windows().createAndPushWindow<CLobbyScreen>(ESelectionScreen::campaignList, true);
+}
+
+void CServerHandler::startCampaignScenario(std::shared_ptr<CampaignState> ourCampaign, const StatisticDataSet & statistic)
+{
+	auto campaignScoreCalculator = std::make_shared<HighScoreCalculation>();
+	campaignScoreCalculator->isCampaign = true;
+	campaignScoreCalculator->parameters = ourCampaign->highscoreParameters;
+	for(auto & param : campaignScoreCalculator->parameters)
+		param.campaignName = ourCampaign->getCampaign().getNameTranslated(&GAME->translator());
+
+	if(ourCampaign->isCampaignFinished())
+		endGameplay();
+	else
+		endCampaignScenario();
+
+	// the game just took its campaign texts down with it, but the epilogue still has to render
+	// them - this keeps them up until the transition hands over to the next lobby
+	auto campaignTexts = std::make_shared<TranslatorOverlay>(ourCampaign->getCampaign().getTexts());
+
+	auto & epilogue = ourCampaign->getCampaign().scenario(*ourCampaign->lastScenario()).epilog;
+	auto finisher = [ourCampaign, campaignScoreCalculator, statistic, campaignTexts]()
+	{
+		if(ourCampaign->campaignSet != "" && ourCampaign->isCampaignFinished())
+		{
+			Settings entry = persistentStorage.write["completedCampaigns"][ourCampaign->getCampaign().getFilename()];
+			entry->Bool() = true;
+		}
+
+		if(!ourCampaign->isCampaignFinished())
+		{
+			// otherwise connection was lost during the epilogue, and the error is already shown
+			if(GAME->server().getState() == EClientState::CAMPAIGN_SCENARIO_WON)
+				GAME->server().sendNextCampaignScenario();
+		}
+		else
+		{
+			GAME->mainmenu()->openCampaignScreen(ourCampaign->campaignSet);
+			if(!ourCampaign->getCampaign().getOutroVideo().empty() && ENGINE->video().open(ourCampaign->getCampaign().getOutroVideo(), 1))
+			{
+				ENGINE->music().stopMusic();
+				auto rim = ourCampaign->getCampaign().getVideoRim().empty() ? ImagePath::builtin("INTRORIM") : ourCampaign->getCampaign().getVideoRim();
+				if(ourCampaign->getCampaign().getVideoRim() == ImagePath::builtin("NONE"))
+					rim = ImagePath();
+				ENGINE->windows().createAndPushWindow<VideoWindow>(ourCampaign->getCampaign().getOutroVideo(), rim, false, 1, [campaignScoreCalculator, statistic](bool skipped){
+					ENGINE->windows().createAndPushWindow<CHighScoreInputScreen>(true, *campaignScoreCalculator, statistic);
+				});
+			}
+			else
+				ENGINE->windows().createAndPushWindow<CHighScoreInputScreen>(true, *campaignScoreCalculator, statistic);
+		}
+	};
+
+	if(epilogue.hasPrologEpilog)
+	{
+		ENGINE->windows().createAndPushWindow<CPrologEpilogVideo>(epilogue, finisher);
+	}
+	else
+	{
+		finisher();
 	}
 }
 
-void CServerHandler::startCampaignScenario(std::shared_ptr<CCampaignState> cs)
+void CServerHandler::showServerError(const std::string & txt) const
 {
-	SDL_Event event;
-	event.type = SDL_USEREVENT;
-	event.user.code = EUserEvent::CAMPAIGN_START_SCENARIO;
-	if(cs)
-		event.user.data1 = CMemorySerializer::deepCopy(*cs.get()).release();
-	else
-		event.user.data1 = CMemorySerializer::deepCopy(*si->campState.get()).release();
-	SDL_PushEvent(&event);
+	if(auto w = ENGINE->windows().topWindow<CLoadingScreen>())
+		ENGINE->windows().popWindow(w);
+	
+	CInfoWindow::showInfoDialog(txt, {});
 }
 
 int CServerHandler::howManyPlayerInterfaces()
@@ -539,15 +956,15 @@ int CServerHandler::howManyPlayerInterfaces()
 	return playerInts;
 }
 
-ui8 CServerHandler::getLoadMode()
+ELoadMode CServerHandler::getLoadMode()
 {
-	if(state == EClientState::GAMEPLAY)
+	if(loadMode != ELoadMode::TUTORIAL && getState() == EClientState::GAMEPLAY)
 	{
 		if(si->campState)
 			return ELoadMode::CAMPAIGN;
 		for(auto pn : playerNames)
 		{
-			if(pn.second.connection != c->connectionID)
+			if(pn.second.connection != logicConnection->connectionID)
 				return ELoadMode::MULTI;
 		}
 		if(howManyPlayerInterfaces() > 1)  //this condition will work for hotseat mode OR multiplayer with allowed more than 1 color per player to control
@@ -561,156 +978,289 @@ ui8 CServerHandler::getLoadMode()
 void CServerHandler::debugStartTest(std::string filename, bool save)
 {
 	logGlobal->info("Starting debug test with file: %s", filename);
-	auto mapInfo = std::make_shared<CMapInfo>();
+	ScenarioSelection selection;
+	selection.fileURI = filename;
 	if(save)
 	{
-		resetStateForLobby(StartInfo::LOAD_GAME);
-		mapInfo->saveInit(ResourceID(filename, EResType::CLIENT_SAVEGAME));
-		screenType = ESelectionScreen::loadGame;
+		resetStateForLobby(EStartMode::LOAD_GAME, ESelectionScreen::loadGame, EServerMode::LOCAL, {});
+		selection.type = ScenarioSelection::EType::SAVE;
 	}
 	else
 	{
-		resetStateForLobby(StartInfo::NEW_GAME);
-		mapInfo->mapInit(filename);
-		screenType = ESelectionScreen::newGame;
+		resetStateForLobby(EStartMode::NEW_GAME, ESelectionScreen::newGame, EServerMode::LOCAL, {});
+		selection.type = ScenarioSelection::EType::MAP;
 	}
+	startScenarioAfterConnection(selection);
+
 	if(settings["session"]["donotstartserver"].Bool())
-		justConnectToServer("127.0.0.1", 3030);
+		connectToServer(getLocalHostname(), getLocalPort());
 	else
-		startLocalServerAndConnect();
-
-	boost::this_thread::sleep(boost::posix_time::milliseconds(100));
-
-	while(!settings["session"]["headless"].Bool() && !dynamic_cast<CLobbyScreen *>(GH.topInt().get()))
-		boost::this_thread::sleep(boost::posix_time::milliseconds(50));
-	while(!mi || mapInfo->fileURI != CSH->mi->fileURI)
-	{
-		setMapInfo(mapInfo);
-		boost::this_thread::sleep(boost::posix_time::milliseconds(50));
-	}
-	// "Click" on color to remove us from it
-	setPlayer(myFirstColor());
-	while(myFirstColor() != PlayerColor::CANNOT_DETERMINE)
-		boost::this_thread::sleep(boost::posix_time::milliseconds(50));
-
-	while(true)
-	{
-		try
-		{
-			sendStartGame();
-			break;
-		}
-		catch(...)
-		{
-
-		}
-		boost::this_thread::sleep(boost::posix_time::milliseconds(50));
-	}
+		startLocalServerAndConnect(false);
 }
 
-void CServerHandler::threadHandleConnection()
+class ServerHandlerCPackVisitor : public ::ICPackVisitor
 {
-	setThreadName("CServerHandler::threadHandleConnection");
-	c->enterLobbyConnectionMode();
+private:
+	CServerHandler & handler;
 
-	try
+public:
+	ServerHandlerCPackVisitor(CServerHandler & handler)
+			:handler(handler)
 	{
-		sendClientConnecting();
-		while(c->connected)
-		{
-			while(state == EClientState::STARTING)
-				boost::this_thread::sleep(boost::posix_time::milliseconds(10));
-
-			CPack * pack = c->retrievePack();
-			if(state == EClientState::DISCONNECTING)
-			{
-				// FIXME: server shouldn't really send netpacks after it's tells client to disconnect
-				// Though currently they'll be delivered and might cause crash.
-				vstd::clear_pointer(pack);
-			}
-			else if(auto lobbyPack = dynamic_ptr_cast<CPackForLobby>(pack))
-			{
-				if(applier->getApplier(typeList.getTypeID(pack))->applyOnLobbyHandler(this, pack))
-				{
-					if(!settings["session"]["headless"].Bool())
-					{
-						boost::unique_lock<boost::recursive_mutex> lock(*mx);
-						packsForLobbyScreen.push_back(lobbyPack);
-					}
-				}
-			}
-			else if(auto clientPack = dynamic_ptr_cast<CPackForClient>(pack))
-			{
-				client->handlePack(clientPack);
-			}
-		}
 	}
-	//catch only asio exceptions
-	catch(const boost::system::system_error & e)
+
+	bool callTyped() override { return false; }
+
+	void visitForLobby(CPackForLobby & lobbyPack) override
 	{
-		if(state == EClientState::DISCONNECTING)
+		handler.visitForLobby(lobbyPack);
+	}
+
+	void visitForClient(CPackForClient & clientPack) override
+	{
+		handler.visitForClient(clientPack);
+	}
+};
+
+void CServerHandler::onPacketReceived(const std::shared_ptr<INetworkConnection> &, const std::vector<std::byte> & message)
+{
+	std::unique_lock<std::mutex> interfaceLock;
+	if(ENGINE)
+		interfaceLock = std::unique_lock<std::mutex>(ENGINE->interfaceMutex);
+
+	if(getState() == EClientState::DISCONNECTING)
+		return;
+
+	auto pack = logicConnection->retrievePack(message);
+	ServerHandlerCPackVisitor visitor(*this);
+	pack->visit(visitor);
+}
+
+void CServerHandler::onDisconnected(const std::shared_ptr<INetworkConnection> & connection, const std::string & errorMessage)
+{
+	std::unique_lock<std::mutex> interfaceLock;
+	if(ENGINE)
+		interfaceLock = std::unique_lock<std::mutex>(ENGINE->interfaceMutex);
+
+	if (connection != networkConnection)
+	{
+		// ServerHandler already closed this connection on its own
+		// This is the final call from network thread that informs serverHandler that connection has died
+		// ignore it since serverHandler have already shut down this connection (and possibly started a new one)
+		return;
+	}
+
+	waitForServerShutdown();
+
+	if(getState() == EClientState::DISCONNECTING)
+	{
+		// Note: this branch can be reached on app shutdown, when main thread holds mutex till destruction
+		logNetwork->info("Successfully closed connection to server!");
+		return;
+	}
+
+	logNetwork->error("Lost connection to server! Connection has been closed");
+
+	if(getState() == EClientState::CAMPAIGN_SCENARIO_WON)
+	{
+		// main menu is already shown under the epilogue
+		setState(EClientState::NONE);
+		showServerError(LIBRARY->generaltexth->translate("vcmi.server.errors.disconnected"));
+	}
+	else if(client)
+	{
+		endGameplay();
+		GAME->mainmenu()->menu->switchToTab("main");
+		showServerError(LIBRARY->generaltexth->translate("vcmi.server.errors.disconnected"));
+	}
+	else
+	{
+		LobbyClientDisconnected lcd;
+		lcd.clientId = logicConnection->connectionID;
+		applyPackOnLobbyScreen(lcd);
+	}
+
+	networkConnection.reset();
+}
+
+void CServerHandler::closeConnection()
+{
+	if(networkConnection)
+	{
+		networkConnection->close();
+		networkConnection.reset();
+	}
+	logicConnection.reset();
+}
+
+void CServerHandler::cancelConnection()
+{
+	setState(EClientState::CONNECTION_CANCELLED);
+	lobbyPreviewMode = false;
+
+	// connection to local server is shut down in onTimer, together with the server
+	if(!isServerLocal())
+		closeConnection();
+}
+
+void CServerHandler::waitForServerShutdown()
+{
+	if (!serverRunner)
+		return; // may not exist for guest in MP
+
+	{
+		// Release interfaceMutex while waiting for server thread to finish
+		// to avoid blocking the GUI thread (same pattern as endNetwork())
+		if(ENGINE)
 		{
-			logNetwork->info("Successfully closed connection to server, ending listening thread!");
+			auto unlockInterface = vstd::makeUnlockGuard(ENGINE->interfaceMutex);
+			serverRunner->wait();
 		}
 		else
 		{
-			logNetwork->error("Lost connection to server, ending listening thread!");
-			logNetwork->error(e.what());
-			if(client)
-			{
-				state = EClientState::DISCONNECTING;
-				CGuiHandler::pushSDLEvent(SDL_USEREVENT, EUserEvent::RETURN_TO_MAIN_MENU);
-			}
-			else
-			{
-				auto lcd = new LobbyClientDisconnected();
-				lcd->clientId = c->connectionID;
-				boost::unique_lock<boost::recursive_mutex> lock(*mx);
-				packsForLobbyScreen.push_back(lcd);
-			}
+			serverRunner->wait();
 		}
 	}
-	catch(...)
-	{
-		handleException();
-		throw;
-	}
-}
+	int exitCode = serverRunner->exitCode();
+	serverRunner.reset();
 
-void CServerHandler::threadRunServer()
-{
-#ifndef VCMI_ANDROID
-	setThreadName("CServerHandler::threadRunServer");
-	const std::string logName = (VCMIDirs::get().userCachePath() / "server_log.txt").string();
-	std::string comm = VCMIDirs::get().serverPath().string()
-		+ " --port=" + getDefaultPortStr()
-		+ " --run-by-client"
-		+ " --uuid=" + uuid;
-	if(shm)
-	{
-		comm += " --enable-shm";
-		if(settings["session"]["enable-shm-uuid"].Bool())
-			comm += " --enable-shm-uuid";
-	}
-	comm += " > \"" + logName + '\"';
-
-	int result = std::system(comm.c_str());
-	if (result == 0)
+	if (exitCode == 0)
 	{
 		logNetwork->info("Server closed correctly");
 	}
 	else
 	{
+		if (getState() == EClientState::CONNECTING)
+		{
+			showServerError(LIBRARY->generaltexth->translate("vcmi.server.errors.existingProcess"));
+			setState(EClientState::CONNECTION_CANCELLED); // stop attempts to reconnect
+		}
 		logNetwork->error("Error: server failed to close correctly or crashed!");
-		logNetwork->error("Check %s for more info", logName);
+		logNetwork->error("Check log file for more info");
 	}
-	threadRunLocalServer.reset();
-	CSH->campaignServerRestartLock.setn(false);
-#endif
+
+	serverRunner.reset();
+}
+
+void CServerHandler::visitForLobby(CPackForLobby & lobbyPack)
+{
+	ApplyOnLobbyHandlerNetPackVisitor visitor(*this);
+	lobbyPack.visit(visitor);
+
+	if(visitor.getResult())
+	{
+		if(!settings["session"]["headless"].Bool())
+			applyPackOnLobbyScreen(lobbyPack);
+	}
+}
+
+void CServerHandler::visitForClient(CPackForClient & clientPack)
+{
+	// the server still announces the end of the game to other players of a won campaign scenario
+	if(getState() == EClientState::CAMPAIGN_SCENARIO_WON)
+		return;
+
+	if(gameplayReplayer && gameplayReplayer->isActive())
+	{
+		// a replay has taken the client over, so the live gamestate is not there to receive this pack.
+		// Holding the network thread here keeps packs in order and applies them to the live session
+		// once the replay is over - the player can end a replay at any time from its overlay
+		auto unlockInterface = vstd::makeUnlockGuard(ENGINE->interfaceMutex);
+		gameplayReplayer->waitForFinish();
+	}
+
+	// not done in CGameState::apply() - lag compensation applies predictions and rollbacks there
+	if(client)
+		client->gameState().replayLog.recordPack(clientPack, client->gameState());
+
+	if (networkLagCompensator && networkLagCompensator->verifyReply(clientPack))
+		return;
+
+	client->handlePack(clientPack);
+}
+
+GameplayReplayer & CServerHandler::replayer()
+{
+	assert(gameplayReplayer);
+	return *gameplayReplayer;
+}
+
+bool CServerHandler::isReplayActive() const
+{
+	return gameplayReplayer && gameplayReplayer->isActive();
 }
 
 void CServerHandler::sendLobbyPack(const CPackForLobby & pack) const
 {
-	if(state != EClientState::STARTING)
-		c->sendPack(&pack);
+	if(getState() != EClientState::STARTING)
+		logicConnection->sendPack(pack);
+}
+
+bool CServerHandler::inLobbyRoom() const
+{
+	return serverMode == EServerMode::LOBBY_HOST || serverMode == EServerMode::LOBBY_GUEST;
+}
+
+bool CServerHandler::inGame() const
+{
+	return logicConnection != nullptr;
+}
+
+void CServerHandler::sendGamePack(const CPackForServer & pack) const
+{
+	if (networkLagCompensator)
+		networkLagCompensator->tryPredictReply(pack);
+
+	logicConnection->sendPack(pack);
+}
+
+void CServerHandler::startLobbyPreview(const std::string & addr, ui16 port, std::function<void()> onJoin)
+{
+	lobbyPreviewMode = true;
+	onLobbyPreviewJoin = std::move(onJoin);
+	connectToServer(addr, port);
+}
+
+void CServerHandler::onLobbyPreviewResponse(LobbyModsCheck & pack)
+{
+	lobbyPreviewMode = false;
+
+	// Close the temporary query connection
+	if(networkConnection)
+	{
+		networkConnection->close();
+		networkConnection.reset();
+	}
+	logicConnection.reset();
+
+	GlobalLobbyRoom roomDescription;
+	roomDescription.gameVersion = pack.vcmiVersion;
+	roomDescription.statusID = "open";
+	roomDescription.playerLimit = 8;
+	roomDescription.modList = pack.mods;
+	roomDescription.hostAccountDisplayName = pack.hostAccountDisplayName;
+	roomDescription.description = "";
+
+	for(const auto & name : pack.participantNames)
+	{
+		GlobalLobbyAccount account;
+		account.displayName = name;
+		roomDescription.participants.push_back(account);
+	}
+
+	ENGINE->windows().createAndPushWindow<GlobalLobbyRoomWindow>(
+		roomDescription,
+		[this]()
+		{
+			ENGINE->windows().popWindows(1);
+			if(onLobbyPreviewJoin)
+				onLobbyPreviewJoin();
+		},
+		[]()
+		{
+			ENGINE->windows().popWindows(1);
+			// Also close the CSimpleJoinScreen that was underneath the preview
+			if(auto w = ENGINE->windows().topWindow<CSimpleJoinScreen>())
+				ENGINE->windows().popWindows(1);
+		});
 }

@@ -3,12 +3,14 @@
 	{
 		"index": 28,
 		"level": 1,
-		"extraNames": [ "apprenticeGremlin" ],
+		"compatibilityIdentifiers": [ "apprenticeGremlin" ],
 		"faction": "tower",
 		"upgrades": ["masterGremlin"],
 		"hasDoubleWeek": true,
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:56",
+			"mapAttackFromLeft": "AvWattak.def:0:57",
 			"animation": "CGREMA.DEF"
 		},
 		"sound" :
@@ -26,8 +28,18 @@
 		"index": 29,
 		"level": 1,
 		"faction": "tower",
+		"shots" : 8,
+		"abilities" :
+		{
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			}
+		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:58",
+			"mapAttackFromLeft": "AvWattak.def:0:59",
 			"animation": "CGREMM.DEF",
 			"missile" :
 			{
@@ -54,11 +66,17 @@
 			"gargoyle" :
 			{
 				"type" : "GARGOYLE"
+			},
+			"canFly" :
+			{
+				"type" : "FLYING"
 			}
 		},
 		"upgrades": ["obsidianGargoyle"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:60",
+			"mapAttackFromLeft": "AvWattak.def:0:61",
 			"animation": "CGARGO.DEF"
 		},
 		"sound" :
@@ -80,10 +98,16 @@
 			"gargoyle" :
 			{
 				"type" : "GARGOYLE"
+			},
+			"canFly" :
+			{
+				"type" : "FLYING"
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:62",
+			"mapAttackFromLeft": "AvWattak.def:0:63",
 			"animation": "COGARG.DEF"
 		},
 		"sound" :
@@ -102,20 +126,22 @@
 		"faction": "tower",
 		"abilities":
 		{
-			"magicResistance" :
-			{
-				"type" : "SPELL_DAMAGE_REDUCTION",
-				"subtype" : -1,
-				"val" : 50
-			},
 			"nonliving" :
 			{
 				"type" : "NON_LIVING"
+			},
+			"magicResistance" :
+			{
+				"type" : "SPELL_DAMAGE_REDUCTION",
+				"subtype" : "any",
+				"val" : 50
 			}
 		},
 		"upgrades": ["stoneGolem"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:64",
+			"mapAttackFromLeft": "AvWattak.def:0:65",
 			"animation": "CSGOLE.DEF"
 		},
 		"sound" :
@@ -134,19 +160,21 @@
 		"faction": "tower",
 		"abilities" :
 		{
-			"magicResistance" :
-			{
-				"type" : "SPELL_DAMAGE_REDUCTION",
-				"subtype" : -1,
-				"val" : 75
-			},
 			"nonliving" :
 			{
 				"type" : "NON_LIVING"
+			},
+			"magicResistance" :
+			{
+				"type" : "SPELL_DAMAGE_REDUCTION",
+				"subtype" : "any",
+				"val" : 75
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:66",
+			"mapAttackFromLeft": "AvWattak.def:0:67",
 			"animation": "CIGOLE.DEF"
 		},
 		"sound" :
@@ -163,9 +191,22 @@
 		"index": 34,
 		"level": 4,
 		"faction": "tower",
-		"abilities": 
+		"shots" : 24,
+		"abilities":
 		{
-			"reduceSpellCost" : 
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			},
+			"noMeleePenalty" :
+			{
+				"type" : "NO_MELEE_PENALTY"
+			},
+			"noWallPenalty" :
+			{
+				"type" : "NO_WALL_PENALTY"
+			},
+			"reduceSpellCost" :
 			{
 				"type" : "CHANGES_SPELL_COST_FOR_ALLY",
 				"val" :  2
@@ -174,6 +215,8 @@
 		"upgrades": ["archMage"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:68",
+			"mapAttackFromLeft": "AvWattak.def:0:69",
 			"animation": "CMAGE.DEF",
 			"missile" :
 			{
@@ -195,9 +238,22 @@
 		"index": 35,
 		"level": 4,
 		"faction": "tower",
-		"abilities": 
+		"shots" : 24,
+		"abilities":
 		{
-			"reduceSpellCost" : 
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			},
+			"noMeleePenalty" :
+			{
+				"type" : "NO_MELEE_PENALTY"
+			},
+			"noWallPenalty" :
+			{
+				"type" : "NO_WALL_PENALTY"
+			},
+			"reduceSpellCost" :
 			{
 				"type" : "CHANGES_SPELL_COST_FOR_ALLY",
 				"val" :  2
@@ -205,10 +261,20 @@
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:70",
+			"mapAttackFromLeft": "AvWattak.def:0:71",
 			"animation": "CAMAGE.DEF",
 			"missile" :
 			{
-				"projectile": "PMAGEX.DEF"
+				"attackClimaxFrame" : 8,
+				"ray" :
+				[
+					{ "start" : [ 160, 192,   0, 255 ], "end" : [ 160, 192,   0,  64 ] },
+					{ "start" : [ 128, 224, 128, 255 ], "end" : [ 128, 224, 128, 128 ] },
+					{ "start" : [  32, 176,  32, 255 ], "end" : [  32, 176,  32, 255 ] },
+					{ "start" : [ 128, 224, 128, 255 ], "end" : [ 128, 224, 128, 128 ] },
+					{ "start" : [ 160, 192,   0, 255 ], "end" : [ 160, 192,   0,  64 ] }
+				]
 			}
 		},
 		"sound" :
@@ -228,22 +294,28 @@
 		"faction": "tower",
 		"abilities":
 		{
-			"hateAngels" : 
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
+			"hateEfreet" :
 			{
 				"type" : "HATE",
-				"subtype" : "creature.efreet",
+				"subtype" : "efreet",
 				"val" : 50
 			},
-			"hateArchAngels" : 
+			"hateEfreetSultans" :
 			{
 				"type" : "HATE",
-				"subtype" : "creature.efreetSultan",
+				"subtype" : "efreetSultan",
 				"val" : 50
 			}
 		},
 		"upgrades": ["masterGenie"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:72",
+			"mapAttackFromLeft": "AvWattak.def:0:73",
 			"animation": "CGENIE.DEF"
 		},
 		"sound" :
@@ -262,36 +334,42 @@
 		"faction": "tower",
 		"abilities":
 		{
-			"hateAngels" : 
+			"canFly" :
 			{
-				"type" : "HATE",
-				"subtype" : "creature.efreet",
-				"val" : 50
+				"type" : "FLYING"
 			},
-			"hateArchAngels" : 
+			"casts" :
 			{
-				"type" : "HATE",
-				"subtype" : "creature.efreetSultan",
-				"val" : 50
+				"type" : "CASTS",
+				"val" : 3
 			},
-			"spellsLength" : 
+			"spellsLength" :
 			{
 				"type" : "CREATURE_ENCHANT_POWER",
-				"val" : 5
+				"val" : 6
 			},
 			"randomSpellcaster" :
 			{
 				"type" : "RANDOM_SPELLCASTER",
 				"val" : 2
 			},
-			"casts" :
+			"hateEfreet" :
 			{
-				"type" : "CASTS",
-				"val" : 3
+				"type" : "HATE",
+				"subtype" : "efreet",
+				"val" : 50
+			},
+			"hateEfreetSultans" :
+			{
+				"type" : "HATE",
+				"subtype" : "efreetSultan",
+				"val" : 50
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:74",
+			"mapAttackFromLeft": "AvWattak.def:0:75",
 			"animation": "CSULTA.DEF"
 		},
 		"sound" :
@@ -309,9 +387,10 @@
 		"index": 38,
 		"level": 6,
 		"faction": "tower",
+		"doubleWide" : true,
 		"abilities" :
 		{
-			"noRetaliation" : 
+			"noRetaliation" :
 			{
 				"type" : "BLOCKS_RETALIATION"
 			}
@@ -319,6 +398,8 @@
 		"upgrades": ["nagaQueen"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:76",
+			"mapAttackFromLeft": "AvWattak.def:0:77",
 			"animation": "CNAGA.DEF"
 		},
 		"sound" :
@@ -335,15 +416,18 @@
 		"index": 39,
 		"level": 6,
 		"faction": "tower",
+		"doubleWide" : true,
 		"abilities" :
 		{
-			"noRetaliation" : 
+			"noRetaliation" :
 			{
 				"type" : "BLOCKS_RETALIATION"
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:78",
+			"mapAttackFromLeft": "AvWattak.def:0:79",
 			"animation": "CNAGAG.DEF"
 		},
 		"sound" :
@@ -362,14 +446,21 @@
 		"faction": "tower",
 		"abilities" :
 		{
-			"immuneToMind" : 
+			"immuneToMind" :
 			{
 				"type" : "MIND_IMMUNITY"
+			},
+			"KING_3" : // Will be affected by Expert Slayer only
+			{
+				"type" : "KING",
+				"val" : 3
 			}
 		},
 		"upgrades": ["titan"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:80",
+			"mapAttackFromLeft": "AvWattak.def:0:81",
 			"animation": "CLTITA.DEF"
 		},
 		"sound" :
@@ -386,21 +477,37 @@
 		"index": 41,
 		"level": 7,
 		"faction": "tower",
+		"shots" : 24,
 		"abilities" :
 		{
-			"immuneToMind" : 
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			},
+			"noMeleePenalty" :
+			{
+				"type" : "NO_MELEE_PENALTY"
+			},
+			"immuneToMind" :
 			{
 				"type" : "MIND_IMMUNITY"
 			},
-			"hateArchAngels" : 
+			"KING_3" : // Will be affected by Expert Slayer only
+			{
+				"type" : "KING",
+				"val" : 3
+			},
+			"hateBlackDragons" :
 			{
 				"type" : "HATE",
-				"subtype" : "creature.blackDragon",
+				"subtype" : "blackDragon",
 				"val" : 50
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:82",
+			"mapAttackFromLeft": "AvWattak.def:0:83",
 			"animation": "CGTITA.DEF",
 			"missile" :
 			{

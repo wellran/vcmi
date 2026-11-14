@@ -10,13 +10,19 @@
 #pragma once
 
 #include "../GameConstants.h"
+#include "../int3.h"
+#include "../filesystem/ResourcePath.h"
+#include "../serializer/Serializeable.h"
+#include "CompoundMapObjectID.h"
 
 class CBinaryReader;
 class CLegacyConfigParser;
 class JsonNode;
+class IIdentifierResolver;
+class ISimpleResourceLoader;
 class int3;
 
-class DLL_LINKAGE ObjectTemplate
+class DLL_LINKAGE ObjectTemplate : public Serializeable
 {
 	enum EBlockMapBits
 	{
@@ -30,30 +36,45 @@ class DLL_LINKAGE ObjectTemplate
 	/// directions from which object can be entered, format same as for moveDir in CGHeroInstance(but 0 - 7)
 	ui8 visitDir;
 	/// list of terrains on which this object can be placed
-	std::set<ETerrainType> allowedTerrains;
+	std::set<TerrainId> allowedTerrains;
+
+	/// or, allow placing object on any terrain
+	bool anyLandTerrain;
 
 	void afterLoadFixup();
 
 public:
 	/// H3 ID/subID of this object
-	Obj id;
-	si32 subid;
+	MapObjectID id;
+	MapObjectSubID subid;
+
 	/// print priority, objects with higher priority will be print first, below everything else
 	si32 printPriority;
 	/// animation file that should be used to display object
-	std::string animationFile;
+	AnimationPath animationFile;
 
 	/// map editor only animation file
-	std::string editorAnimationFile;
+	AnimationPath editorAnimationFile;
 
 	/// string ID, equals to def base name for h3m files (lower case, no extension) or specified in mod data
 	std::string stringID;
 
-	ui32 getWidth() const;
-	ui32 getHeight() const;
+	inline ui32 getWidth() const
+	{
+		return width;
+	};
+
+	inline ui32 getHeight() const
+	{ 
+		return height;
+	};
+
 	void setSize(ui32 width, ui32 height);
 
-	bool isVisitable() const;
+	inline bool isVisitable() const
+	{
+		return visitable;
+	};
 
 	// Checks object used tiles
 	// Position is relative to bottom-right corner of the object, can not be negative
@@ -61,44 +82,107 @@ public:
 	bool isVisitableAt(si32 X, si32 Y) const;
 	bool isVisibleAt(si32 X, si32 Y) const;
 	bool isBlockedAt(si32 X, si32 Y) const;
-	std::set<int3> getBlockedOffsets() const;
-	int3 getBlockMapOffset() const; //bottom-right corner when firts blocked tile is
+
+	/// Layer in which the cell is drawn, position is relative to bottom-right corner like above
+	/// Objects drawn at higher layer cover the ones on lower layer: 0 - below everything, 1-254 - regular objects, 255 - above everything
+	ui8 getDrawLayerAt(si32 X, si32 Y) const;
+
+	inline const std::set<int3> & getBlockedOffsets() const
+	{
+		return blockedOffsets;
+	};
+
+	inline int3 getBlockMapOffset() const
+	{
+		return blockMapOffset; 
+	}
+
+	inline int3 getTopVisibleOffset() const
+	{
+		return topVisibleOffset;
+	}
 
 	// Checks if object is visitable from certain direction. X and Y must be between -1..+1
 	bool isVisitableFrom(si8 X, si8 Y) const;
-	int3 getVisitableOffset() const;
-	bool isVisitableFromTop() const;
+	inline int3 getVisitableOffset() const
+	{
+		//logGlobal->warn("Warning: getVisitableOffset called on non-visitable obj!");
+		return visitableOffset;
+	};
+
+	inline bool isVisitableFromTop() const
+	{
+		return visitDir & 2;
+	};
+
+	inline bool canBePlacedAtAnyTerrain() const
+	{
+		return anyLandTerrain;
+	};
+
+	int getTotalAllowedTerrains() const;
 
 	// Checks if object can be placed on specific terrain
-	bool canBePlacedAt(ETerrainType terrain) const;
+	bool canBePlacedAt(TerrainId terrain) const;
+
+	/// Returns number of completely empty rows & columns in template
+	/// Such as shifted wandering monster def's from hota, or Portal of Glory dwelling from H3
+	/// object must be visitable
+	int3 getCornerOffset() const;
+
+	CompoundMapObjectID getCompoundID() const;
 
 	ObjectTemplate();
-	//custom copy constructor is required
-	ObjectTemplate(const ObjectTemplate & other);
 
-	ObjectTemplate& operator=(const ObjectTemplate & rhs);
-
-	void readTxt(CLegacyConfigParser & parser);
-	void readMsk();
+	void readTxt(CLegacyConfigParser & parser, const ISimpleResourceLoader & filesystem);
+	void readMsk(const ISimpleResourceLoader & filesystem);
 	void readMap(CBinaryReader & reader);
-	void readJson(const JsonNode & node, const bool withTerrain = true);
-	void writeJson(JsonNode & node, const bool withTerrain = true) const;
+	void readJson(const JsonNode & node, IIdentifierResolver & resolver, bool withTerrain = true);
+	void writeJson(JsonNode & node, bool withTerrain = true) const;
 
 	bool operator==(const ObjectTemplate& ot) const { return (id == ot.id && subid == ot.subid); }
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+private:
+	ui32 width;
+	ui32 height;
+	bool visitable;
+
+	std::set<int3> blockedOffsets;
+	int3 blockMapOffset;
+	int3 visitableOffset;
+	int3 topVisibleOffset;
+
+	/// draw layer of every cell, indexed like usedTiles
+	std::vector<std::vector<ui8>> drawLayers;
+
+	void recalculate();
+
+	void calculateWidth();
+	void calculateHeight();
+	void calculateVisitable();
+	void calculateBlockedOffsets();
+	void calculateBlockMapOffset();
+	void calculateVisitableOffset();
+	void calculateTopVisibleOffset();
+	void calculateDrawLayers();
+
+public:
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & usedTiles;
 		h & allowedTerrains;
+		h & anyLandTerrain;
 		h & animationFile;
 		h & stringID;
 		h & id;
-		h & subid;
+		subid.serializeIdentifier(h, id);
 		h & printPriority;
 		h & visitDir;
-		if(version >= 770)
+		h & editorAnimationFile;
+
+		if (!h.saving)
 		{
-			h & editorAnimationFile;
+			recalculate();
 		}
 	}
 };

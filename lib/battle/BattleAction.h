@@ -22,23 +22,44 @@ namespace battle
 class DLL_LINKAGE BattleAction
 {
 public:
-	ui8 side; //who made this action
+	BattleSide side; //who made this action
 	ui32 stackNumber; //stack ID, -1 left hero, -2 right hero,
 	EActionType actionType; //use ActionType enum for values
 
-	si32 actionSubtype;
+	SpellID spell;
 
 	BattleAction();
 
 	static BattleAction makeHeal(const battle::Unit * healer, const battle::Unit * healed);
+	/// Heal of the most wounded unit that the healer can heal, chosen when the action is applied
+	static BattleAction makeHeal(const battle::Unit * healer);
+	static BattleAction makeNoAction(const battle::Unit * stack);
+	static BattleAction makeBadMorale(const battle::Unit * stack);
 	static BattleAction makeDefend(const battle::Unit * stack);
 	static BattleAction makeWait(const battle::Unit * stack);
-	static BattleAction makeMeleeAttack(const battle::Unit * stack, BattleHex destination, BattleHex attackFrom, bool returnAfterAttack = true);
+	/// Melee attack from a hex next to the target. A unit with RETURN_AFTER_STRIKE returns to its position unless returnAfterAttack is false
+	static BattleAction makeMeleeAttack(const battle::Unit * stack, const BattleHex & destination, const BattleHex & attackFrom, bool returnAfterAttack = true);
+	static BattleAction makeMeleeAttack(const battle::Unit* stack, const battle::Unit* target, const BattleHex& attackFrom, bool returnAfterAttack = true);
+	/// Attack of a LONG_WEAPON unit over one free hex
+	static BattleAction makeLongWeaponAttack(const battle::Unit * stack, const BattleHex & destination, const BattleHex & attackFrom);
 	static BattleAction makeShotAttack(const battle::Unit * shooter, const battle::Unit * target);
-	static BattleAction makeCreatureSpellcast(const battle::Unit * stack, const battle::Target & target, SpellID spellID);
-	static BattleAction makeMove(const battle::Unit * stack, BattleHex dest);
-	static BattleAction makeEndOFTacticPhase(ui8 side);
+	static BattleAction makeShotAttack(const battle::Unit * shooter, const BattleHex & destination);
+	static BattleAction makeHeal(const battle::Unit * healer, const BattleHex & destination);
+	/// Catapult shot without a target, at a wall part that the spell picks
+	static BattleAction makeCatapultShot(const battle::Unit * catapult);
+	static BattleAction makeWalkAndCast(const battle::Unit * stack, const BattleHex & castFrom, const battle::Unit * target, const SpellID & spellID);
+	static BattleAction makeCreatureSpellcast(const battle::Unit * stack, const battle::Target & target, const SpellID & spellID);
+	static BattleAction makeHeroSpellcast(BattleSide side, const battle::Target & target, const SpellID & spellID);
+	/// Random spell of a RANDOM_SPELLCASTER unit at the unit on the hex. The server rolls the spell
+	static BattleAction makeRandomSpellcast(const battle::Unit * stack, const BattleHex & destination);
+	static BattleAction makeMove(const battle::Unit * stack, const BattleHex & dest);
+	static BattleAction makeEndOFTacticPhase(BattleSide side);
+	static BattleAction makeRetreat(BattleSide side);
+	static BattleAction makeSurrender(BattleSide side);
 
+	bool isTacticsAction() const;
+	bool isUnitAction() const;
+	bool isBattleEndAction() const;
 	std::string toString() const;
 
 	void aimToHex(const BattleHex & destination);
@@ -47,22 +68,21 @@ public:
 	battle::Target getTarget(const CBattleInfoCallback * cb) const;
 	void setTarget(const battle::Target & target_);
 
-	template <typename Handler> void serialize(Handler & h, const int version)
+	template <typename Handler> void serialize(Handler & h)
 	{
 		h & side;
 		h & stackNumber;
 		h & actionType;
-		h & actionSubtype;
+		h & spell;
 		h & target;
 	}
-private:
 
 	struct DestinationInfo
 	{
 		int32_t unitValue;
 		BattleHex hexValue;
 
-		template <typename Handler> void serialize(Handler & h, const int version)
+		template <typename Handler> void serialize(Handler & h)
 		{
 			h & unitValue;
 			h & hexValue;

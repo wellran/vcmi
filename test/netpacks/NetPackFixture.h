@@ -10,8 +10,7 @@
 
 #pragma once
 
-#include "../../lib/NetPacks.h"
-#include "../../lib/CGameState.h"
+#include "../../lib/gameState/CGameState.h"
 
 namespace test
 {
@@ -19,6 +18,8 @@ namespace test
 class GameStateFake : public CGameState
 {
 public:
+	using CGameState::CGameState;
+
 	MOCK_METHOD3(updateEntity, void(Metatype, int32_t, const JsonNode &));
 };
 

@@ -11,6 +11,10 @@
 
 #include "../mainmenu/CMainMenu.h"
 
+class CMapInfo;
+struct StartInfo;
+struct PlayerInfo;
+
 class CButton;
 class CTextBox;
 class CTextInput;
@@ -18,15 +22,21 @@ class CAnimImage;
 class CToggleGroup;
 class RandomMapTab;
 class OptionsTab;
+class TurnOptionsTab;
+class ExtraOptionsTab;
 class SelectionTab;
+class BattleOnlyModeTab;
 class InfoCard;
 class CChatBox;
-class CMapInfo;
-struct StartInfo;
-struct PlayerInfo;
+class PvPBox;
+class TownSelector;
 class CLabel;
+class CSlider;
 class CFlagBox;
 class CLabelGroup;
+class TransparentFilledRectangle;
+class FilledTexturePlayerColored;
+class LRClickableArea;
 
 class ISelectionScreenInfo
 {
@@ -39,7 +49,7 @@ public:
 	virtual const StartInfo * getStartInfo() = 0;
 
 	virtual int getCurrentDifficulty();
-	virtual PlayerInfo getPlayerInfo(int color);
+	virtual PlayerInfo getPlayerInfo(PlayerColor color);
 
 };
 
@@ -52,16 +62,25 @@ public:
 	std::shared_ptr<CButton> buttonSelect;
 	std::shared_ptr<CButton> buttonRMG;
 	std::shared_ptr<CButton> buttonOptions;
+	std::shared_ptr<CButton> buttonBattleMode;
+	std::shared_ptr<CButton> buttonExtraOptions;
 	std::shared_ptr<CButton> buttonStart;
 	std::shared_ptr<CButton> buttonBack;
+	std::shared_ptr<CButton> buttonSimturns;
+
+	std::vector<std::shared_ptr<CPicture>> images;
 
 	std::shared_ptr<SelectionTab> tabSel;
 	std::shared_ptr<OptionsTab> tabOpt;
+	std::shared_ptr<TurnOptionsTab> tabTurnOptions;
+	std::shared_ptr<ExtraOptionsTab> tabExtraOptions;
 	std::shared_ptr<RandomMapTab> tabRand;
+	std::shared_ptr<BattleOnlyModeTab> tabBattleOnlyMode;
 	std::shared_ptr<CIntObject> curTab;
 
 	CSelectionBase(ESelectionScreen type);
 	virtual void toggleTab(std::shared_ptr<CIntObject> tab);
+	void keyPressed(EShortcut key) override;
 };
 
 class InfoCard : public CIntObject
@@ -74,6 +93,7 @@ class InfoCard : public CIntObject
 	std::shared_ptr<CAnimImage> iconsMapSizes;
 
 	std::shared_ptr<CLabel> labelSaveDate;
+	std::shared_ptr<CLabel> labelMapSize;
 	std::shared_ptr<CLabel> labelScenarioName;
 	std::shared_ptr<CLabel> labelScenarioDescription;
 	std::shared_ptr<CLabel> labelVictoryCondition;
@@ -90,8 +110,11 @@ class InfoCard : public CIntObject
 	std::shared_ptr<CLabel> labelVictoryConditionText;
 	std::shared_ptr<CLabel> labelLossConditionText;
 
-	std::shared_ptr<CLabelGroup> labelGroupPlayersAssigned;
-	std::shared_ptr<CLabelGroup> labelGroupPlayersUnassigned;
+	std::shared_ptr<CLabelGroup> labelGroupPlayers;
+	std::shared_ptr<CButton> buttonInvitePlayers;
+	std::shared_ptr<CButton> buttonOpenGlobalLobby;
+
+	std::shared_ptr<PvPBox> pvpBox;
 public:
 
 	bool showChat;
@@ -103,6 +126,7 @@ public:
 	InfoCard();
 	void disableLabelRedraws();
 	void changeSelection();
+	void clearSelection();
 	void toggleChat();
 	void setChat(bool activateChat);
 };
@@ -112,17 +136,47 @@ class CChatBox : public CIntObject
 public:
 	std::shared_ptr<CTextBox> chatHistory;
 	std::shared_ptr<CTextInput> inputBox;
+	std::shared_ptr<TransparentFilledRectangle> inputBackground;
 
 	CChatBox(const Rect & rect);
 
-	void keyPressed(const SDL_KeyboardEvent & key) override;
-
+	void keyPressed(EShortcut key) override;
+	bool captureThisKey(EShortcut key) override;
 	void addNewMessage(const std::string & text);
+};
+
+class PvPBox : public CIntObject
+{
+	std::shared_ptr<FilledTexturePlayerColored> backgroundTexture;
+	std::shared_ptr<TransparentFilledRectangle> backgroundBorder;
+	
+	std::shared_ptr<TownSelector> townSelector;
+
+	std::shared_ptr<CButton> buttonFlipCoin;
+	std::shared_ptr<CButton> buttonRandomTown;
+	std::shared_ptr<CButton> buttonRandomTownVs;
+	std::shared_ptr<CButton> buttonHandicap;
+public:
+	PvPBox(const Rect & rect);
+};
+
+class TownSelector : public CIntObject
+{
+	std::map<FactionID, std::shared_ptr<CAnimImage>> towns;
+	std::map<FactionID, std::shared_ptr<LRClickableArea>> townsArea;
+	std::shared_ptr<CSlider> slider;
+
+	void sliderMove(int slidPos);
+	void updateListItems();
+
+public:
+	std::map<FactionID, bool> townsEnabled;
+
+	TownSelector(const Point & loc);
 };
 
 class CFlagBox : public CIntObject
 {
-	std::shared_ptr<CAnimation> iconsTeamFlags;
 	std::shared_ptr<CLabel> labelAllies;
 	std::shared_ptr<CLabel> labelEnemies;
 	std::vector<std::shared_ptr<CAnimImage>> flagsAllies;
@@ -131,7 +185,7 @@ class CFlagBox : public CIntObject
 public:
 	CFlagBox(const Rect & rect);
 	void recreate();
-	void clickRight(tribool down, bool previousState) override;
+	void showPopupWindow(const Point & cursorPosition) override;
 	void showTeamsPopup();
 
 	class CFlagBoxTooltipBox : public CWindowObject
@@ -140,7 +194,7 @@ public:
 		std::shared_ptr<CLabelGroup> labelGroupTeams;
 		std::vector<std::shared_ptr<CAnimImage>> iconsFlags;
 	public:
-		CFlagBoxTooltipBox(std::shared_ptr<CAnimation> icons);
+		CFlagBoxTooltipBox();
 	};
 };
 

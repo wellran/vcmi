@@ -11,80 +11,107 @@
 #include "StdInc.h"
 #include "CRandomGenerator.h"
 
-boost::thread_specific_ptr<CRandomGenerator> CRandomGenerator::defaultRand;
+#include <boost/stacktrace.hpp>
+
+namespace
+{
+template<typename T>
+std::string invalidRangeMessage(T lower, T upper)
+{
+	std::ostringstream out;
+	out << "Invalid range provided: " << lower << " ... " << upper << "\nStacktrace:\n" << boost::stacktrace::stacktrace();
+	return out.str();
+}
+}
 
 CRandomGenerator::CRandomGenerator()
 {
+	logRng->trace("CRandomGenerator constructed");
 	resetSeed();
+}
+
+CRandomGenerator::CRandomGenerator(int seed)
+{
+	logRng->trace("CRandomGenerator constructed (%d)", seed);
+	setSeed(seed);
 }
 
 void CRandomGenerator::setSeed(int seed)
 {
+	logRng->trace("CRandomGenerator::setSeed (%d)", seed);
 	rand.seed(seed);
 }
 
 void CRandomGenerator::resetSeed()
 {
-	boost::hash<std::string> stringHash;
-	auto threadIdHash = stringHash(boost::lexical_cast<std::string>(boost::this_thread::get_id()));
-	setSeed((int)(threadIdHash * std::time(nullptr)));
-}
-
-TRandI CRandomGenerator::getIntRange(int lower, int upper)
-{
-	return std::bind(TIntDist(lower, upper), std::ref(rand));
-}
-
-vstd::TRandI64 CRandomGenerator::getInt64Range(int64_t lower, int64_t upper)
-{
-	return std::bind(TInt64Dist(lower, upper), std::ref(rand));
+	logRng->trace("CRandomGenerator::resetSeed");
+	std::hash<std::thread::id> hasher;
+	auto threadIdHash = hasher(std::this_thread::get_id());
+	setSeed(static_cast<int>(threadIdHash * std::time(nullptr)));
 }
 
 int CRandomGenerator::nextInt(int upper)
 {
-	return getIntRange(0, upper)();
+	logRng->trace("CRandomGenerator::nextInt (%d)", upper);
+	return nextInt(0, upper);
+}
+
+int64_t CRandomGenerator::nextInt64(int64_t upper)
+{
+	logRng->trace("CRandomGenerator::nextInt64 (%d)", upper);
+	return nextInt64(0, upper);
 }
 
 int CRandomGenerator::nextInt(int lower, int upper)
 {
-	return getIntRange(lower, upper)();
+	logRng->trace("CRandomGenerator::nextInt64 (%d, %d)", lower, upper);
+
+	if (lower > upper)
+		throw std::runtime_error(invalidRangeMessage(lower, upper));
+
+	return TIntDist(lower, upper)(rand);
 }
 
 int CRandomGenerator::nextInt()
 {
+	logRng->trace("CRandomGenerator::nextInt64");
 	return TIntDist()(rand);
 }
 
-vstd::TRand CRandomGenerator::getDoubleRange(double lower, double upper)
+int CRandomGenerator::nextBinomialInt(int coinsCount, double coinChance)
 {
-    return std::bind(TRealDist(lower, upper), std::ref(rand));
+	logRng->trace("CRandomGenerator::nextBinomialInt (%d, %f)", coinsCount, coinChance);
+	std::binomial_distribution<> distribution(coinsCount, coinChance);
+	return distribution(rand);
+}
+
+int64_t CRandomGenerator::nextInt64(int64_t lower, int64_t upper)
+{
+	logRng->trace("CRandomGenerator::nextInt64 (%d, %d)", lower, upper);
+	if (lower > upper)
+		throw std::runtime_error(invalidRangeMessage(lower, upper));
+
+	return TInt64Dist(lower, upper)(rand);
 }
 
 double CRandomGenerator::nextDouble(double upper)
 {
-	return getDoubleRange(0, upper)();
+	logRng->trace("CRandomGenerator::nextDouble (%f)", upper);
+	return nextDouble(0, upper);
 }
 
 double CRandomGenerator::nextDouble(double lower, double upper)
 {
-	return getDoubleRange(lower, upper)();
-}
+	logRng->trace("CRandomGenerator::nextDouble (%f, %f)", lower, upper);
+	if(lower > upper)
+		throw std::runtime_error(invalidRangeMessage(lower, upper));
 
-double CRandomGenerator::nextDouble()
-{
-	return TRealDist()(rand);
+	return TRealDist(lower, upper)(rand);
 }
 
 CRandomGenerator & CRandomGenerator::getDefault()
 {
-	if(!defaultRand.get())
-	{
-		defaultRand.reset(new CRandomGenerator());
-	}
-	return *defaultRand.get();
+	static thread_local CRandomGenerator defaultRand;
+	return defaultRand;
 }
 
-TGenerator & CRandomGenerator::getStdGenerator()
-{
-	return rand;
-}

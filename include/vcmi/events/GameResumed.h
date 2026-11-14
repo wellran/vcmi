@@ -12,11 +12,12 @@
 
 #include "Event.h"
 #include "SubscriptionRegistry.h"
+#include "../scripting/ApiTags.h"
 
 namespace events
 {
 
-class DLL_LINKAGE GameResumed : public Event
+class DLL_LINKAGE GameResumed : public Event, public scripting::ApiRawPointer<GameResumed>
 {
 public:
 	using Sub = SubscriptionRegistry<GameResumed>;

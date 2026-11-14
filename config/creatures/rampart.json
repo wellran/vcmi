@@ -5,10 +5,12 @@
 		"level": 1,
 		"faction": "rampart",
 		"upgrades": ["centaurCaptain"],
+		"doubleWide" : true,
 		"hasDoubleWeek": true,
 		"graphics" :
 		{
-			"missile" : null,
+			"mapAttackFromRight": "AvWattak.def:0:28",
+			"mapAttackFromLeft": "AvWattak.def:0:29",
 			"animation": "CCENTR.DEF"
 		},
 		"sound" :
@@ -26,9 +28,11 @@
 		"index": 15,
 		"level": 1,
 		"faction": "rampart",
+		"doubleWide" : true,
 		"graphics" :
 		{
-			"missile" : null,
+			"mapAttackFromRight": "AvWattak.def:0:30",
+			"mapAttackFromLeft": "AvWattak.def:0:31",
 			"animation": "CECENT.DEF"
 		},
 		"sound" :
@@ -56,6 +60,8 @@
 		"upgrades": ["battleDwarf"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:32",
+			"mapAttackFromLeft": "AvWattak.def:0:33",
 			"animation": "CDWARF.DEF"
 		},
 		"sound" :
@@ -82,6 +88,8 @@
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:34",
+			"mapAttackFromLeft": "AvWattak.def:0:35",
 			"animation": "CBDWAR.DEF"
 		},
 		"sound" :
@@ -99,8 +107,18 @@
 		"level": 3,
 		"faction": "rampart",
 		"upgrades": ["grandElf"],
+		"shots" : 24,
+		"abilities" :
+		{
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			}
+		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:36",
+			"mapAttackFromLeft": "AvWattak.def:0:37",
 			"animation": "CELF.DEF",
 			"missile" :
 			{
@@ -122,17 +140,25 @@
 		"index": 19,
 		"level": 3,
 		"faction": "rampart",
-		"abilities": 
+		"shots" : 24,
+		"abilities" :
 		{
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			},
 			"doubleShot" :
 			{
 				"type": "ADDITIONAL_ATTACK",
 				"val" : 1,
+				"description" : "@creatures.core.marksman.bonus.extraAttack",
 				"effectRange": "ONLY_DISTANCE_FIGHT"
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:38",
+			"mapAttackFromLeft": "AvWattak.def:0:39",
 			"animation": "CGRELF.DEF",
 			"missile" :
 			{
@@ -154,8 +180,13 @@
 		"index": 20,
 		"level": 4,
 		"faction": "rampart",
+		"doubleWide" : true,
 		"abilities":
 		{
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
 			"increaseManaCost" :
 			{
 				"type" : "CHANGES_SPELL_COST_FOR_ENEMY",
@@ -166,6 +197,8 @@
 		"hasDoubleWeek": true,
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:40",
+			"mapAttackFromLeft": "AvWattak.def:0:41",
 			"animation": "CPEGAS.DEF"
 		},
 		"sound" :
@@ -182,8 +215,13 @@
 		"index": 21,
 		"level": 4,
 		"faction": "rampart",
+		"doubleWide" : true,
 		"abilities":
 		{
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
 			"increaseManaCost" :
 			{
 				"type" : "CHANGES_SPELL_COST_FOR_ENEMY",
@@ -192,6 +230,8 @@
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:42",
+			"mapAttackFromLeft": "AvWattak.def:0:43",
 			"animation": "CAPEGS.DEF"
 		},
 		"sound" :
@@ -213,13 +253,15 @@
 			"binds" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.bind",
+				"subtype" : "bind",
 				"val" : 100
 			}
 		},
 		"upgrades": ["dendroidSoldier"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:44",
+			"mapAttackFromLeft": "AvWattak.def:0:45",
 			"animation": "CTREE.DEF"
 		},
 		"sound" :
@@ -241,12 +283,14 @@
 			"binds" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.bind",
+				"subtype" : "bind",
 				"val" : 100
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:46",
+			"mapAttackFromLeft": "AvWattak.def:0:47",
 			"animation": "CBTREE.DEF"
 		},
 		"sound" :
@@ -263,23 +307,27 @@
 		"index": 24,
 		"level": 6,
 		"faction": "rampart",
+		"doubleWide" : true,
 		"abilities":
 		{
-			"spellResistAura" :
-			{
-				"type" : "SPELL_RESISTANCE_AURA",
-				"val" : 20
-			},
 			"blinds" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.blind",
+				"subtype" : "blind",
+				"val" : 20,
+				"addInfo" : [3,0]
+			},
+			"spellResistAura" :
+			{
+				"type" : "SPELL_RESISTANCE_AURA",
 				"val" : 20
 			}
 		},
 		"upgrades": ["warUnicorn"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:48",
+			"mapAttackFromLeft": "AvWattak.def:0:49",
 			"animation": "CUNICO.DEF"
 		},
 		"sound" :
@@ -296,22 +344,26 @@
 		"index": 25,
 		"level": 6,
 		"faction": "rampart",
+		"doubleWide" : true,
 		"abilities":
 		{
-			"spellResistAura" :
-			{
-				"type" : "SPELL_RESISTANCE_AURA",
-				"val" : 20
-			},
 			"blinds" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.blind",
+				"subtype" : "blind",
+				"val" : 20,
+				"addInfo" : [3,0]
+			},
+			"spellResistAura" :
+			{
+				"type" : "SPELL_RESISTANCE_AURA",
 				"val" : 20
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:50",
+			"mapAttackFromLeft": "AvWattak.def:0:51",
 			"animation": "CWUNIC.DEF"
 		},
 		"sound" :
@@ -329,13 +381,23 @@
 		"index": 26,
 		"level": 7,
 		"faction": "rampart",
+		"doubleWide" : true,
 		"abilities":
 		{
 			"dragon" :
 			{
 				"type" : "DRAGON_NATURE"
 			},
-			"fireBreath" :
+			"dragonSkeleton" :
+			{
+				"type" : "SKELETON_TRANSFORMER_TARGET",
+				"subtype" : "boneDragon"
+			},
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
+			"twoHexAttackBreath" :
 			{
 				"type" : "TWO_HEX_ATTACK_BREATH"
 			},
@@ -343,11 +405,18 @@
 			{
 				"type" : "LEVEL_SPELL_IMMUNITY",
 				"val" : 3
+			},
+			"KING_1" : // Will be affected by Slayer with no expertise
+			{
+				"type" : "KING",
+				"val" : 0
 			}
 		},
 		"upgrades": ["goldDragon"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:52",
+			"mapAttackFromLeft": "AvWattak.def:0:53",
 			"animation": "CGDRAG.DEF"
 		},
 		"sound" :
@@ -364,13 +433,23 @@
 		"index": 27,
 		"level": 7,
 		"faction": "rampart",
+		"doubleWide" : true,
 		"abilities":
 		{
 			"dragon" :
 			{
 				"type" : "DRAGON_NATURE"
 			},
-			"fireBreath" :
+			"dragonSkeleton" :
+			{
+				"type" : "SKELETON_TRANSFORMER_TARGET",
+				"subtype" : "boneDragon"
+			},
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
+			"twoHexAttackBreath" :
 			{
 				"type" : "TWO_HEX_ATTACK_BREATH"
 			},
@@ -378,10 +457,17 @@
 			{
 				"type" : "LEVEL_SPELL_IMMUNITY",
 				"val" : 4
+			},
+			"KING_1" : // Will be affected by Slayer with no expertise
+			{
+				"type" : "KING",
+				"val" : 0
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:54",
+			"mapAttackFromLeft": "AvWattak.def:0:55",
 			"animation": "CDDRAG.DEF"
 		},
 		"sound" :

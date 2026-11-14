@@ -12,6 +12,7 @@
 
 #include "Event.h"
 #include "SubscriptionRegistry.h"
+#include "../scripting/ApiTags.h"
 
 struct BattleStackAttacked;
 
@@ -23,7 +24,7 @@ namespace battle
 namespace events
 {
 
-class DLL_LINKAGE ApplyDamage : public Event
+class DLL_LINKAGE ApplyDamage : public Event, public scripting::ApiRawPointer<ApplyDamage>
 {
 public:
 	using Sub = SubscriptionRegistry<ApplyDamage>;
@@ -34,7 +35,7 @@ public:
 
 	static Sub * getRegistry();
 
-	virtual int64_t getInitalDamage() const = 0;
+	virtual int64_t getInitialDamage() const = 0;
 	virtual int64_t getDamage() const = 0;
 	virtual void setDamage(int64_t value) = 0;
 	virtual const battle::Unit * getTarget() const = 0;

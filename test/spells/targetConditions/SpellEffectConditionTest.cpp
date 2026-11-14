@@ -9,9 +9,9 @@
  */
 #include "StdInc.h"
 
-#include "StdInc.h"
-
 #include "TargetConditionItemFixture.h"
+
+#include "../../../lib/GameLibrary.h"
 
 namespace test
 {
@@ -23,7 +23,7 @@ class SpellEffectConditionTest : public TargetConditionItemTest
 public:
 	void setDefaultExpectations()
 	{
-		EXPECT_CALL(unitMock, getAllBonuses(_, _, _, _)).Times(AtLeast(1));
+		EXPECT_CALL(unitMock, getAllBonuses(_, _)).Times(AtLeast(1));
 		EXPECT_CALL(unitMock, getTreeVersion()).Times(AtLeast(0));
 	}
 
@@ -31,7 +31,7 @@ public:
 	{
 		TargetConditionItemTest::SetUp();
 
-		subject = TargetConditionItemFactory::getDefault()->createConfigurable("", "spell", "age");
+		subject = TargetConditionItemFactory::create(*LIBRARY->identifiers())->createConfigurable("core", "spell", "age");
 		GTEST_ASSERT_NE(subject, nullptr);
 	}
 };
@@ -45,7 +45,7 @@ TEST_F(SpellEffectConditionTest, ImmuneByDefault)
 TEST_F(SpellEffectConditionTest, ReceptiveIfHasEffectFromDesiredSpell)
 {
 	setDefaultExpectations();
-	unitBonuses.addNewBonus(std::make_shared<Bonus>(Bonus::ONE_BATTLE, Bonus::STACK_HEALTH, Bonus::SPELL_EFFECT, 3, SpellID::AGE));
+	unitBonuses.addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::STACK_HEALTH, BonusSource::SPELL_EFFECT, 3, BonusSourceID(SpellID(SpellID::AGE))));
 
 	EXPECT_TRUE(subject->isReceptive(&mechanicsMock, &unitMock));
 }
@@ -53,14 +53,14 @@ TEST_F(SpellEffectConditionTest, ReceptiveIfHasEffectFromDesiredSpell)
 TEST_F(SpellEffectConditionTest, ImmuneIfHasEffectFromOtherSpell)
 {
 	setDefaultExpectations();
-	unitBonuses.addNewBonus(std::make_shared<Bonus>(Bonus::ONE_BATTLE, Bonus::STACK_HEALTH, Bonus::SPELL_EFFECT, 3, SpellID::AIR_SHIELD));
+	unitBonuses.addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::STACK_HEALTH, BonusSource::SPELL_EFFECT, 3, BonusSourceID(SpellID(SpellID::AIR_SHIELD))));
 	EXPECT_FALSE(subject->isReceptive(&mechanicsMock, &unitMock));
 }
 
 TEST_F(SpellEffectConditionTest, ImmuneIfHasNoSpellEffects)
 {
 	setDefaultExpectations();
-	unitBonuses.addNewBonus(std::make_shared<Bonus>(Bonus::ONE_BATTLE, Bonus::STACK_HEALTH, Bonus::CREATURE_ABILITY, 3, 0));
+	unitBonuses.addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::STACK_HEALTH, BonusSource::CREATURE_ABILITY, 3, BonusSourceID()));
 	EXPECT_FALSE(subject->isReceptive(&mechanicsMock, &unitMock));
 }
 

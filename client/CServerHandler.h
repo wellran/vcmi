@@ -9,24 +9,42 @@
  */
 #pragma once
 
+#include "Translator.h"
+
 #include "../lib/CStopWatch.h"
 
+#include "../lib/network/NetworkInterface.h"
 #include "../lib/StartInfo.h"
-#include "../lib/CondSh.h"
+#include "../lib/mapping/CMapInfo.h"
+#include "../lib/mapping/CMapHeader.h"
+#include "../lib/mapping/ScenarioList.h"
+#include "../lib/gameState/GameStatistics.h"
 
-struct SharedMemory;
-class CConnection;
+class GameConnection;
 class PlayerColor;
 struct StartInfo;
+struct TurnTimerInfo;
 
 class CMapInfo;
+class CGameState;
 struct ClientPlayer;
-struct CPack;
 struct CPackForLobby;
-class CClient;
+struct CPackForServer;
+struct CPackForClient;
+struct LobbyModsCheck;
 
-template<typename T> class CApplier;
+class HighScoreParameter;
+
+class NetworkLagCompensator;
+class GameplayReplayer;
+class CClient;
 class CBaseForLobbyApply;
+class GlobalLobbyClient;
+class GameChatHandler;
+class IServerRunner;
+
+enum class ESelectionScreen : ui8;
+enum class ELoadMode : ui8;
 
 // TODO: Add mutex so we can't set CONNECTION_CANCELLED if client already connected, but thread not setup yet
 enum class EClientState : ui8
@@ -38,7 +56,16 @@ enum class EClientState : ui8
 	LOBBY_CAMPAIGN, // Client is on scenario bonus selection screen
 	STARTING, // Gameplay interfaces being created, we pause netpacks retrieving
 	GAMEPLAY, // In-game, used by some UI
-	DISCONNECTING // We disconnecting, drop all netpacks
+	DISCONNECTING, // We disconnecting, drop all netpacks
+	CAMPAIGN_SCENARIO_WON, // Campaign scenario is won and its game is destroyed, drop game netpacks until the lobby of the next scenario
+};
+
+enum class EServerMode : uint8_t
+{
+	NONE = 0,
+	LOCAL, // no global lobby
+	LOBBY_HOST, // We are hosting global server available via global lobby
+	LOBBY_GUEST // Connecting to a remote server via proxy provided by global lobby
 };
 
 class IServerAPI
@@ -51,98 +78,203 @@ public:
 
 	virtual void sendClientConnecting() const = 0;
 	virtual void sendClientDisconnecting() = 0;
-	virtual void setCampaignState(std::shared_ptr<CCampaignState> newCampaign) = 0;
-	virtual void setCampaignMap(int mapId) const = 0;
+	virtual void startCampaign(const std::string & fileURI, const std::string & campaignSet) const = 0;
+	virtual void setCampaignMap(CampaignScenarioID mapId) const = 0;
 	virtual void setCampaignBonus(int bonusId) const = 0;
-	virtual void setMapInfo(std::shared_ptr<CMapInfo> to, std::shared_ptr<CMapGenOptions> mapGenOpts = {}) const = 0;
+	virtual void setBattleOnlyModeStartInfo(std::shared_ptr<BattleOnlyModeStartInfo> startInfo) const = 0;
+	virtual void selectScenario(const ScenarioSelection & selection, std::shared_ptr<CMapGenOptions> mapGenOpts = {}) const = 0;
 	virtual void setPlayer(PlayerColor color) const = 0;
-	virtual void setPlayerOption(ui8 what, ui8 dir, PlayerColor player) const = 0;
+	virtual void setPlayerName(PlayerColor color, const std::string & name) const = 0;
+	virtual void setPlayerHandicap(PlayerColor color, Handicap handicap) const = 0;
+	virtual void setPlayerOption(ui8 what, int32_t value, PlayerColor player) const = 0;
 	virtual void setDifficulty(int to) const = 0;
-	virtual void setTurnLength(int npos) const = 0;
+	virtual void setTurnTimerInfo(const TurnTimerInfo &) const = 0;
+	virtual void setSimturnsInfo(const SimturnsInfo &) const = 0;
+	virtual void setExtraOptionsInfo(const ExtraOptionsInfo & info) const = 0;
 	virtual void sendMessage(const std::string & txt) const = 0;
 	virtual void sendGuiAction(ui8 action) const = 0; // TODO: possibly get rid of it?
-	virtual void sendStartGame(bool allowOnlyAI = false) const = 0;
+	virtual void sendStartGame(bool allowOnlyAI = false, bool verify = true) const = 0;
+	virtual void sendRestartGame() const = 0;
 };
 
 /// structure to handle running server and connecting to it
-class CServerHandler : public IServerAPI, public LobbyInfo
+class CServerHandler final : public IServerAPI, public LobbyInfo, public INetworkClientListener, public INetworkTimerListener, boost::noncopyable
 {
-	std::shared_ptr<CApplier<CBaseForLobbyApply>> applier;
+	friend class ApplyOnLobbyHandlerNetPackVisitor;
 
-	std::shared_ptr<boost::recursive_mutex> mx;
-	std::list<CPackForLobby *> packsForLobbyScreen; //protected by mx
+	std::unique_ptr<INetworkHandler> networkHandler;
+	std::shared_ptr<INetworkConnection> networkConnection;
+	std::unique_ptr<GlobalLobbyClient> lobbyClient;
+	std::unique_ptr<GameChatHandler> gameChat;
+	std::unique_ptr<IServerRunner> serverRunner;
+	std::unique_ptr<NetworkLagCompensator> networkLagCompensator;
+	std::unique_ptr<GameplayReplayer> gameplayReplayer;
+	/// Selected once connected, and started once the server has loaded it
+	std::optional<ScenarioSelection> scenarioToStart;
+	std::vector<std::string> localPlayerNames;
+	/// Quick save of the running game can be loaded, as reported by the server
+	bool quickSaveAvailable = false;
 
-	std::vector<std::string> myNames;
+	/// Texts of the map and campaign being set up. Rebuilt on every lobby update, since each one
+	/// replaces the lobby state, and texts of the map that is gone must stop shadowing the new one
+	std::vector<TranslatorOverlay> lobbyTextOverlays;
+	/// Texts of the running game, dropped when it ends
+	std::vector<TranslatorOverlay> gameplayTextOverlays;
 
-	void threadHandleConnection();
-	void threadRunServer();
-	void sendLobbyPack(const CPackForLobby & pack) const override;
+	void installLobbyTexts();
+
+	std::thread threadNetwork;
+
+	std::atomic<EClientState> state;
+	bool lobbyPreviewMode = false;
+	std::function<void()> onLobbyPreviewJoin;
+
+	void threadRunNetwork();
+	void waitForServerShutdown();
+	/// Closes connection to server, if any, without notifying the server
+	void closeConnection();
+
+	void onPacketReceived(const NetworkConnectionPtr &, const std::vector<std::byte> & message) override;
+	void onConnectionFailed(const std::string & errorMessage) override;
+	void onConnectionEstablished(const NetworkConnectionPtr &) override;
+	void onDisconnected(const NetworkConnectionPtr &, const std::string & errorMessage) override;
+	void onTimer() override;
+
+	void applyPackOnLobbyScreen(CPackForLobby & pack);
+
+	/// Stops replay and interfaces of the running game, they still exist afterwards
+	void stopGameplay();
+	/// Destroys interfaces and game state of a stopped game
+	void destroyGameplay();
+	void showMainMenu();
+	/// Ends won scenario of an unfinished campaign, keeping the connection for the lobby of the next scenario
+	void endCampaignScenario();
+
+	std::string serverHostname;
+	ui16 serverPort;
+
+	bool isServerLocal() const;
 
 public:
-	std::atomic<EClientState> state;
+	/// High-level connection overlay that is capable of (de)serializing network data
+	std::shared_ptr<GameConnection> logicConnection;
+
 	////////////////////
 	// FIXME: Bunch of crutches to glue it all together
 
-	// For starting non-custom campaign and continue to next mission
-	std::shared_ptr<CCampaignState> campaignStateToSend;
+	/// Campaign started outside of the campaign list, for example from a campaign set
+	struct CampaignToStart
+	{
+		std::string fileURI;
+		std::string campaignSet;
+	};
+	/// Sent once connected, kept until the server selects it, or rejects it
+	std::optional<CampaignToStart> campaignToStart;
 
-	ui8 screenType; // To create lobby UI only after server is setup
-	ui8 loadMode; // For saves filtering in SelectionTab
+	ESelectionScreen screenType; // To create lobby UI only after server is setup
+	EServerMode serverMode;
+	ELoadMode loadMode; // For saves filtering in SelectionTab
+	bool hotseatMode;
+	bool battleMode;
 	////////////////////
 
 	std::unique_ptr<CStopWatch> th;
-	std::shared_ptr<boost::thread> threadRunLocalServer;
-
-	std::shared_ptr<CConnection> c;
-	CClient * client;
-
-	CondSh<bool> campaignServerRestartLock;
+	std::unique_ptr<CClient> client;
 
 	CServerHandler();
+	~CServerHandler();
+	
+	void resetStateForLobby(EStartMode mode, ESelectionScreen screen, EServerMode serverMode, const std::vector<std::string> & playerNames);
+	void startLocalServerAndConnect(bool connectToLobby);
+	void connectToServer(const std::string & addr, const ui16 port);
 
-	void resetStateForLobby(const StartInfo::EMode mode, const std::vector<std::string> * names = nullptr);
-	void startLocalServerAndConnect();
-	void justConnectToServer(const std::string &addr = "", const ui16 port = 0);
-	void applyPacksOnLobbyScreen();
-	void stopServerConnection();
+	GameChatHandler & getGameChat();
+	GlobalLobbyClient & getGlobalLobby();
+	INetworkHandler & getNetworkHandler();
 
 	// Helpers for lobby state access
 	std::set<PlayerColor> getHumanColors();
 	PlayerColor myFirstColor() const;
 	bool isMyColor(PlayerColor color) const;
-	ui8 myFirstId() const; // Used by chat only!
+	PlayerConnectionID myFirstId() const; // Used by chat only!
 
-	bool isServerLocal() const;
+	EClientState getState() const;
+	void setState(EClientState newState);
+	/// Aborts connection attempt requested by player, including already established connection to remote server
+	void cancelConnection();
+
 	bool isHost() const;
 	bool isGuest() const;
+	bool hasQuickSave() const;
+	/// Called after a quick save is written, before the server can be asked about it
+	void onQuickSaveWritten();
+	bool hasRemoteClientInLobby() const;
+	bool inLobbyRoom() const;
+	bool inGame() const;
 
-	static ui16 getDefaultPort();
-	static std::string getDefaultPortStr();
+	const std::string & getCurrentHostname() const;
+	const std::string & getLocalHostname() const;
+	const std::string & getRemoteHostname() const;
+
+	ui16 getCurrentPort() const;
+	ui16 getLocalPort() const;
+	ui16 getRemotePort() const;
 
 	// Lobby server API for UI
+	void sendLobbyPack(const CPackForLobby & pack) const override;
+
 	void sendClientConnecting() const override;
 	void sendClientDisconnecting() override;
-	void setCampaignState(std::shared_ptr<CCampaignState> newCampaign) override;
-	void setCampaignMap(int mapId) const override;
+	void startCampaign(const std::string & fileURI, const std::string & campaignSet) const override;
+	void setCampaignMap(CampaignScenarioID mapId) const override;
 	void setCampaignBonus(int bonusId) const override;
-	void setMapInfo(std::shared_ptr<CMapInfo> to, std::shared_ptr<CMapGenOptions> mapGenOpts = {}) const override;
+	void setBattleOnlyModeStartInfo(std::shared_ptr<BattleOnlyModeStartInfo> startInfo) const override;
+	void selectScenario(const ScenarioSelection & selection, std::shared_ptr<CMapGenOptions> mapGenOpts = {}) const override;
 	void setPlayer(PlayerColor color) const override;
-	void setPlayerOption(ui8 what, ui8 dir, PlayerColor player) const override;
+	void setPlayerName(PlayerColor color, const std::string & name) const override;
+	void setPlayerHandicap(PlayerColor color, Handicap handicap) const override;
+	void setPlayerOption(ui8 what, int32_t value, PlayerColor player) const override;
 	void setDifficulty(int to) const override;
-	void setTurnLength(int npos) const override;
+	void setTurnTimerInfo(const TurnTimerInfo &) const override;
+	void setSimturnsInfo(const SimturnsInfo &) const override;
+	void setExtraOptionsInfo(const ExtraOptionsInfo &) const override;
 	void sendMessage(const std::string & txt) const override;
 	void sendGuiAction(ui8 action) const override;
-	void sendStartGame(bool allowOnlyAI = false) const override;
+	void sendRestartGame() const override;
+	void sendStartGame(bool allowOnlyAI = false, bool verify = true) const override;
 
-	void startGameplay();
-	void endGameplay(bool closeConnection = true, bool restart = false);
-	void startCampaignScenario(std::shared_ptr<CCampaignState> cs = {});
+	void startScenarioAfterConnection(const ScenarioSelection & selection);
+	bool validateGameStart(bool allowOnlyAI = false) const;
+	void debugStartTest(std::string filename, bool save = false);
+
+	void startGameplay(std::shared_ptr<CGameState> gameState);
+	void quickLoadGame();
+	void showHighScoresAndEndGameplay(PlayerColor player, bool victory, const StatisticDataSet & statistic);
+	void stopNetwork();
+	void waitForNetworkThread();
+	void endNetwork();
+	void endGameplay();
+	void restartGameplay();
+	/// Called once the server has returned to lobby with the next scenario of the campaign
+	void openNextCampaignScenarioLobby();
+	void sendNextCampaignScenario() const;
+	void startCampaignScenario(std::shared_ptr<CampaignState> ourCampaign, const StatisticDataSet & statistic);
+	void showServerError(const std::string & txt) const;
 
 	// TODO: LobbyState must be updated within game so we should always know how many player interfaces our client handle
 	int howManyPlayerInterfaces();
-	ui8 getLoadMode();
+	ELoadMode getLoadMode();
 
-	void debugStartTest(std::string filename, bool save = false);
+	void visitForLobby(CPackForLobby & lobbyPack);
+	void visitForClient(CPackForClient & clientPack);
+
+	GameplayReplayer & replayer();
+
+	/// Safe to call at any time, also outside of a running game
+	bool isReplayActive() const;
+
+	void sendGamePack(const CPackForServer & pack) const;
+
+	void startLobbyPreview(const std::string & addr, ui16 port, std::function<void()> onJoin);
+	void onLobbyPreviewResponse(LobbyModsCheck & pack);
 };
-
-extern CServerHandler * CSH;

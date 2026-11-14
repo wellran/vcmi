@@ -13,40 +13,47 @@
 
 ///BattleProxy
 
-BattleProxy::BattleProxy(Subject subject_)
-	: subject(subject_)
-{
-	setBattle(this);
-	player = subject->getPlayerID();
-}
+BattleProxy::BattleProxy(Subject subject_): 
+	subject(std::move(subject_))
+{}
 
 BattleProxy::~BattleProxy() = default;
 
+const IBattleInfo * BattleProxy::getBattle() const
+{
+	return this;
+}
+
+std::optional<PlayerColor> BattleProxy::getPlayerID() const
+{
+	return subject->getPlayerID();
+}
+
 int32_t BattleProxy::getActiveStackID() const
 {
-	auto ret = subject->battleActiveUnit();
+	const auto * ret = subject->battleActiveUnit();
 	if(ret)
 		return ret->unitId();
 	else
 		return -1;
 }
 
-TStacks BattleProxy::getStacksIf(TStackFilter predicate) const
+TStacks BattleProxy::getStacksIf(const TStackFilter & predicate) const
 {
 	return subject->battleGetStacksIf(predicate);
 }
 
-battle::Units BattleProxy::getUnitsIf(battle::UnitFilter predicate) const
+battle::Units BattleProxy::getUnitsIf(const battle::UnitFilter & predicate) const
 {
 	return subject->battleGetUnitsIf(predicate);
 }
 
-BFieldType BattleProxy::getBattlefieldType() const
+BattleField BattleProxy::getBattlefieldType() const
 {
 	return subject->battleGetBattlefieldType();
 }
 
-ETerrainType BattleProxy::getTerrainType() const
+TerrainId BattleProxy::getTerrainType() const
 {
 	return subject->battleTerrainType();
 }
@@ -56,19 +63,20 @@ IBattleInfo::ObstacleCList BattleProxy::getAllObstacles() const
 	return subject->battleGetAllObstacles();
 }
 
-PlayerColor BattleProxy::getSidePlayer(ui8 side) const
+PlayerColor BattleProxy::getSidePlayer(BattleSide side) const
 {
 	return subject->sideToPlayer(side);
 }
 
-const CArmedInstance * BattleProxy::getSideArmy(ui8 side) const
+const CArmedInstance * BattleProxy::getSideArmy(BattleSide side) const
 {
-	return subject->battleGetArmyObject(side);
+	//state getters are not subject to access checks, those are performed by callback methods
+	return subject->getBattle()->getSideArmy(side);
 }
 
-const CGHeroInstance * BattleProxy::getSideHero(ui8 side) const
+const CGHeroInstance * BattleProxy::getSideHero(BattleSide side) const
 {
-	return subject->battleGetFightingHero(side);
+	return subject->getBattle()->getSideHero(side);
 }
 
 ui8 BattleProxy::getTacticDist() const
@@ -76,9 +84,14 @@ ui8 BattleProxy::getTacticDist() const
 	return subject->battleTacticDist();
 }
 
-ui8 BattleProxy::getTacticsSide() const
+BattleSide BattleProxy::getTacticsSide() const
 {
 	return subject->battleGetTacticsSide();
+}
+
+int32_t BattleProxy::getRound() const
+{
+	return subject->battleGetRound();
 }
 
 const CGTownInstance * BattleProxy::getDefendedTown() const
@@ -86,7 +99,7 @@ const CGTownInstance * BattleProxy::getDefendedTown() const
 	return subject->battleGetDefendedTown();
 }
 
-si8 BattleProxy::getWallState(int partOfWall) const
+EWallState BattleProxy::getWallState(EWallPart partOfWall) const
 {
 	return subject->battleGetWallState(partOfWall);
 }
@@ -96,18 +109,18 @@ EGateState BattleProxy::getGateState() const
 	return subject->battleGetGateState();
 }
 
-uint32_t BattleProxy::getCastSpells(ui8 side) const
+int32_t BattleProxy::getCastSpells(BattleSide side) const
 {
 	return subject->battleCastSpells(side);
 }
 
-int32_t BattleProxy::getEnchanterCounter(ui8 side) const
+int32_t BattleProxy::getEnchanterCounter(BattleSide side) const
 {
 	return subject->battleGetEnchanterCounter(side);
 }
 
-const IBonusBearer * BattleProxy::asBearer() const
+const IBonusBearer * BattleProxy::getBonusBearer() const
 {
-	return subject->getBattleNode();
+	return subject->getBonusBearer();
 }
 

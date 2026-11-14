@@ -10,11 +10,16 @@
 
 #pragma once
 
+#include <vcmi/Creature.h>
 #include <vcmi/spells/Magic.h>
 
-struct BattleHex;
+#include "../../constants/EntityIdentifiers.h"
+#include "../../json/JsonNode.h"
+#include "../ISpellMechanics.h"
+
+class BattleHex;
+class BattleHexArray;
 class CBattleInfoCallback;
-class JsonSerializeFormat;
 class ServerCallback;
 
 namespace vstd
@@ -24,50 +29,90 @@ namespace vstd
 
 namespace spells
 {
-using EffectTarget = Target;
 
 namespace effects
 {
-using RNG = ::vstd::RNG;
+using RNG = vstd::RNG;
 class Effects;
 class Effect;
-class Registry;
 
-template<typename F>
-class RegisterEffect;
+using TargetType = spells::AimType;
 
-using TargetType = ::spells::AimType;
+struct SpellEffectValue : public scripting::ApiSerializable<SpellEffectValue>
+{
+	int64_t hpDelta = 0; // positive -> healed health points, negative -> damage
+	int64_t unitsDelta = 0; // positive -> resurrected / summoned (demons) / animated (undeads), negative -> kills
+	const Creature * unitType = nullptr; // type of creatures summoned / resurrected / animated / etc.
 
-class DLL_LINKAGE Effect
+	SpellEffectValue & operator+=(const SpellEffectValue & rhs) noexcept
+	{
+		hpDelta += rhs.hpDelta;
+		unitsDelta += rhs.unitsDelta;
+		if(unitType == nullptr)
+			unitType = rhs.unitType;
+
+		return *this;
+	}
+
+	template<typename Serializer>
+	void serializeScript(Serializer & s)
+	{
+		s("hpDelta",    hpDelta,    "Signed change in unit health (negative for damage, positive for healing).");
+		s("unitsDelta", unitsDelta, "Signed change in stack count (creatures killed or resurrected).");
+		s("unitType",   unitType,   "Creature type associated with the effect, if any.");
+	}
+};
+
+/// Description of the choice of one destination of a spell target, made by an effect
+struct EffectTargetStep : TargetStepDescription
+{
+	std::string healthGainTextID; ///< if not empty, the health change of the spell is appended to the text, a health gain with the plural forms of this text id
+};
+
+class Effect
 {
 public:
-	bool indirect;
-	bool optional;
+	bool indirect = false;
+	bool optional = false;
 
 	std::string name;
+	std::string spellScope;
+	std::string spellIdentifier;
 
-	Effect();
-	virtual ~Effect();
+	virtual ~Effect() = default; //Required for child classes
 
-	virtual void adjustTargetTypes(std::vector<TargetType> & types) const = 0;
+	// TODO: document me
+	virtual void adjustTargetTypes(std::vector<TargetType> & types, const Mechanics * m) const {};
 
-	virtual void adjustAffectedHexes(std::set<BattleHex> & hexes, const Mechanics * m, const Target & spellTarget) const = 0;
+	/// Generates list of hexes affected by spell, if spell were to cast at specified target
+	virtual void adjustAffectedHexes(BattleHexArray & hexes, const Mechanics * m, const Target & spellTarget) const = 0;
 
-	virtual bool applicable(Problem & problem, const Mechanics * m) const;
-	virtual bool applicable(Problem & problem, const Mechanics * m, const EffectTarget & target) const;
+	/// Returns whether effect has any valid targets on the battlefield
+	virtual bool applicableGeneral(Problem & problem, const Mechanics * m) const;
 
-	virtual void apply(ServerCallback * server, const Mechanics * m, const EffectTarget & target) const = 0;
+	/// Returns whether effect is valid and can be applied onto selected target
+	virtual bool applicableTarget(Problem & problem, const Mechanics * m, const Target & target) const;
 
-	virtual EffectTarget filterTarget(const Mechanics * m, const EffectTarget & target) const = 0;
+	virtual void apply(ServerCallback * server, const Mechanics * m, const Target & target) const = 0;
 
-	virtual EffectTarget transformTarget(const Mechanics * m, const Target & aimPoint, const Target & spellTarget) const = 0;
+	/// Processes input target and generates subset-result that contains only valid targets
+	virtual Target filterTarget(const Mechanics * m, const Target & target) const = 0;
 
-	void serializeJson(JsonSerializeFormat & handler);
+	// TODO: document me
+	virtual Target transformTarget(const Mechanics * m, const Target & aimPoint, const Target & spellTarget) const = 0;
 
-	static std::shared_ptr<Effect> create(const Registry * registry, const std::string & type);
+	// Returns total damage or heal amount that this spell will result in when cast on unit
+	virtual SpellEffectValue getHealthChange(const Mechanics * m, const Target & spellTarget) const { return {};}
+
+	/// Describes the choice of the destination that follows the chosen ones, or returns nothing to leave it to the description of Mechanics
+	virtual std::optional<EffectTargetStep> describeTargetStep(const Mechanics * m, const Target & partialTarget, const BattleHex & hoveredHex) const { return std::nullopt; }
+
+	/// Initializes Effect from its (already preprocessed) JSON definition.
+	/// Reads common flags from the node and delegates the rest to initImpl.
+	void init(JsonNode data);
 
 protected:
-	virtual void serializeJsonEffect(JsonSerializeFormat & handler) = 0;
+	virtual void initImpl(JsonNode data) = 0;
 };
 
 }

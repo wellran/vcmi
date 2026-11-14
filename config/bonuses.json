@@ -1,362 +1,368 @@
-//TODO: selector-based config
-// SECONDARY_SKILL_PREMY
-// school immunities
-// LEVEL_SPELL_IMMUNITY
-
 {
+	"ARTIFACT_GROWING":
+	{
+		"blockDescriptionPropagation": true
+	},
+	
+	"ARTIFACT_CHARGE":
+	{
+		"blockDescriptionPropagation": true
+	},
+	
 	"ADDITIONAL_ATTACK":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_DOUBLE"
-		}
 	},
 
 	"ADDITIONAL_RETALIATION":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_RETAIL1"
-		}
 	},
 
-	"AIR_IMMUNITY":
+	"ADJACENT_SPELLCASTER":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_SPAIR1"
-		}
 	},
 
 	"ATTACKS_ALL_ADJACENT":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_ROUND"
-		}
+	},
+
+	"ALWAYS_MAXIMUM_DAMAGE":
+	{
+	},
+
+	"BASE_TILE_MOVEMENT_COST":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"BATTLE_CAN_FLEE":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"BATTLE_CAN_SURRENDER":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"BEFORE_BATTLE_REPOSITION":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"BEFORE_BATTLE_REPOSITION_BLOCK":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"BIND_EFFECT":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"BLOCKS_RANGED_RETALIATION":
+	{
 	},
 
 	"BLOCKS_RETALIATION":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_RETAIL"
-		}
 	},
 
 	"CATAPULT":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/Catapult"
-		}
 	},
 	
 	"CATAPULT_EXTRA_SHOTS":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/Catapult"
-		}
+		"hidden": true
 	},
 
 	"CHANGES_SPELL_COST_FOR_ALLY":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_MANA"
-		}
 	},
 
 	"CHANGES_SPELL_COST_FOR_ENEMY":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/MagicDamper"
-		}
 	},
 
 	"CHARGE_IMMUNITY":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/ChargeImmune"
-		}
+	},
+	
+	"COMBAT_MANA_BONUS":
+	{
+		"blockDescriptionPropagation": true
 	},
 
-	"DAEMON_SUMMONING":
+	"CPU_CONTROLLED":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/RiseDemons"
-		}
+
+	},
+
+	"CREATURE_GROWTH":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"CREATURE_GROWTH_PERCENT":
+	{
+		"blockDescriptionPropagation": true
 	},
 
 	"DARKNESS":
 	{
+		"hidden": true
 	},
-
-	"DEATH_STARE":
+	
+	"DISGUISED":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_DEATH"
-		}
+		"hidden": true,
+		"blockDescriptionPropagation": true
 	},
 
 	"DEFENSIVE_STANCE":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_DEFBON"
-		}
 	},
 
 	"DOUBLE_DAMAGE_CHANCE":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_DBLOW"
-		}
 	},
 
 	"DRAGON_NATURE":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_DRAGON"
-		}
-	},
-
-	"DIRECT_DAMAGE_IMMUNITY":
-	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_SPDIR"
-		}
-	},
-
-	"DISGUISED":
-	{
-		"hidden": true
-	},
-
-	"EARTH_IMMUNITY":
-	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_SPEATH1"
-		}
 	},
 
 	"ENCHANTER":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_CAST1"
-		}
 	},
 
-	"ENCHANTED":
+	"ENEMY_ATTACK_REDUCTION":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_BLESS"
-		}
 	},
 
 	"ENEMY_DEFENCE_REDUCTION":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_RDEF"
-		}
-	},
-
-	"FIRE_IMMUNITY":
-	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_SPFIRE1"
-		}
-	},
-
-	"FIRE_SHIELD":
-	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/FireShield"
-		}
 	},
 	
-	"FEAR":
+	"FEARFUL":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_FEAR"
+	},
+
+	"FIRST_STRIKE":
+	{
+		"subtypeDescriptions" : {
+			"bonusSubtype.damageTypeRanged" : null,
+			"bonusSubtype.damageTypeMelee" : null,
 		}
 	},
 
-	"FEARLESS":
+	"FEROCITY":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_FEARL"
-		}
 	},
 
 	"FLYING":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_FLY"
+		"subtypeDescriptions" : {
+			"bonusSubtype.movementTeleporting" : null,
 		}
+	},
+	
+	"FLYING_MOVEMENT":
+	{
+		"blockDescriptionPropagation": true
+	},
 
+	"FREE_SHIP_BOARDING":
+	{
+		"blockDescriptionPropagation": true
 	},
 
 	"FREE_SHOOTING":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_SHOOTA"
+		"subtypeDescriptions" : {
+			"bonusSubtype.freeShootingNoPenalty" : null,
+			"bonusSubtype.freeShootingExceptAdjacent" : null,
 		}
-
+	},
+	
+	"FULL_MAP_DARKNESS":
+	{
+		"blockDescriptionPropagation": true
 	},
 
-	"FULL_HP_REGENERATION":
+	"FULL_MAP_SCOUTING":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_TROLL"
-		}
+		"blockDescriptionPropagation": true
 	},
 
 	"GARGOYLE":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/NonLiving"	// Just use the NonLiving icon for now
-		}
+		"creatureNature" : true,
 	},
 
 	"GENERAL_DAMAGE_REDUCTION":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/DamageReductionMelee"
+		"subtypeDescriptions" : {
+			"bonusSubtype.damageTypeRanged" : null,
+			"bonusSubtype.damageTypeMelee" : null,
 		}
+	},
+
+	"DAMAGE_RECEIVED_CAP":
+	{
+	},
+
+	"GENERATE_RESOURCE":
+	{
+		"blockDescriptionPropagation": true
 	},
 
 	"HATE":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_HATE"
-		}
 	},
 
 	"HEALER":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/Healer"
-		}
 	},
 
 	"HP_REGENERATION":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_TROLL"
-		}
+	},
+	
+	"HERO_EXPERIENCE_GAIN_PERCENT":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"HERO_SPELL_CASTS_PER_COMBAT_TURN":
+	{
+		"blockDescriptionPropagation": true
+	},
+	
+	"IMPROVED_NECROMANCY":
+	{
+		"blockDescriptionPropagation": true
 	},
 	
 	"JOUSTING":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_CHAMP"
+	},
+
+	"KING":
+	{
+		"valueDescriptions" : {
+			"2" : null,
+			"3" : null
 		}
 	},
 
-	"KING1":
+	"LEARN_BATTLE_SPELL_CHANCE":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_KING1"
-		}
+		"hidden": true,
+		"blockDescriptionPropagation": true
 	},
 
-	"KING2":
+	"LEARN_BATTLE_SPELL_CHANCE_PRE_BATTLE":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_KING2"
-		}
+		"hidden": true,
+		"blockDescriptionPropagation": true
 	},
 
-	"KING3":
+	"LEARN_BATTLE_SPELL_LEVEL_LIMIT":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_KING3"
-		}
+		"hidden": true,
+		"blockDescriptionPropagation": true
+	},
+
+	"LEARN_BATTLE_SPELL_LEVEL_LIMIT_PRE_BATTLE":
+	{
+		"hidden": true,
+		"blockDescriptionPropagation": true
+	},
+	
+	"LEARN_MEETING_SPELL_LIMIT":
+	{
+		"blockDescriptionPropagation": true
 	},
 
 	"LEVEL_SPELL_IMMUNITY":
 	{
-		"graphics":
-		{
-			"icon":  ""
-		}
 	},
 
-	"LIFE_DRAIN":
+	"LIMITED_SHOOTING_RANGE":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/DrainLife"
-		}
+	},
+	
+	"LIVING":
+	{
+		"creatureNature" : true
+	},
+	
+	"LUCK":
+	{
+		"blockDescriptionPropagation": true
 	},
 
 	"MANA_CHANNELING":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/ManaChannel"
-		}
 	},
 	
 	"MANA_DRAIN":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/ManaDrain"
-		}
 	},
 
 	"MAGIC_MIRROR":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/MagicMirror"
-		}
 	},
 
 	"MAGIC_RESISTANCE":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_DWARF"
-		}
+	},
+	
+	"MAGIC_SCHOOL_SKILL":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"MANA_PERCENTAGE_REGENERATION":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"MANA_PER_KNOWLEDGE_PERCENTAGE":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"MAX_LEARNABLE_SPELL_LEVEL":
+	{
+		"blockDescriptionPropagation": true
+	},
+	
+	"MECHANICAL":
+	{
+		"creatureNature" : true
 	},
 
 	"MIND_IMMUNITY":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_MIND"
-		}
+	},
+	
+	"MORALE":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"MORE_DAMAGE_FROM_SPELL":
+	{
+	},
+
+	"MOVEMENT":
+	{
+		"blockDescriptionPropagation": true
+	},
+	
+	"NEGATIVE_EFFECTS_IMMUNITY" :
+	{
 	},
 
 	"NONE":
@@ -366,226 +372,319 @@
 
 	"NO_DISTANCE_PENALTY":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_DIST"
-		}
 	},
 	
 	"NO_MELEE_PENALTY":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_MELEE"
-		}
 	},
 
 	"NO_MORALE":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_MORAL"
-		}
 	},
 	
 	"NO_WALL_PENALTY":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_OBST"
-		}
 	},
 
 	"NO_TERRAIN_PENALTY":
 	{
-		"hidden": true
+		"hidden": true,
+		"blockDescriptionPropagation": true
 	},
 
 	"NON_LIVING":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/NonLiving"
-		}
+		"creatureNature" : true
+	},
+
+	"OPENING_BATTLE_SPELL":
+	{
 	},
 
 	"RANDOM_SPELLCASTER":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/RandomBoost"
-		}
+	},
+
+	"PERCENTAGE_DAMAGE_BOOST":
+	{
+		"hidden": true
+	},
+
+	"RANGED_RETALIATION":
+	{
 	},
 
 	"RECEPTIVE":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_NOFRIM"
-		}
 	},
 	
-	"REBIRTH":
+	"PRIMARY_SKILL":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_REBIRTH"
-		}
+		"blockDescriptionPropagation": true
+	},
+	
+	"REBIRTH_SPENT":
+	{
+		"hidden": true
+	},
+	
+	"RESOURCES_CONSTANT_BOOST":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"RESOURCES_TOWN_MULTIPLYING_BOOST":
+	{
+		"blockDescriptionPropagation": true
 	},
 
 	"RETURN_AFTER_STRIKE":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_HARPY"
-		}
 	},
 
-	"SECONDARY_SKILL_PREMY":
+	"REVENGE":
 	{
-		"hidden": true
-		//todo: selector based config
+	},
+	
+	"ROUGH_TERRAIN_DISCOUNT":
+	{
+		"blockDescriptionPropagation": true
 	},
 
-	"SELF_LUCK":
+	"SIEGE_WEAPON":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/SelfLuck"
-		}
+		"creatureNature" : true
 	},
-
-	"SELF_MORALE":
+	
+	"SKELETON_TRANSFORMER_TARGET":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_MINOT"
-		}
 	},
 
 	"SHOOTER":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_SHOOT"
-		}
 	},
-	
-	"SOUL_STEAL":
+
+	"SHOOTS_ALL_ADJACENT":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_SUMMON2"
-		}
 	},
 	
+	"SIGHT_RADIUS":
+	{
+		"blockDescriptionPropagation": true
+	},
+
 	"SPELLCASTER":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_CASTER"
-		}
 	},
 
 	"SPELL_AFTER_ATTACK":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_CAST"
-		}
 	},
 
 	"SPELL_BEFORE_ATTACK":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_CAST2"
-		}
 	},
 
 	"SPELL_DAMAGE_REDUCTION":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_GOLEM"
+		"subtypeDescriptions" : {
+			"spellSchool.air" : null,
+			"spellSchool.earth" : null,
+			"spellSchool.fire" : null,
+			"spellSchool.water" : null,
 		}
 	},
 
 	"SPELL_IMMUNITY":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_SPDISB" //todo: configurable use from spell handler
-		}
 	},
 
 	"SPELL_LIKE_ATTACK":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_SPDFIRE"
+	},
+
+	"SPELL_SCHOOL_IMMUNITY":
+	{
+		"subtypeDescriptions" : {
+			"spellSchool.air" : null,
+			"spellSchool.earth" : null,
+			"spellSchool.fire" : null,
+			"spellSchool.water" : null,
 		}
 	},
 
 	"SPELL_RESISTANCE_AURA":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_UNIC"
-		}
+	},
+
+	"SURRENDER_DISCOUNT":
+	{
+		"blockDescriptionPropagation": true
 	},
 
 	"TWO_HEX_ATTACK_BREATH":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_BREATH"
-		}
+	},
+
+	"LONG_WEAPON":
+	{
+	},
+
+	"PRISM_HEX_ATTACK_BREATH":
+	{
 	},
 
 	"THREE_HEADED_ATTACK":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/ThreeHeaded"
-		}
+	},
+
+	"TRANSMUTATION_IMMUNITY":
+	{
 	},
 	
-	"TRANSMUTATION":
+	"THIEVES_GUILD_ACCESS":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_SGTYPE"
-		}
+		"blockDescriptionPropagation": true
+	},
+	
+	"MARKETPLACE_ACCESS":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"SURRENDER_MARKETPLACE_ACCESS":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"DIPLOMACY_ARMY_STRENGTH_MULTIPLIER":
+	{
+		"blockDescriptionPropagation": true
+	},
+
+	"DEITYOFFIRE":
+	{
+		"blockDescriptionPropagation": true
 	},
 
 	"UNDEAD":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_UNDEAD"
-		}
+		"creatureNature" : true,
+	},
+	
+	"UNDEAD_RAISE_PERCENTAGE":
+	{
+		"blockDescriptionPropagation": true
 	},
 	
 	"UNLIMITED_RETALIATIONS":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_RETAIL1"
-		}
 	},
 
 	"VISIONS":
 	{
-		"hidden": true
+		"hidden": true,
+		"blockDescriptionPropagation": true
 	},
 	
-	"WATER_IMMUNITY":
+	"VULNERABLE_FROM_BACK":
 	{
-		"graphics":
-		{
-			"icon":  "zvs/Lib1.res/E_SPWATER1"
-		}
-	}
-}
+	},
+	
+	"WANDERING_CREATURES_JOIN_BONUS":
+	{
+		"blockDescriptionPropagation": true
+	},
+	
+	"WATER_WALKING":
+	{
+		"blockDescriptionPropagation": true
+	},
+	
+	"WIDE_BREATH":
+	{
+	},
 
+	"DISINTEGRATE":
+	{
+	},
+
+	"INVINCIBLE":
+	{
+	},
+	
+	"FORCE_NEUTRAL_ENCOUNTER_STACK_COUNT":
+	{
+		"hidden": true,
+		"blockDescriptionPropagation": true
+	},
+
+	"SPECIAL_PECULIAR_ENCHANT":
+	{
+	},
+
+	"SPECIAL_ADD_VALUE_ENCHANT":
+	{
+	},
+
+	"SPECIAL_FIXED_VALUE_ENCHANT":
+	{
+	},
+
+	"ALIGNMENT_MIX" : {},
+	"ALWAYS_MINIMUM_DAMAGE" : {},
+	"ATTACKS_NEAREST_CREATURE" : {},
+	"BLOCK_ALL_MAGIC" : {},
+	"BLOCK_CREATURE_MAGIC" : {},
+	"BLOCK_MAGIC_ABOVE" : {},
+	"BLOCK_MAGIC_BELOW" : {},
+	"BONUS_DAMAGE_CHANCE" : {},
+	"BONUS_DAMAGE_PERCENTAGE" : {},
+	"CASTS" : {},
+	"CREATURE_DAMAGE" : {},
+	"CREATURE_ENCHANT_POWER" : {},
+	"CREATURE_SPELL_POWER" : {},
+	"FORGETFULL" : {},
+	"GENERAL_ATTACK_REDUCTION" : {},
+	"GENERAL_DAMAGE_PREMY" : {},
+	"HATES_TRAIT" : {},
+	"HYPNOTIZED" : {},
+	"IN_FRENZY" : {},
+	"MANA_REGENERATION" : {},
+	"MANUAL_CONTROL" : {},
+	"MAX_LUCK" : {},
+	"MAX_MORALE" : {},
+	"MULTIHEX_ANIMATION" : {},
+	"MULTIHEX_ENEMY_ATTACK" : {},
+	"MULTIHEX_UNIT_ATTACK" : {},
+	"NEGATE_ALL_NATURAL_IMMUNITIES" : {},
+	"NO_LUCK" : {},
+	"NO_RETALIATION" : {},
+	"NO_SPELLCAST_BY_DEFAULT" : {},
+	"NONEVIL_ALIGNMENT_MIX" : {},
+	"NOT_ACTIVE" : {},
+	"ON_COMBAT_EVENT" : {},
+	"POISON" : {},
+	"SHOTS" : {},
+	"SLAYER" : {},
+	"SPECIAL_CRYSTAL_GENERATION" : {},
+	"SPECIAL_SPELL_LEV" : {},
+	"SPECIAL_SPELL_SCALING" : {},
+	"SPECIAL_UPGRADE" : {},
+	"SPECIFIC_SPELL_DAMAGE" : {},
+	"SPECIFIC_SPELL_POWER" : {},
+	"SPECIFIC_SPELL_RANGE" : {},
+	"SPELL" : {},
+	"SPELL_CAST_COUNTER" : {},
+	"SPELL_DAMAGE" : {},
+	"SPELL_DURATION" : {},
+	"SPELLS_OF_LEVEL" : {},
+	"SPELLS_OF_SCHOOL" : {},
+	"STACK_EXPERIENCE_GAIN_PERCENT" : {},
+	"STACK_HEALTH" : {},
+	"STACKS_SPEED" : {},
+	"TERRAIN_NATIVE" : {},
+	"UNIT_DEFENDING" : {},
+	"UNLIMITED_MOVEMENT" : {},
+	"WHIRLPOOL_PROTECTION" : {}
+}

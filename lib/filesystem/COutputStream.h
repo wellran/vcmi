@@ -14,14 +14,9 @@
 /**
  * Abstract class which provides method definitions for writing into a stream.
  */
-class DLL_LINKAGE COutputStream : public virtual CStream
+class COutputStream : public virtual CStream
 {
 public:
-	/**
-	 * D-tor.
-	 */
-	virtual ~COutputStream() {}
-
 	/**
 	 * Write n bytes from the stream into the data buffer.
 	 *

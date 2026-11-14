@@ -13,9 +13,16 @@
 
 struct z_stream_s;
 
+class DecompressionException : public std::runtime_error
+{
+public:
+	using runtime_error::runtime_error;
+	~DecompressionException() override;
+};
+
 /// Abstract class that provides buffer for one-directional input streams (e.g. compressed data)
 /// Used for zip archives support and in .lod deflate compression
-class CBufferedStream : public CInputStream
+class DLL_LINKAGE CBufferedStream : public CInputStream
 {
 public:
 	CBufferedStream();
@@ -63,6 +70,8 @@ public:
 	 */
 	si64 getSize() override;
 
+	std::pair<std::unique_ptr<ui8[]>, si64> readAll() override;
+
 protected:
 	/**
 	 * @brief virtual method to get more data into the buffer
@@ -95,8 +104,8 @@ public:
 	/**
 	 * C-tor.
 	 *
-	 * @param stream - stream with compresed data
-	 * @param gzip - this is gzipp'ed file e.g. campaign or maps, false for files in lod
+	 * @param stream - stream with compressed data
+	 * @param gzip - this is gzipp'ed file e.g. campaign or maps, false for files in .lod
 	 * @param decompressedSize - optional parameter to hint size of decompressed data
 	 */
 	CCompressedStream(std::unique_ptr<CInputStream> stream, bool gzip, size_t decompressedSize=0);
@@ -124,11 +133,11 @@ private:
 	std::vector<ui8> compressedBuffer;
 
 	/** struct with current zlib inflate state */
-	z_stream_s * inflateState;
+	std::unique_ptr<z_stream_s> inflateState;
 
 	enum EState
 	{
-		ERROR_OCCURED,
+		ERROR_OCCURRED,
 		INITIALIZED,
 		IN_PROGRESS,
 		STREAM_END,

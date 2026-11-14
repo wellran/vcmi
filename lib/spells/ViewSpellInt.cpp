@@ -11,17 +11,10 @@
 #include "StdInc.h"
 
 #include "ViewSpellInt.h"
-
-#include "../mapObjects/CObjectHandler.h"
-
-ObjectPosInfo::ObjectPosInfo():
-	pos(), id(Obj::NO_OBJ), subId(-1), owner(PlayerColor::CANNOT_DETERMINE)
-{
-
-}
+#include "../mapObjects/CGObjectInstance.h"
 
 ObjectPosInfo::ObjectPosInfo(const CGObjectInstance * obj):
-	pos(obj->visitablePos()), id(obj->ID), subId(obj->subID), owner(obj->tempOwner)
+	pos(obj->visitablePos()), id(obj->ID), subId(obj->getObjTypeIndex()), owner(obj->tempOwner)
 {
 
 }

@@ -10,7 +10,9 @@
 
 #pragma once
 
-struct MetaString;
+#include "vcmi/scripting/ApiTags.h"
+
+class MetaString;
 
 namespace battle
 {
@@ -24,7 +26,7 @@ class Caster;
 class Spell;
 class Mechanics;
 class BattleCast;
-using Destination = ::battle::Destination;
+using Destination = battle::Destination;
 
 using Target = std::vector<Destination>;
 
@@ -41,16 +43,16 @@ enum class Mode
 
 enum class AimType
 {
-	NO_TARGET,
+	NOTHING,
 	CREATURE,
 	OBSTACLE,
 	LOCATION
 };
 
-class DLL_LINKAGE Problem
+class DLL_LINKAGE Problem : public scripting::ApiRawPointer<Problem>
 {
 public:
-	typedef int Severity;
+	using Severity = int;
 
 	enum ESeverity
 	{

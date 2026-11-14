@@ -9,99 +9,148 @@
  */
 #pragma once
 
-#include "../lib/serializer/Connection.h"
-#include "../lib/StartInfo.h"
+#include "IGameServer.h"
 
-#include <boost/program_options.hpp>
+#include "../lib/network/NetworkInterface.h"
+#include "../lib/networkPacks/PacksForLobby.h"
+#include "../lib/StartInfo.h"
 
 class CMapInfo;
 
 struct CPackForLobby;
-class CGameHandler;
-struct SharedMemory;
 
+class GameConnection;
 struct StartInfo;
 struct LobbyInfo;
 struct PlayerSettings;
 class PlayerColor;
+class MetaString;
 
-template<typename T> class CApplier;
+class CGameHandler;
 class CBaseForServerApply;
 class CBaseForGHApply;
+class GlobalLobbyProcessor;
 
-enum class EServerState : ui8
+class CVCMIServer : public LobbyInfo, public INetworkServerListener, public INetworkTimerListener, public IServerDiscoveryAnnouncer, public IGameServer
 {
-	LOBBY,
-	GAMEPLAY_STARTING,
-	GAMEPLAY,
-	GAMEPLAY_ENDED,
-	SHUTDOWN
-};
+	std::chrono::steady_clock::time_point gameplayStartTime;
+	std::chrono::steady_clock::time_point lastTimerUpdateTime;
 
-class CVCMIServer : public LobbyInfo
-{
-	std::atomic<bool> restartGameplay; // FIXME: this is just a hack
-	std::shared_ptr<boost::asio::io_service> io;
-	std::shared_ptr<TAcceptor> acceptor;
-	std::shared_ptr<TSocket> upcomingConnection;
-	std::list<std::unique_ptr<CPackForLobby>> announceQueue;
-	boost::recursive_mutex mx;
-	std::shared_ptr<CApplier<CBaseForServerApply>> applier;
-	std::unique_ptr<boost::thread> announceLobbyThread;
+	std::unique_ptr<INetworkHandler> networkHandler;
+	/// Network server instance that receives and processes incoming connections on active socket
+	std::unique_ptr<INetworkServer> networkServer;
 
+	/// Handles connection with global lobby. Must be constructed and destroyed after network handler
+	std::unique_ptr<GlobalLobbyProcessor> lobbyProcessor;
+
+	EServerState state = EServerState::LOBBY;
+
+	std::shared_ptr<GameConnection> findConnection(const std::shared_ptr<INetworkConnection> &);
+
+	GameConnectionID currentClientId;
+	PlayerConnectionID currentPlayerId;
+	uint16_t port;
+	bool runByClient;
+
+	std::shared_ptr<IServerDiscoveryListener> discoveryListener;
+
+	/// Map info last sent to clients in LobbyUpdateMapInfo
+	std::shared_ptr<CMapInfo> announcedMapInfo;
+
+	bool loadSavedGame(CGameHandler & handler, const StartInfo & info);
 public:
+	uint16_t getPort() const override
+	{
+		return port;
+	}
+
+	bool isInLobby() const override;
+
+	// IGameServer impl
+	void setState(EServerState value) override;
+	EServerState getState() const override;
+	bool isPlayerHost(const PlayerColor & color) const override;
+	bool hasPlayerAt(PlayerColor player, GameConnectionID connectionID) const override;
+	bool hasBothPlayersAtSameConnection(PlayerColor left, PlayerColor right) const override;
+	void applyPack(CPackForClient & pack) override;
+	void sendPack(CPackForClient & pack, GameConnectionID connectionID) override;
+
+	/// List of all active connections
+	std::vector<std::shared_ptr<GameConnection>> activeConnections;
+
+	/// Last list requested by the host, sent again after files are deleted
+	std::optional<LobbyRequestScenarioList> lastScenarioListRequest;
+
+	/// Heroes and battlefield of battle-only mode, last sent by a client
+	std::shared_ptr<BattleOnlyModeStartInfo> battleOnlyModeStartInfo;
+
+	uint16_t prepare(bool connectToLobby, bool listenForConnections);
+
+	// INetworkListener impl
+	void onDisconnected(const std::shared_ptr<INetworkConnection> & connection, const std::string & errorMessage) override;
+	void onPacketReceived(const std::shared_ptr<INetworkConnection> & connection, const std::vector<std::byte> & message) override;
+	void onNewConnection(const std::shared_ptr<INetworkConnection> &) override;
+	void onTimer() override;
+
 	std::shared_ptr<CGameHandler> gh;
-	std::atomic<EServerState> state;
-	ui16 port;
 
-	boost::program_options::variables_map cmdLineOptions;
-	std::set<std::shared_ptr<CConnection>> connections;
-	std::atomic<int> currentClientId;
-	std::atomic<ui8> currentPlayerId;
-	std::shared_ptr<CConnection> hostClient;
-
-	CVCMIServer(boost::program_options::variables_map & opts);
+	CVCMIServer(uint16_t port, bool runByClient);
 	~CVCMIServer();
+
 	void run();
-	void prepareToStartGame();
-	void startGameImmidiately();
 
-	void startAsyncAccept();
-	void connectionAccepted(const boost::system::error_code & ec);
-	void threadHandleClient(std::shared_ptr<CConnection> c);
-	void threadAnnounceLobby();
-	void handleReceivedPack(std::unique_ptr<CPackForLobby> pack);
+	bool wasStartedByClient() const;
+	bool prepareToStartGame();
+	void prepareToRestart();
+	void startGameImmediately();
+	uint16_t startAcceptingIncomingConnections(bool listenForConnections);
 
-	void announcePack(std::unique_ptr<CPackForLobby> pack);
-	bool passHost(int toConnectionId);
+	void threadHandleClient(std::shared_ptr<GameConnection> c);
 
-	void announceTxt(const std::string & txt, const std::string & playerName = "system");
-	void addToAnnounceQueue(std::unique_ptr<CPackForLobby> pack);
+	void announcePack(CPackForLobby & pack);
 
-	void setPlayerConnectedId(PlayerSettings & pset, ui8 player) const;
+	void announceTxt(const MetaString & txt, const std::string & playerName = "System");
+	void announceTxt(const std::string & txt, const std::string & playerName = "System");
+
+	void setPlayerConnectedId(PlayerSettings & pset, PlayerConnectionID player) const;
 	void updateStartInfoOnMapChange(std::shared_ptr<CMapInfo> mapInfo, std::shared_ptr<CMapGenOptions> mapGenOpt = {});
 
-	void clientConnected(std::shared_ptr<CConnection> c, std::vector<std::string> & names, std::string uuid, StartInfo::EMode mode);
-	void clientDisconnected(std::shared_ptr<CConnection> c);
+	void clientConnected(std::shared_ptr<GameConnection> c, const std::vector<std::string> & names, const std::string & uuid, EStartMode mode);
+	void clientDisconnected(std::shared_ptr<GameConnection> c);
+
+	void announceMessage(const MetaString & txt);
+	void announceMessage(const std::string & txt);
+
+	void handleReceivedPack(std::shared_ptr<GameConnection> connection, CPackForLobby & pack);
 
 	void updateAndPropagateLobbyState();
 
+	INetworkHandler & getNetworkHandler();
+	INetworkServer & getNetworkServer();
+
 	// Work with LobbyInfo
 	void setPlayer(PlayerColor clickedColor);
+	void setPlayerName(PlayerColor player, const std::string & name);
+	void setPlayerHandicap(PlayerColor player, Handicap handicap);
 	void optionNextHero(PlayerColor player, int dir); //dir == -1 or +1
-	int nextAllowedHero(PlayerColor player, int min, int max, int incl, int dir);
-	bool canUseThisHero(PlayerColor player, int ID);
-	std::vector<int> getUsedHeroes();
+	void optionSetHero(PlayerColor player, HeroTypeID id);
+	HeroTypeID nextAllowedHero(PlayerColor player, HeroTypeID id, int direction);
+	bool canUseThisHero(PlayerColor player, HeroTypeID ID);
+	std::vector<HeroTypeID> getUsedHeroes();
 	void optionNextBonus(PlayerColor player, int dir); //dir == -1 or +1
+	void optionSetBonus(PlayerColor player, PlayerStartingBonus id);
 	void optionNextCastle(PlayerColor player, int dir); //dir == -1 or +
+	void optionSetCastle(PlayerColor player, FactionID id);
 
 	// Campaigns
-	void setCampaignMap(int mapId);
+	/// Selects campaign and its first available scenario, or its current scenario if it can still be played
+	void setCampaign(std::shared_ptr<CampaignState> campaign);
+	void setCampaignMap(CampaignScenarioID mapId);
 	void setCampaignBonus(int bonusId);
 
-	ui8 getIdOfFirstUnallocatedPlayer() const;
+	PlayerConnectionID getIdOfFirstUnallocatedPlayer() const;
 
-#ifdef VCMI_ANDROID
-	static void create();
-#endif
+	void multiplayerWelcomeMessage();
+	void startDiscoveryListener();
+	void stopDiscoveryListener();
 };

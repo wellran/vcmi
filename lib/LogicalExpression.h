@@ -9,8 +9,7 @@
  */
 #pragma once
 
-//FIXME: move some of code into .cpp to avoid this include?
-#include "JsonNode.h"
+#include "json/JsonNode.h"
 
 namespace LogicalExpressionDetail
 {
@@ -19,7 +18,7 @@ namespace LogicalExpressionDetail
 	class ExpressionBase
 	{
 	public:
-		/// Possible logical operations, mostly needed to create different types for boost::variant
+		/// Possible logical operations, mostly needed to create different types for std::variant
 		enum EOperations
 		{
 			ANY_OF,
@@ -28,19 +27,14 @@ namespace LogicalExpressionDetail
 		};
 		template<EOperations tag> class Element;
 
-		typedef Element<ANY_OF> OperatorAny;
-		typedef Element<ALL_OF> OperatorAll;
-		typedef Element<NONE_OF> OperatorNone;
+		using OperatorAny = Element<ANY_OF>;
+		using OperatorAll = Element<ALL_OF>;
+		using OperatorNone = Element<NONE_OF>;
 
-		typedef ContainedClass Value;
+		using Value = ContainedClass;
 
 		/// Variant that contains all possible elements from logical expression
-		typedef boost::variant<
-			OperatorAll,
-			OperatorAny,
-			OperatorNone,
-			Value
-			> Variant;
+		using Variant = std::variant<OperatorAll, OperatorAny, OperatorNone, Value>;
 
 		/// Variant element, contains list of expressions to which operation "tag" should be applied
 		template<EOperations tag>
@@ -60,7 +54,7 @@ namespace LogicalExpressionDetail
 			}
 
 			template <typename Handler>
-			void serialize(Handler & h, const int version)
+			void serialize(Handler & h)
 			{
 				h & expressions;
 			}
@@ -68,18 +62,18 @@ namespace LogicalExpressionDetail
 	};
 
 	/// Visitor to test result (true/false) of the expression
-	template <typename ContainedClass>
-	class TestVisitor : public boost::static_visitor<bool>
+	template<typename ContainedClass>
+	class TestVisitor
 	{
-		typedef ExpressionBase<ContainedClass> Base;
+		using Base = ExpressionBase<ContainedClass>;
 
 		std::function<bool(const typename Base::Value &)> classTest;
 
 		size_t countPassed(const std::vector<typename Base::Variant> & element) const
 		{
-			return boost::range::count_if(element, [&](const typename Base::Variant & expr)
+			return std::ranges::count_if(element, [&](const typename Base::Variant & expr)
 			{
-				return boost::apply_visitor(*this, expr);
+				return std::visit(*this, expr);
 			});
 		}
 	public:
@@ -114,10 +108,10 @@ namespace LogicalExpressionDetail
 	template <typename ContainedClass>
 	class FalsifiabilityVisitor;
 
-	template <typename ContainedClass>
-	class PossibilityVisitor : public boost::static_visitor<bool>
+	template<typename ContainedClass>
+	class PossibilityVisitor
 	{
-		typedef ExpressionBase<ContainedClass> Base;
+		using Base = ExpressionBase<ContainedClass>;
 
 	protected:
 		std::function<bool(const typename Base::Value &)> satisfiabilityTest;
@@ -127,17 +121,17 @@ namespace LogicalExpressionDetail
 
 		size_t countSatisfiable(const std::vector<typename Base::Variant> & element) const
 		{
-			return boost::range::count_if(element, [&](const typename Base::Variant & expr)
+			return std::ranges::count_if(element, [&](const typename Base::Variant & expr)
 			{
-				return boost::apply_visitor(*satisfiabilityVisitor, expr);
+				return std::visit(*satisfiabilityVisitor, expr);
 			});
 		}
 
 		size_t countFalsifiable(const std::vector<typename Base::Variant> & element) const
 		{
-			return boost::range::count_if(element, [&](const typename Base::Variant & expr)
+			return std::ranges::count_if(element, [&](const typename Base::Variant & expr)
 			{
-				return boost::apply_visitor(*falsifiabilityVisitor, expr);
+				return std::visit(*falsifiabilityVisitor, expr);
 			});
 		}
 
@@ -165,7 +159,7 @@ namespace LogicalExpressionDetail
 	template <typename ContainedClass>
 	class SatisfiabilityVisitor : public PossibilityVisitor<ContainedClass>
 	{
-		typedef ExpressionBase<ContainedClass> Base;
+		using Base = ExpressionBase<ContainedClass>;
 
 	public:
 		SatisfiabilityVisitor(std::function<bool (const typename Base::Value &)> satisfiabilityTest,
@@ -200,7 +194,7 @@ namespace LogicalExpressionDetail
 	template <typename ContainedClass>
 	class FalsifiabilityVisitor : public PossibilityVisitor<ContainedClass>
 	{
-		typedef ExpressionBase<ContainedClass> Base;
+		using Base = ExpressionBase<ContainedClass>;
 
 	public:
 		FalsifiabilityVisitor(std::function<bool (const typename Base::Value &)> satisfiabilityTest,
@@ -233,11 +227,11 @@ namespace LogicalExpressionDetail
 
 	/// visitor that is trying to generates candidates that must be fulfilled
 	/// to complete this expression
-	template <typename ContainedClass>
-	class CandidatesVisitor : public boost::static_visitor<std::vector<ContainedClass> >
+	template<typename ContainedClass>
+	class CandidatesVisitor
 	{
-		typedef ExpressionBase<ContainedClass> Base;
-		typedef std::vector<typename Base::Value> TValueList;
+		using Base = ExpressionBase<ContainedClass>;
+		using TValueList = std::vector<typename Base::Value>;
 
 		TestVisitor<ContainedClass> classTest;
 
@@ -252,7 +246,7 @@ namespace LogicalExpressionDetail
 			if (!classTest(element))
 			{
 				for (auto & elem : element.expressions)
-					boost::range::copy(boost::apply_visitor(*this, elem), std::back_inserter(ret));
+					std::ranges::copy(std::visit(*this, elem), std::back_inserter(ret));
 			}
 			return ret;
 		}
@@ -263,7 +257,7 @@ namespace LogicalExpressionDetail
 			if (!classTest(element))
 			{
 				for (auto & elem : element.expressions)
-					boost::range::copy(boost::apply_visitor(*this, elem), std::back_inserter(ret));
+					std::ranges::copy(std::visit(*this, elem), std::back_inserter(ret));
 			}
 			return ret;
 		}
@@ -283,10 +277,10 @@ namespace LogicalExpressionDetail
 	};
 
 	/// Simple foreach visitor
-	template <typename ContainedClass>
-	class ForEachVisitor : public boost::static_visitor<typename ExpressionBase<ContainedClass>::Variant>
+	template<typename ContainedClass>
+	class ForEachVisitor
 	{
-		typedef ExpressionBase<ContainedClass> Base;
+		using Base = ExpressionBase<ContainedClass>;
 
 		std::function<typename Base::Variant(const typename Base::Value &)> visitor;
 
@@ -301,19 +295,20 @@ namespace LogicalExpressionDetail
 		}
 
 		template <typename Type>
-		typename Base::Variant operator()(Type element) const
+		typename Base::Variant operator()(const Type & element) const
 		{
-			for (auto & entry : element.expressions)
-				entry = boost::apply_visitor(*this, entry);
-			return element;
+			Type result = element;
+			for (auto & entry : result.expressions)
+				entry = std::visit(*this, entry);
+			return result;
 		}
 	};
 
 	/// Minimizing visitor that removes all redundant elements from variant (e.g. AllOf inside another AllOf can be merged safely)
-	template <typename ContainedClass>
-	class MinimizingVisitor : public boost::static_visitor<typename ExpressionBase<ContainedClass>::Variant>
+	template<typename ContainedClass>
+	class MinimizingVisitor
 	{
-		typedef ExpressionBase<ContainedClass> Base;
+		using Base = ExpressionBase<ContainedClass>;
 
 	public:
 		typename Base::Variant operator()(const typename Base::Value & element) const
@@ -328,15 +323,15 @@ namespace LogicalExpressionDetail
 
 			for (auto & entryRO : element.expressions)
 			{
-				auto entry = boost::apply_visitor(*this, entryRO);
+				auto entry = std::visit(*this, entryRO);
 
 				try
 				{
 					// copy entries from child of this type
-					auto sublist = boost::get<Type>(entry).expressions;
+					auto sublist = std::get<Type>(entry).expressions;
 					std::move(sublist.begin(), sublist.end(), std::back_inserter(ret.expressions));
 				}
-				catch (boost::bad_get &)
+				catch (std::bad_variant_access &)
 				{
 					// different type (e.g. allOf vs oneOf) just copy
 					ret.expressions.push_back(entry);
@@ -358,7 +353,7 @@ namespace LogicalExpressionDetail
 	template <typename ContainedClass>
 	class Reader
 	{
-		typedef ExpressionBase<ContainedClass> Base;
+		using Base = ExpressionBase<ContainedClass>;
 
 		std::function<typename Base::Value(const JsonNode &)> classParser;
 
@@ -395,10 +390,10 @@ namespace LogicalExpressionDetail
 	};
 
 	/// Serializes expression in JSON format. Part of map format.
-	template <typename ContainedClass>
-	class Writer : public boost::static_visitor<JsonNode>
+	template<typename ContainedClass>
+	class Writer
 	{
-		typedef ExpressionBase<ContainedClass> Base;
+		using Base = ExpressionBase<ContainedClass>;
 
 		std::function<JsonNode(const typename Base::Value &)> classPrinter;
 
@@ -408,7 +403,7 @@ namespace LogicalExpressionDetail
 			ret.Vector().resize(1);
 			ret.Vector().back().String() = name;
 			for (auto & expr : element)
-				ret.Vector().push_back(boost::apply_visitor(*this, expr));
+				ret.Vector().push_back(std::visit(*this, expr));
 			return ret;
 		}
 	public:
@@ -437,17 +432,19 @@ namespace LogicalExpressionDetail
 		}
 	};
 
-	std::string DLL_LINKAGE getTextForOperator(std::string operation);
+	std::string DLL_LINKAGE getTextForOperator(const std::string & operation);
+	std::string DLL_LINKAGE getTextForSeparator(const std::string & separator);
 
 	/// Prints expression in human-readable format
-	template <typename ContainedClass>
-	class Printer : public boost::static_visitor<std::string>
+	template<typename ContainedClass>
+	class Printer
 	{
-		typedef ExpressionBase<ContainedClass> Base;
+		using Base = ExpressionBase<ContainedClass>;
 
 		std::function<std::string(const typename Base::Value &)> classPrinter;
 		std::unique_ptr<TestVisitor<ContainedClass>> statusTest;
-		mutable std::string prefix;
+		/// set while printing anything below the outermost expression
+		mutable bool nested = false;
 
 		template<typename Operator>
 		std::string formatString(std::string toFormat, const Operator & expr) const
@@ -458,13 +455,60 @@ namespace LogicalExpressionDetail
 			return toFormat;
 		}
 
-		std::string printExpressionList(const std::vector<typename Base::Variant> & element) const
+		/// true for a branch the player has already fulfilled, so it has nothing left to ask for
+		bool isRedundant(const typename Base::Value &) const
+		{
+			return false;
+		}
+
+		bool isRedundant(const typename Base::OperatorAll & element) const
+		{
+			return std::ranges::all_of(element.expressions, [this](const typename Base::Variant & entry){ return isRedundant(entry); });
+		}
+
+		bool isRedundant(const typename Base::OperatorAny & element) const
+		{
+			return std::ranges::any_of(element.expressions, [this](const typename Base::Variant & entry){ return isRedundant(entry); });
+		}
+
+		bool isRedundant(const typename Base::OperatorNone & element) const
+		{
+			return element.expressions.empty();
+		}
+
+		bool isRedundant(const typename Base::Variant & element) const
+		{
+			return std::visit([this](const auto & entry){ return this->isRedundant(entry); }, element);
+		}
+
+		std::vector<typename Base::Variant> pendingEntries(const std::vector<typename Base::Variant> & element) const
+		{
+			std::vector<typename Base::Variant> ret;
+			std::ranges::copy_if(element, std::back_inserter(ret), [this](const typename Base::Variant & entry){ return !isRedundant(entry); });
+			return ret;
+		}
+
+		std::string printNested(const typename Base::Variant & element) const
+		{
+			bool wasNested = nested;
+			nested = true;
+			std::string ret = std::visit(*this, element);
+			nested = wasNested;
+			return ret;
+		}
+
+		std::string join(const std::vector<typename Base::Variant> & element, const std::string & separator) const
 		{
 			std::string ret;
-			prefix.push_back('\t');
-			for (auto & expr : element)
-				ret += prefix + boost::apply_visitor(*this, expr) + "\n";
-			prefix.pop_back();
+			for (const auto & entry : element)
+			{
+				std::string entryText = printNested(entry);
+				if (entryText.empty())
+					continue;
+				if (!ret.empty())
+					ret += separator;
+				ret += entryText;
+			}
 			return ret;
 		}
 	public:
@@ -479,20 +523,63 @@ namespace LogicalExpressionDetail
 
 		std::string operator()(const typename Base::OperatorAny & element) const
 		{
-			return formatString(getTextForOperator("anyOf"), element) + "\n"
-					+ printExpressionList(element.expressions);
+			if (isRedundant(element))
+				return ""; // one of the alternatives is already built
+
+			auto entries = pendingEntries(element.expressions);
+			if (entries.size() == 1)
+				return printNested(entries.front());
+
+			// "A + B, C" would read as three alternatives, so groups get a stronger separator
+			bool hasGroups = std::ranges::any_of(entries, [](const typename Base::Variant & entry)
+			{
+				return !std::holds_alternative<typename Base::Value>(entry);
+			});
+
+			return formatString(getTextForOperator("anyOf"), element) + " "
+					+ join(entries, getTextForSeparator(hasGroups ? "or" : "list"));
 		}
 
 		std::string operator()(const typename Base::OperatorAll & element) const
 		{
-			return formatString(getTextForOperator("allOf"), element) + "\n"
-					+ printExpressionList(element.expressions);
+			auto entries = pendingEntries(element.expressions);
+			if (entries.empty())
+				return "";
+			if (entries.size() == 1)
+				return printNested(entries.front());
+
+			if (nested)
+				return join(entries, getTextForSeparator("and"));
+
+			// outermost list: all plain buildings on one line, every operator on a line of its own
+			std::vector<typename Base::Variant> values;
+			std::vector<typename Base::Variant> operators;
+			for (const auto & entry : entries)
+			{
+				if (std::holds_alternative<typename Base::Value>(entry))
+					values.push_back(entry);
+				else
+					operators.push_back(entry);
+			}
+
+			std::string ret = join(values, getTextForSeparator("list"));
+			for (const auto & entry : operators)
+			{
+				std::string entryText = printNested(entry);
+				if (entryText.empty())
+					continue;
+				if (!ret.empty())
+					ret += "\n";
+				ret += entryText;
+			}
+			return ret;
 		}
 
 		std::string operator()(const typename Base::OperatorNone & element) const
 		{
-			return formatString(getTextForOperator("noneOf"), element) + "\n"
-					+ printExpressionList(element.expressions);
+			// a fulfilled entry is exactly what makes a noneOf fail, so nothing is filtered out here
+			return formatString(getTextForOperator("noneOf"), element) + " "
+					+ join(element.expressions, getTextForSeparator("list"));
 		}
 
 		std::string operator()(const typename Base::Value & element) const
@@ -508,30 +595,27 @@ namespace LogicalExpressionDetail
 template<typename ContainedClass>
 class LogicalExpression
 {
-	typedef LogicalExpressionDetail::ExpressionBase<ContainedClass> Base;
+	using Base = LogicalExpressionDetail::ExpressionBase<ContainedClass>;
+
 public:
 	/// Type of values used in expressions, same as ContainedClass
-	typedef typename Base::Value Value;
+	using Value = typename Base::Value;
 	/// Operators for use in expressions, all include vectors with operands
-	typedef typename Base::OperatorAny OperatorAny;
-	typedef typename Base::OperatorAll OperatorAll;
-	typedef typename Base::OperatorNone OperatorNone;
+	using OperatorAny = typename Base::OperatorAny;
+	using OperatorAll = typename Base::OperatorAll;
+	using OperatorNone = typename Base::OperatorNone;
 	/// one expression entry
-	typedef typename Base::Variant Variant;
+	using Variant = typename Base::Variant;
 
 private:
 	Variant data;
 
 public:
 	/// Base constructor
-	LogicalExpression()
-	{}
+	LogicalExpression() = default;
 
 	/// Constructor from variant or (implicitly) from Operator* types
-	LogicalExpression(const Variant & data):
-		data(data)
-	{
-	}
+	LogicalExpression(const Variant & data): data(data) {}
 
 	/// Constructor that receives JsonNode as input and function that can parse Value instances
 	LogicalExpression(const JsonNode & input, std::function<Value(const JsonNode &)> parser)
@@ -550,14 +634,14 @@ public:
 	Variant morph(std::function<Variant(const Value &)> morpher) const
 	{
 		LogicalExpressionDetail::ForEachVisitor<Value> visitor(morpher);
-		return boost::apply_visitor(visitor, data);
+		return std::visit(visitor, data);
 	}
 
 	/// Minimizes expression, removing any redundant elements
 	void minimize()
 	{
 		LogicalExpressionDetail::MinimizingVisitor<Value> visitor;
-		data = boost::apply_visitor(visitor, data);
+		data = std::visit(visitor, data);
 	}
 
 	/// calculates if expression evaluates to "true".
@@ -565,7 +649,7 @@ public:
 	bool test(std::function<bool(const Value &)> toBool) const
 	{
 		LogicalExpressionDetail::TestVisitor<Value> testVisitor(toBool);
-		return boost::apply_visitor(testVisitor, data);
+		return std::visit(testVisitor, data);
 	}
 
 	/// calculates if expression can evaluate to "true".
@@ -577,7 +661,7 @@ public:
 		satisfiabilityVisitor.setFalsifiabilityVisitor(&falsifiabilityVisitor);
 		falsifiabilityVisitor.setSatisfiabilityVisitor(&satisfiabilityVisitor);
 
-		return boost::apply_visitor(satisfiabilityVisitor, data);
+		return std::visit(satisfiabilityVisitor, data);
 	}
 
 	/// calculates if expression can evaluate to "false".
@@ -589,14 +673,14 @@ public:
 		satisfiabilityVisitor.setFalsifiabilityVisitor(&falsifiabilityVisitor);
 		falsifiabilityVisitor.setFalsifiabilityVisitor(&satisfiabilityVisitor);
 
-		return boost::apply_visitor(falsifiabilityVisitor, data);
+		return std::visit(falsifiabilityVisitor, data);
 	}
 
 	/// generates list of candidates that can be fulfilled by caller (like AI)
 	std::vector<Value> getFulfillmentCandidates(std::function<bool(const Value &)> toBool) const
 	{
 		LogicalExpressionDetail::CandidatesVisitor<Value> candidateVisitor(toBool);
-		return boost::apply_visitor(candidateVisitor, data);
+		return std::visit(candidateVisitor, data);
 	}
 
 	/// Converts expression in human-readable form
@@ -605,22 +689,22 @@ public:
 	std::string toString(std::function<std::string(const Value &)> toStr) const
 	{
 		LogicalExpressionDetail::Printer<Value> printVisitor(toStr);
-		return boost::apply_visitor(printVisitor, data);
+		return std::visit(printVisitor, data);
 	}
 	std::string toString(std::function<std::string(const Value &)> toStr, std::function<bool(const Value &)> toBool) const
 	{
 		LogicalExpressionDetail::Printer<Value> printVisitor(toStr, toBool);
-		return boost::apply_visitor(printVisitor, data);
+		return std::visit(printVisitor, data);
 	}
 
 	JsonNode toJson(std::function<JsonNode(const Value &)> toJson) const
 	{
 		LogicalExpressionDetail::Writer<Value> writeVisitor(toJson);
-		return boost::apply_visitor(writeVisitor, data);
+		return std::visit(writeVisitor, data);
 	}
 
 	template <typename Handler>
-	void serialize(Handler & h, const int version)
+	void serialize(Handler & h)
 	{
 		h & data;
 	}

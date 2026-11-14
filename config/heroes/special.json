@@ -5,7 +5,7 @@
 		"index": 144,
 		"class" : "knight",
 		"female": false,
-		"special" : false, // available in single scenario, replacement for no longer available Lord Haart
+		"special" : true,
 		"skills":
 		[
 			{ "skill" : "leadership", "level": "advanced" }
@@ -61,14 +61,28 @@
 		],
 		"specialty" : {
 			"base" : {
-				"addInfo" : "creature.enchanter",
+				"addInfo" : "enchanter",
 				"type" : "SPECIAL_UPGRADE"
 			},
 			"bonuses" : {
-				"archMage2enchanter" : { "subtype" : "creature.archMage" },
-				"mage2enchanter" : { "subtype" : "creature.mage" },
-				"monk2enchanter" : { "subtype" : "creature.monk" },
-				"zealot2enchanter" : { "subtype" : "creature.zealot" }
+				"mage2enchanter" : {
+					"limiters" : [
+						{
+							"type" : "CREATURE_TYPE_LIMITER",
+							"creature" : "mage",
+							"includeUpgrades" : true
+						}
+					]
+				},
+				"monk2enchanter" : {
+					"limiters" : [
+						{
+							"type" : "CREATURE_TYPE_LIMITER",
+							"creature" : "monk",
+							"includeUpgrades" : true
+						}
+					]
+				}
 			}
 		}
 	},
@@ -85,14 +99,28 @@
 		],
 		"specialty" : {
 			"base" : {
-				"addInfo" : "creature.sharpshooter",
+				"addInfo" : "sharpshooter",
 				"type" : "SPECIAL_UPGRADE"
 			},
 			"bonuses" : {
-				"archer2sharpshooter" : { "subtype" : "creature.archer" },
-				"grandElf2sharpshooter" : { "subtype" : "creature.grandElf" },
-				"marksman2sharpshooter" : { "subtype" : "creature.marksman" },
-				"woodElf2sharpshooter" : { "subtype" : "creature.woodElf" }
+				"archer2sharpshooter" : {
+					"limiters" : [
+						{
+							"type" : "CREATURE_TYPE_LIMITER",
+							"creature" : "archer",
+							"includeUpgrades" : true
+						}
+					]
+				},
+				"woodElf2sharpshooter" : {
+					"limiters" : [
+						{
+							"type" : "CREATURE_TYPE_LIMITER",
+							"creature" : "woodElf",
+							"includeUpgrades" : true
+						}
+					]
+				}
 			}
 		}
 	},
@@ -110,24 +138,25 @@
 			"base" : {
 				"limiters" : [
 					{
-						"parameters" : [ "behemoth", true ],
-						"type" : "CREATURE_TYPE_LIMITER"
+						"type" : "CREATURE_TYPE_LIMITER",
+						"creature" : "behemoth",
+						"includeUpgrades" : true
 					}
 				]
 			},
 			"bonuses" : {
 				"damage" : {
-					"subtype" : 0,
+					"subtype" : "creatureDamageBoth",
 					"type" : "CREATURE_DAMAGE",
 					"val" : 10
 				},
 				"attack" : {
-					"subtype" : "primSkill.attack",
+					"subtype" : "attack",
 					"type" : "PRIMARY_SKILL",
 					"val" : 5
 				},
 				"defence" : {
-					"subtype" : "primSkill.defence",
+					"subtype" : "defence",
 					"type" : "PRIMARY_SKILL",
 					"val" : 5
 				}
@@ -149,24 +178,25 @@
 			"base" : {
 				"limiters" : [
 					{
-						"parameters" : [ "blackKnight", true ],
-						"type" : "CREATURE_TYPE_LIMITER"
+						"type" : "CREATURE_TYPE_LIMITER",
+						"creature" : "blackKnight",
+						"includeUpgrades" : true
 					}
 				]
 			},
 			"bonuses" : {
 				"damage" : {
-					"subtype" : 0,
+					"subtype" : "creatureDamageBoth",
 					"type" : "CREATURE_DAMAGE",
 					"val" : 10
 				},
 				"attack" : {
-					"subtype" : "primSkill.attack",
+					"subtype" : "attack",
 					"type" : "PRIMARY_SKILL",
 					"val" : 5
 				},
 				"defence" : {
-					"subtype" : "primSkill.defence",
+					"subtype" : "defence",
 					"type" : "PRIMARY_SKILL",
 					"val" : 5
 				}
@@ -176,7 +206,7 @@
 	"mutare":
 	{
 		"index": 151,
-		"class" : "warlock",
+		"class" : "overlord",
 		"female": true,
 		"special" : true,
 		"spellbook": [ "magicArrow" ],
@@ -189,16 +219,16 @@
 			"base" : {
 				"limiters" : [
 					{
-						"parameters" : [ "DRAGON_NATURE" ],
-						"type" : "HAS_ANOTHER_BONUS_LIMITER"
+						"type" : "HAS_ANOTHER_BONUS_LIMITER",
+						"bonusType" : "DRAGON_NATURE"
 					}
 				],
 				"type" : "PRIMARY_SKILL",
 				"val" : 5
 			},
 			"bonuses" : {
-				"attack" : { "subtype" : "primSkill.attack" },
-				"defence" : { "subtype" : "primSkill.defence" }
+				"attack" : { "subtype" : "attack" },
+				"defence" : { "subtype" : "defence" }
 			}
 		}
 	},
@@ -214,13 +244,13 @@
 			{ "skill" : "armorer", "level": "basic" }
 		],
 		"specialty" : {
-			"creature" : "griffin"
+			"creature" : "swordsman"
 		}
 	},
 	"mutareDrake":
 	{
 		"index": 153,
-		"class" : "warlock",
+		"class" : "overlord",
 		"female": true,
 		"special" : true,
 		"spellbook": [ "magicArrow" ],
@@ -233,16 +263,16 @@
 			"base" : {
 				"limiters" : [
 					{
-						"parameters" : [ "DRAGON_NATURE" ],
-						"type" : "HAS_ANOTHER_BONUS_LIMITER"
+						"type" : "HAS_ANOTHER_BONUS_LIMITER",
+						"bonusType" : "DRAGON_NATURE"
 					}
 				],
 				"type" : "PRIMARY_SKILL",
 				"val" : 5
 			},
 			"bonuses" : {
-				"attack" : { "subtype" : "primSkill.attack" },
-				"defence" : { "subtype" : "primSkill.defence" }
+				"attack" : { "subtype" : "attack" },
+				"defence" : { "subtype" : "defence" }
 			}
 		},
 		"army" :
@@ -306,19 +336,20 @@
 			"base" : {
 				"limiters" : [
 					{
-						"parameters" : [ "devil", true ],
-						"type" : "CREATURE_TYPE_LIMITER"
+						"type" : "CREATURE_TYPE_LIMITER",
+						"creature" : "devil",
+						"includeUpgrades" : true
 					}
 				]
 			},
 			"bonuses" : {
 				"attack" : {
-					"subtype" : "primSkill.attack",
+					"subtype" : "attack",
 					"type" : "PRIMARY_SKILL",
 					"val" : 4
 				},
 				"defence" : {
-					"subtype" : "primSkill.defence",
+					"subtype" : "defence",
 					"type" : "PRIMARY_SKILL",
 					"val" : 2
 				},

@@ -1,7 +1,4 @@
 set(stupidAI_SRCS
-		StdInc.cpp
-
-		main.cpp
 		StupidAI.cpp
 )
 
@@ -13,13 +10,11 @@ set(stupidAI_HEADERS
 
 assign_source_group(${stupidAI_SRCS} ${stupidAI_HEADERS})
 
-add_library(StupidAI SHARED ${stupidAI_SRCS} ${stupidAI_HEADERS})
-target_link_libraries(StupidAI PRIVATE vcmi)
+add_library(StupidAI OBJECT ${stupidAI_SRCS} ${stupidAI_HEADERS})
+target_compile_definitions(StupidAI PRIVATE VCMI_DLL=1)
+
+target_link_libraries(StupidAI PRIVATE vcmiMain)
 target_include_directories(StupidAI PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 vcmi_set_output_dir(StupidAI "AI")
-
-set_target_properties(StupidAI PROPERTIES ${PCH_PROPERTIES})
-cotire(StupidAI)
-
-install(TARGETS StupidAI RUNTIME DESTINATION ${AI_LIB_DIR} LIBRARY DESTINATION ${AI_LIB_DIR})
+enable_pch(StupidAI)

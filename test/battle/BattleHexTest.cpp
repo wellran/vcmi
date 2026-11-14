@@ -9,29 +9,29 @@
  */
 
 #include "StdInc.h"
-#include "../lib/battle/BattleHex.h"
+#include "../../lib/battle/BattleHexArray.h"
 
 TEST(BattleHexTest, getNeighbouringTiles)
 {
 	BattleHex mainHex;
-	std::vector<BattleHex> neighbouringTiles;
+	BattleHexArray neighbouringTiles;
 	mainHex.setXY(16,0);
-	neighbouringTiles = mainHex.neighbouringTiles();
+	neighbouringTiles = mainHex.getNeighbouringTiles();
 	EXPECT_EQ(neighbouringTiles.size(), 1);
 	mainHex.setXY(0,0);
-	neighbouringTiles = mainHex.neighbouringTiles();
+	neighbouringTiles = mainHex.getNeighbouringTiles();
 	EXPECT_EQ(neighbouringTiles.size(), 2);
 	mainHex.setXY(15,2);
-	neighbouringTiles = mainHex.neighbouringTiles();
+	neighbouringTiles = mainHex.getNeighbouringTiles();
 	EXPECT_EQ(neighbouringTiles.size(), 3);
 	mainHex.setXY(2,0);
-	neighbouringTiles = mainHex.neighbouringTiles();
+	neighbouringTiles = mainHex.getNeighbouringTiles();
 	EXPECT_EQ(neighbouringTiles.size(), 4);
 	mainHex.setXY(1,2);
-	neighbouringTiles = mainHex.neighbouringTiles();
+	neighbouringTiles = mainHex.getNeighbouringTiles();
 	EXPECT_EQ(neighbouringTiles.size(), 5);
 	mainHex.setXY(8,5);
-	neighbouringTiles = mainHex.neighbouringTiles();
+	neighbouringTiles = mainHex.getNeighbouringTiles();
 	EXPECT_EQ(neighbouringTiles.size(), 6);
 
 	ASSERT_TRUE(neighbouringTiles.size()==6 && mainHex==93);
@@ -45,7 +45,8 @@ TEST(BattleHexTest, getNeighbouringTiles)
 
 TEST(BattleHexTest, getDistance)
 {
-	BattleHex firstHex(0,0), secondHex(16,0);
+	BattleHex firstHex(0,0);
+	BattleHex secondHex(16,0);
 	EXPECT_EQ((int)firstHex.getDistance(firstHex,secondHex), 16);
 	firstHex=0, secondHex=170;
 	EXPECT_EQ((int)firstHex.getDistance(firstHex,secondHex), 10);
@@ -63,7 +64,8 @@ TEST(BattleHexTest, getDistance)
 
 TEST(BattleHexTest, mutualPositions)
 {
-	BattleHex firstHex(0,0), secondHex(16,0);
+	BattleHex firstHex(0,0);
+	BattleHex secondHex(16,0);
 	firstHex=86, secondHex=68;
 	EXPECT_EQ((int)firstHex.mutualPosition(firstHex,secondHex), BattleHex::EDir::TOP_LEFT);
 	secondHex=69;
@@ -83,23 +85,23 @@ TEST(BattleHexTest, mutualPositions)
 TEST(BattleHexTest, getClosestTile)
 {
 	BattleHex mainHex(0);
-	std::set<BattleHex> possibilities;
+	BattleHexArray possibilities;
 	possibilities.insert(3);
 	possibilities.insert(170);
 	possibilities.insert(100);
 	possibilities.insert(119);
 	possibilities.insert(186);
 
-	EXPECT_EQ(mainHex.getClosestTile(0,mainHex,possibilities), 3);
+	EXPECT_EQ(mainHex.getClosestTile(BattleSide::ATTACKER,mainHex,possibilities), 3);
 	mainHex = 139;
-	EXPECT_EQ(mainHex.getClosestTile(1,mainHex,possibilities), 119);
+	EXPECT_EQ(mainHex.getClosestTile(BattleSide::DEFENDER,mainHex,possibilities), 119);
 	mainHex = 16;
-	EXPECT_EQ(mainHex.getClosestTile(1,mainHex,possibilities), 100);
+	EXPECT_EQ(mainHex.getClosestTile(BattleSide::DEFENDER,mainHex,possibilities), 100);
 	mainHex = 166;
-	EXPECT_EQ(mainHex.getClosestTile(0,mainHex,possibilities), 186);
+	EXPECT_EQ(mainHex.getClosestTile(BattleSide::ATTACKER,mainHex,possibilities), 186);
 	mainHex = 76;
-	EXPECT_EQ(mainHex.getClosestTile(1,mainHex,possibilities), 3);
-	EXPECT_EQ(mainHex.getClosestTile(0,mainHex,possibilities), 100);
+	EXPECT_EQ(mainHex.getClosestTile(BattleSide::DEFENDER,mainHex,possibilities), 3);
+	EXPECT_EQ(mainHex.getClosestTile(BattleSide::ATTACKER,mainHex,possibilities), 100);
 }
 
 TEST(BattleHexTest, moveEDir)

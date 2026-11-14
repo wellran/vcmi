@@ -3,11 +3,13 @@
 	{
 		"index": 84,
 		"level": 1,
-		"extraNames": [ "goblins" ],
+		"compatibilityIdentifiers": [ "goblins" ],
 		"faction": "stronghold",
 		"upgrades": ["hobgoblin"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:168",
+			"mapAttackFromLeft": "AvWattak.def:0:169",
 			"animation": "CGOBLI.DEF"
 		},
 		"sound" :
@@ -27,6 +29,8 @@
 		"hasDoubleWeek": true,
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:170",
+			"mapAttackFromLeft": "AvWattak.def:0:171",
 			"animation": "CHGOBL.DEF"
 		},
 		"sound" :
@@ -44,9 +48,12 @@
 		"level": 2,
 		"faction": "stronghold",
 		"upgrades": ["hobgoblinWolfRider"],
+		"doubleWide" : true,
 		"hasDoubleWeek": true,
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:172",
+			"mapAttackFromLeft": "AvWattak.def:0:173",
 			"animation": "CBWLFR.DEF"
 		},
 		"sound" :
@@ -63,6 +70,7 @@
 		"index": 87,
 		"level": 2,
 		"faction": "stronghold",
+		"doubleWide" : true,
 		"abilities":
 		{
 			"extraAttack" :
@@ -73,6 +81,8 @@
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:174",
+			"mapAttackFromLeft": "AvWattak.def:0:175",
 			"animation": "CUWLFR.DEF"
 		},
 		"sound" :
@@ -90,8 +100,18 @@
 		"level": 3,
 		"faction": "stronghold",
 		"upgrades": ["orcChieftain"],
+		"shots" : 12,
+		"abilities" :
+		{
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			}
+		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:176",
+			"mapAttackFromLeft": "AvWattak.def:0:177",
 			"animation": "CORC.DEF",
 			"missile" :
 			{
@@ -113,8 +133,18 @@
 		"index": 89,
 		"level": 3,
 		"faction": "stronghold",
+		"shots" : 24,
+		"abilities" :
+		{
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			}
+		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:178",
+			"mapAttackFromLeft": "AvWattak.def:0:179",
 			"animation": "CORCCH.DEF",
 			"missile" :
 			{
@@ -139,6 +169,8 @@
 		"upgrades": ["ogreMage"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:180",
+			"mapAttackFromLeft": "AvWattak.def:0:181",
 			"animation": "COGRE.DEF"
 		},
 		"sound" :
@@ -160,7 +192,7 @@
 			"castsBloodlust" :
 			{
 				"type" : "SPELLCASTER",
-				"subtype" : "spell.bloodlust",
+				"subtype" : "bloodlust",
 				"val" : 2
 			},
 			"castsCount" :
@@ -171,11 +203,13 @@
 			"castLength" :
 			{
 				"type" : "CREATURE_ENCHANT_POWER",
-				"val" : 3
+				"val" : 6
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:182",
+			"mapAttackFromLeft": "AvWattak.def:0:183",
 			"animation": "COGMAG.DEF"
 		},
 		"sound" :
@@ -194,8 +228,18 @@
 		"level": 5,
 		"faction": "stronghold",
 		"upgrades": ["thunderbird"],
+		"doubleWide" : true,
+		"abilities" :
+		{
+			"canFly" :
+			{
+				"type" : "FLYING"
+			}
+		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:184",
+			"mapAttackFromLeft": "AvWattak.def:0:185",
 			"animation": "CROC.DEF"
 		},
 		"sound" :
@@ -212,23 +256,30 @@
 		"index": 93,
 		"level": 5,
 		"faction": "stronghold",
+		"doubleWide" : true,
 		"abilities":
 		{
-			"thunderStrength" :
+			"canFly" :
 			{
-				"type" : "SPECIFIC_SPELL_POWER",
-				"subtype" : "spell.thunderbolt",
-				"val" : 10
+				"type" : "FLYING"
 			},
 			"thunderOnAttack" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.thunderbolt",
+				"subtype" : "thunderbolt",
 				"val" : 20
+			},
+			"thunderStrength" :
+			{
+				"type" : "SPECIFIC_SPELL_POWER",
+				"subtype" : "thunderbolt",
+				"val" : 10
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:186",
+			"mapAttackFromLeft": "AvWattak.def:0:187",
 			"animation": "CTBIRD.DEF"
 		},
 		"sound" :
@@ -245,9 +296,24 @@
 		"index": 94,
 		"level": 6,
 		"faction": "stronghold",
+		"shots" : 16,
+		"abilities" :
+		{
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			},
+			"canShootWalls" :
+			{
+				"type" : "CATAPULT",
+				"subtype" : "cyclopsShot"
+			}
+		},
 		"upgrades": ["cyclopKing"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:188",
+			"mapAttackFromLeft": "AvWattak.def:0:189",
 			"animation": "CCYCLR.DEF",
 			"missile" :
 			{
@@ -269,16 +335,30 @@
 		"index": 95,
 		"level": 6,
 		"faction": "stronghold",
+		"shots" : 24,
 		"abilities":
 		{
-			"siegeDoubleAttack" :
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			},
+			"canShootWalls" :
+			{
+				"type" : "CATAPULT",
+				"subtype" : "cyclopsShot"
+			},
+			"canShootWallsTimes" :
 			{
 				"type" : "CATAPULT_EXTRA_SHOTS",
+				"subtype" : "cyclopsShot",
+				"valueType" : "BASE_NUMBER",
 				"val" : 1
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:190",
+			"mapAttackFromLeft": "AvWattak.def:0:191",
 			"animation": "CCYCLLOR.DEF",
 			"missile" :
 			{
@@ -300,17 +380,25 @@
 		"index": 96,
 		"level": 7,
 		"faction": "stronghold",
+		"doubleWide" : true,
 		"abilities":
 		{
 			"reduceDefence" :
 			{
 				"type" : "ENEMY_DEFENCE_REDUCTION",
 				"val" : 40
+			},
+			"KING_1" : // Will be affected by Slayer with no expertise
+			{
+				"type" : "KING",
+				"val" : 0
 			}
 		},
 		"upgrades": ["ancientBehemoth"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:192",
+			"mapAttackFromLeft": "AvWattak.def:0:193",
 			"animation": "CYBEHE.DEF"
 		},
 		"sound" :
@@ -327,16 +415,24 @@
 		"index": 97,
 		"level": 7,
 		"faction": "stronghold",
+		"doubleWide" : true,
 		"abilities":
 		{
 			"reduceDefence" :
 			{
 				"type" : "ENEMY_DEFENCE_REDUCTION",
 				"val" : 80
+			},
+			"KING_1" : // Will be affected by Slayer with no expertise
+			{
+				"type" : "KING",
+				"val" : 0
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:194",
+			"mapAttackFromLeft": "AvWattak.def:0:195",
 			"animation": "CABEHE.DEF"
 		},
 		"sound" :

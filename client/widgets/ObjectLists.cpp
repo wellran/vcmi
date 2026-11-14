@@ -10,8 +10,8 @@
 #include "StdInc.h"
 #include "ObjectLists.h"
 
-#include "../gui/CGuiHandler.h"
-#include "Buttons.h"
+#include "../GameEngine.h"
+#include "Slider.h"
 
 CObjectList::CObjectList(CreateFunc create)
 	: createObject(create)
@@ -28,14 +28,14 @@ void CObjectList::deleteItem(std::shared_ptr<CIntObject> item)
 
 std::shared_ptr<CIntObject> CObjectList::createItem(size_t index)
 {
-	OBJECT_CONSTRUCTION_CUSTOM_CAPTURING(255-DISPOSE);
+	OBJECT_CONSTRUCTION;
 	std::shared_ptr<CIntObject> item = createObject(index);
 	if(!item)
 		item = std::make_shared<CIntObject>();
 
-	item->recActions = defActions;
 	addChild(item.get());
-	item->activate();
+	if (isActive())
+		item->activate();
 	return item;
 }
 
@@ -44,7 +44,6 @@ CTabbedInt::CTabbedInt(CreateFunc create, Point position, size_t ActiveID)
 	activeTab(nullptr),
 	activeID(ActiveID)
 {
-	defActions &= ~DISPOSE;
 	pos += position;
 	reset();
 }
@@ -65,11 +64,12 @@ size_t CTabbedInt::getActive() const
 
 void CTabbedInt::reset()
 {
+
 	deleteItem(activeTab);
 	activeTab = createItem(activeID);
 	activeTab->moveTo(pos.topLeft());
 
-	if(active)
+	if(isActive())
 		redraw();
 }
 
@@ -90,9 +90,19 @@ CListBox::CListBox(CreateFunc create, Point Pos, Point ItemOffset, size_t Visibl
 
 	if(Slider & 1)
 	{
-		OBJECT_CONSTRUCTION_CAPTURING(255-DISPOSE);
-		slider = std::make_shared<CSlider>(SliderPos.topLeft(), SliderPos.w, std::bind(&CListBox::moveToPos, this, _1),
-			(int)VisibleSize, (int)TotalSize, (int)InitialPos, Slider & 2, Slider & 4 ? CSlider::BLUE : CSlider::BROWN);
+		OBJECT_CONSTRUCTION;
+		slider = std::make_shared<CSlider>(
+			SliderPos.topLeft(),
+			SliderPos.w,
+			std::bind(&CListBox::moveToPos, this, _1),
+			(int)VisibleSize,
+			(int)TotalSize,
+			(int)InitialPos,
+			Slider & 2 ? Orientation::HORIZONTAL : Orientation::VERTICAL,
+			Slider & 4 ? CSlider::BLUE : CSlider::BROWN
+		);
+
+		slider->setPanningStep(itemOffset.x + itemOffset.y);
 	}
 	reset();
 }
@@ -106,16 +116,23 @@ void CListBox::updatePositions()
 		(elem)->moveTo(itemPos);
 		itemPos += itemOffset;
 	}
-	if (active)
+	if(slider)
 	{
-		redraw();
-		if (slider)
-			slider->moveTo((int)first);
+		slider->scrollTo((int)first);
+		moveChildForeground(slider.get());
 	}
+	redraw();
+	if(onScroll)
+		onScroll();
 }
 
 void CListBox::reset()
 {
+	// hack to ensure that all items will be recreated with new address
+	// save current item list so all shared_ptr's will be destroyed only on scope exit and not inside loop below
+	// see comment in EventDispatcher::handleLeftButtonClick for details on why this hack is needed
+	auto itemsCopy = items;
+
 	size_t current = first;
 	for (auto & elem : items)
 	{
@@ -127,6 +144,9 @@ void CListBox::reset()
 
 void CListBox::resize(size_t newSize)
 {
+	if (totalSize == newSize)
+		return;
+
 	totalSize = newSize;
 	if (slider)
 		slider->setAmount((int)totalSize);
@@ -148,6 +168,11 @@ std::shared_ptr<CIntObject> CListBox::getItem(size_t which)
 		if( i == which)
 			return *iter;
 	return std::shared_ptr<CIntObject>();
+}
+
+std::shared_ptr<CSlider> CListBox::getSlider()
+{
+	return slider;
 }
 
 size_t CListBox::getIndexOf(std::shared_ptr<CIntObject> item)
@@ -230,4 +255,39 @@ size_t CListBox::getPos()
 const std::list<std::shared_ptr<CIntObject>> & CListBox::getItems()
 {
 	return items;
+}
+
+CListBoxWithCallback::CListBoxWithCallback(CListBoxWithCallback::MovedPosCallback callback, CreateFunc create, Point pos, Point itemOffset, 
+	size_t visibleSize,	size_t totalSize, size_t initialPos, int slider, Rect sliderPos)
+	: CListBox(create, pos, itemOffset, visibleSize, totalSize, initialPos, slider, sliderPos)
+{
+	movedPosCallback = callback;
+}
+
+void CListBoxWithCallback::scrollTo(size_t pos)
+{
+	CListBox::scrollTo(pos);
+	if(movedPosCallback)
+		movedPosCallback(getPos());
+}
+
+void CListBoxWithCallback::moveToPos(size_t pos)
+{
+	CListBox::moveToPos(pos);
+	if(movedPosCallback)
+		movedPosCallback(getPos());
+}
+
+void CListBoxWithCallback::moveToNext()
+{
+	CListBox::moveToNext();
+	if(movedPosCallback)
+		movedPosCallback(getPos());
+}
+
+void CListBoxWithCallback::moveToPrev()
+{
+	CListBox::moveToPrev();
+	if(movedPosCallback)
+		movedPosCallback(getPos());
 }

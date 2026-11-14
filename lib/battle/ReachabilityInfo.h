@@ -8,31 +8,42 @@
  *
  */
 #pragma once
-#include "BattleHex.h"
+#include "BattleHexArray.h"
 #include "CBattleInfoEssentials.h"
 #include "AccessibilityInfo.h"
 
+class BattleHexArray;
+
 // Reachability info is result of BFS calculation. It's dependent on stack (it's owner, whether it's flying),
-// startPosition and perpective.
-struct DLL_LINKAGE ReachabilityInfo
+// startPosition and perspective.
+struct ReachabilityInfo
 {
-	typedef std::array<int, GameConstants::BFIELD_SIZE> TDistances;
-	typedef std::array<BattleHex, GameConstants::BFIELD_SIZE> TPredecessors;
+	using TDistances = std::array<uint32_t, GameConstants::BFIELD_SIZE>;
+	using TPredecessors = std::array<BattleHex, GameConstants::BFIELD_SIZE>;
 
 	enum { INFINITE_DIST = 1000000 };
 
-	struct DLL_LINKAGE Parameters
+	struct Parameters
 	{
-		ui8 side;
-		bool doubleWide;
-		bool flying;
-		std::vector<BattleHex> knownAccessible; //hexes that will be treated as accessible, even if they're occupied by stack (by default - tiles occupied by stack we do reachability for, so it doesn't block itself)
+		BattleSide side = BattleSide::NONE;
+		bool doubleWide = false;
+		/// Defending units pass through the gate, including attacking units hypnotized by the defender
+		bool canUseGate = false;
+		bool flying = false;
+		bool ignoreKnownAccessible = false; //Ignore obstacles if it is in accessible hexes
+		bool bypassEnemyStacks = false; // in case of true will count amount of turns needed to kill enemy and thus move forward
+		const BattleHexArray * knownAccessible; //hexes that will be treated as accessible, even if they're occupied by stack (by default - tiles occupied by stack we do reachability for, so it doesn't block itself)
+		TBattlefieldTurnsArray destructibleEnemyTurns; // how many turns it is needed to kill enemy on specific hex (index <=> hex)
 
 		BattleHex startPosition; //assumed position of stack
-		BattlePerspective::BattlePerspective perspective; //some obstacles (eg. quicksands) may be invisible for some side
+		BattleSide perspective = BattleSide::ALL_KNOWING; //some obstacles (eg. quicksands) may be invisible for some side
 
-		Parameters();
-		Parameters(const battle::Unit * Stack, BattleHex StartPosition);
+		Parameters()
+		{
+			destructibleEnemyTurns.fill(-1);
+		}
+		Parameters(const battle::Unit * Stack, const BattleHex & StartPosition);
+		Parameters(BattleSide perspective, const battle::Unit * Stack, const BattleHex & StartPosition, const BattleHexArray & accessibleHexes);
 	};
 
 	Parameters params;
@@ -42,16 +53,14 @@ struct DLL_LINKAGE ReachabilityInfo
 
 	ReachabilityInfo();
 
-	bool isReachable(BattleHex hex) const;
+	bool isReachable(const BattleHex & hex) const;
 
-	int distToNearestNeighbour(
-		const std::vector<BattleHex> & targetHexes,
+	uint32_t distToNearestNeighbour(
+		const BattleHexArray & targetHexes,
 		BattleHex * chosenHex = nullptr) const;
 
-	int distToNearestNeighbour(
+	uint32_t distToNearestNeighbour(
 		const battle::Unit * attacker,
 		const battle::Unit * defender,
 		BattleHex * chosenHex = nullptr) const;
 };
-
-

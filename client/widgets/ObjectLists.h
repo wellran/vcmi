@@ -11,18 +11,17 @@
 
 #include "../gui/CIntObject.h"
 
-struct SDL_Surface;
-struct Rect;
+class Rect;
+
 class CAnimImage;
 class CSlider;
 class CLabel;
-class CAnimation;
 
 /// Used as base for Tabs and List classes
 class CObjectList : public CIntObject
 {
 public:
-	typedef std::function<std::shared_ptr<CIntObject>(size_t)> CreateFunc;
+	using CreateFunc = std::function<std::shared_ptr<CIntObject>(size_t)>;
 
 private:
 	CreateFunc createObject;
@@ -75,7 +74,7 @@ public:
 	//ItemOffset - distance between items in the list
 	//VisibleSize - maximal number of displayable at once items
 	//TotalSize
-	//Slider - slider style, bit field: 1 = present(disabled), 2=horisontal(vertical), 4=blue(brown)
+	//Slider - slider style, bit field: 1 = present(disabled), 2=horizontal(vertical), 4=blue(brown)
 	//SliderPos - position of slider, if present
 	CListBox(CreateFunc create, Point Pos, Point ItemOffset, size_t VisibleSize,
 		size_t TotalSize, size_t InitialPos=0, int Slider=0, Rect SliderPos=Rect() );
@@ -90,6 +89,8 @@ public:
 	//return item with index which or null if not present
 	std::shared_ptr<CIntObject> getItem(size_t which);
 
+	std::shared_ptr<CSlider> getSlider();
+
 	//return currently active items
 	const std::list<std::shared_ptr<CIntObject>> & getItems();
 
@@ -97,12 +98,30 @@ public:
 	size_t getIndexOf(std::shared_ptr<CIntObject> item);
 
 	//scroll list to make item which visible
-	void scrollTo(size_t which);
+	virtual void scrollTo(size_t which);
 
 	//scroll list to specified position
-	void moveToPos(size_t which);
-	void moveToNext();
-	void moveToPrev();
+	virtual void moveToPos(size_t which);
+	virtual void moveToNext();
+	virtual void moveToPrev();
 
 	size_t getPos();
+
+	std::function<void()> onScroll;
+};
+
+class CListBoxWithCallback : public CListBox
+{
+public:
+	using MovedPosCallback = std::function<void(size_t)>;
+
+	CListBoxWithCallback(MovedPosCallback callback, CreateFunc create, Point pos, Point itemOffset, size_t visibleSize,
+		size_t totalSize, size_t initialPos = 0, int slider = 0, Rect sliderPos = Rect());
+	void scrollTo(size_t pos) override;
+	void moveToPos(size_t pos) override;
+	void moveToNext() override;
+	void moveToPrev() override;
+
+private:
+	MovedPosCallback movedPosCallback;
 };

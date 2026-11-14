@@ -20,7 +20,7 @@
 			"base":{
 				"range" : "0",
 				"battleEffects" : {
-					"directDamage" : {"type":"core:damage"}
+					"directDamage" : {"type":"damage"}
 				},
 				"targetModifier":{"smart":true}
 			}
@@ -30,9 +30,6 @@
 			"negative": true
 		},
 		"targetCondition" : {
-			"noneOf" : {
-				"bonus.DIRECT_DAMAGE_IMMUNITY" : "normal"
-			}
 		}
 	},
 	"iceBolt" : {
@@ -47,7 +44,7 @@
 				{"minimumAngle": 1.20 ,"defName":"C08SPW1"},
 				{"minimumAngle": 1.50 ,"defName":"C08SPW0"}
 			],
-			"hit":["C08SPW5"]
+			"hit":[ {"defName" : "C08SPW5", "transparency" : 0.5 }]
 		},
 		"sounds": {
 			"cast": "ICERAY"
@@ -56,7 +53,7 @@
 			"base":{
 				"range" : "0",
 				"battleEffects" : {
-					"directDamage" : {"type":"core:damage"}
+					"directDamage" : {"type":"damage"}
 				},
 				"targetModifier":{"smart":true}
 			}
@@ -66,9 +63,6 @@
 			"negative": true
 		},
 		"targetCondition" : {
-			"noneOf" : {
-				"bonus.DIRECT_DAMAGE_IMMUNITY" : "normal"
-			}
 		}
 	},
 	"lightningBolt" : {
@@ -76,7 +70,7 @@
 		"targetType": "CREATURE",
 
 		"animation":{
-			"affect":[{"defName":"C03SPA0", "verticalPosition":"bottom"}, "C11SPA1"]
+			"affect":[{"defName":"C03SPA0", "verticalPosition":"bottom"}, "C03SPA1"]
 		},
 		"sounds": {
 			"cast": "LIGHTBLT"
@@ -85,7 +79,7 @@
 			"base":{
 				"range" : "0",
 				"battleEffects" : {
-					"directDamage" : {"type":"core:damage"}
+					"directDamage" : {"type":"damage"}
 				},
 				"targetModifier":{"smart":true}
 			}
@@ -95,9 +89,6 @@
 			"negative": true
 		},
 		"targetCondition" : {
-			"noneOf" : {
-				"bonus.DIRECT_DAMAGE_IMMUNITY" : "normal"
-			}
 		}
 	},
 	"implosion" : {
@@ -114,7 +105,7 @@
 			"base":{
 				"range" : "0",
 				"battleEffects" : {
-					"directDamage" : {"type":"core:damage"}
+					"directDamage" : {"type":"damage"}
 				},
 				"targetModifier":{"smart":true}
 			}
@@ -125,7 +116,6 @@
 		},
 		"targetCondition" : {
 			"noneOf" : {
-				"bonus.DIRECT_DAMAGE_IMMUNITY" : "normal",
 				"bonus.SIEGE_WEAPON" : "absolute"
 			}
 		}
@@ -135,7 +125,16 @@
 		"targetType": "CREATURE",
 
 		"animation":{
-			"affect":[{"defName":"C03SPA0", "verticalPosition":"bottom"}, "C11SPA1"]
+			"affect":[{"defName":"C11SPA0", "verticalPosition":"bottom"}, "C11SPA1"],
+			"ray":{
+				"jaggedness" : 0.2,
+				"hopDelay" : 50,
+				"width" : 16,
+				"colors" : [
+					{ "start" : [ 100, 140, 255,  96 ], "end" : [ 100, 140, 255,  48 ] },
+					{ "start" : [ 255, 255, 255, 255 ], "end" : [ 255, 255, 255, 224 ] }
+				]
+			}
 		},
 		"sounds": {
 			"cast": "CHAINLTE"
@@ -145,7 +144,7 @@
 				"range" : "0",
 				"battleEffects" : {
 					"directDamage" : {
-						"type" : "core:damage",
+						"type" : "damage",
 						"chainFactor" : 0.5,
 						"chainLength" : 4
 					}
@@ -186,7 +185,7 @@
 			"base":{
 				"range" : "1",
 				"battleEffects" : {
-					"directDamage" : {"type":"core:damage"}
+					"directDamage" : {"type":"damage"}
 				},
 				"targetModifier":{"smart":false}
 			}
@@ -197,7 +196,6 @@
 		},
 		"targetCondition" : {
 			"noneOf" : {
-				"bonus.DIRECT_DAMAGE_IMMUNITY" : "normal"
 			}
 		}
 	},
@@ -215,7 +213,7 @@
 			"base":{
 				"range" : "0,1",
 				"battleEffects" : {
-					"directDamage" : {"type":"core:damage"}
+					"directDamage" : {"type":"damage"}
 				},
 				"targetModifier":{"smart":false}
 			}
@@ -226,7 +224,6 @@
 		},
 		"targetCondition" : {
 			"noneOf" : {
-				"bonus.DIRECT_DAMAGE_IMMUNITY" : "normal"
 			}
 		}
 	},
@@ -244,7 +241,7 @@
 			"base":{
 				"range" : "0-2",
 				"battleEffects" : {
-					"directDamage" : {"type":"core:damage"}
+					"directDamage" : {"type":"damage"}
 				},
 				"targetModifier":{"smart":false}
 			}
@@ -255,7 +252,6 @@
 		},
 		"targetCondition" : {
 			"noneOf" : {
-				"bonus.DIRECT_DAMAGE_IMMUNITY" : "normal"
 			}
 		}
 	},
@@ -273,7 +269,7 @@
 			"base":{
 				"range" : "0,1",
 				"battleEffects" : {
-					"directDamage" : {"type":"core:damage"}
+					"directDamage" : {"type":"damage"}
 				},
 				"targetModifier":{"smart":false}
 			}
@@ -284,7 +280,6 @@
 		},
 		"targetCondition" : {
 			"noneOf" : {
-				"bonus.DIRECT_DAMAGE_IMMUNITY" : "normal"
 			}
 		}
 	},
@@ -302,7 +297,7 @@
 			"base":{
 				"range" : "X",
 				"battleEffects" : {
-					"directDamage" : {"type":"core:damage"}
+					"directDamage" : {"type":"damage"}
 				},
 				"targetModifier":{"smart":false}
 			}
@@ -313,7 +308,6 @@
 		},
 		"targetCondition" : {
 			"noneOf" : {
-				"bonus.DIRECT_DAMAGE_IMMUNITY" : "normal",
 				"bonus.SIEGE_WEAPON" : "absolute",
 				"bonus.UNDEAD" : "absolute"
 			}
@@ -324,7 +318,7 @@
 		"targetType" : "CREATURE",
 
 		"animation":{
-			"affect":["C14SPA0"]
+			"affect":[{"defName" : "C14SPA0", "transparency" : 0.5}]
 		},
 		"sounds": {
 			"cast": "SACBRETH"
@@ -333,7 +327,7 @@
 			"base":{
 				"range" : "X",
 				"battleEffects" : {
-					"directDamage" : {"type":"core:damage"}
+					"directDamage" : {"type":"damage"}
 				},
 				"targetModifier":{"smart":false}
 			}
@@ -345,9 +339,6 @@
 		"targetCondition" : {
 			"allOf" : {
 				"bonus.UNDEAD" : "absolute"
-			},
-			"noneOf" : {
-				"bonus.DIRECT_DAMAGE_IMMUNITY" : "normal"
 			}
 		}
 	},
@@ -365,7 +356,7 @@
 			"base":{
 				"range" : "X",
 				"battleEffects" : {
-					"directDamage" : {"type":"core:damage"}
+					"directDamage" : {"type":"damage"}
 				},
 				"targetModifier":{"smart":false}
 			}
@@ -375,9 +366,6 @@
 			"negative": true
 		},
 		"targetCondition" : {
-			"noneOf" : {
-				"bonus.DIRECT_DAMAGE_IMMUNITY" : "normal"
-			}
 		}
 	},
 	"titanBolt" : {
@@ -385,7 +373,7 @@
 		"targetType" : "CREATURE",
 
 		"animation":{
-			"hit":[{"defName":"C03SPA0", "verticalPosition":"bottom"}, "C11SPA1"]
+			"hit":[{"defName":"C03SPA0", "verticalPosition":"bottom"}, "C03SPA1"]
 		},
 		"sounds": {
 			"cast": "LIGHTBLT"
@@ -394,7 +382,7 @@
 			"base":{
 				"range" : "0",
 				"battleEffects" : {
-					"directDamage" : {"type":"core:damage"}
+					"directDamage" : {"type":"damage"}
 				},
 				"targetModifier":{"smart":true}
 			}

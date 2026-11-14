@@ -14,31 +14,50 @@
 #include <vcmi/Environment.h>
 #include <vcmi/ServerCallback.h>
 
-#include "../../lib/HeroBonus.h"
+#include "../../lib/bonuses/Bonus.h"
 #include "../../lib/battle/BattleProxy.h"
 #include "../../lib/battle/CUnitState.h"
 
 class HypotheticBattle;
-class CStack;
 
 ///Fake random generator, used by AI to evaluate random server behavior
-class RNGStub : public vstd::RNG
+class RNGStub final : public vstd::RNG
 {
 public:
-	vstd::TRandI64 getInt64Range(int64_t lower, int64_t upper) override
+	int nextInt() override
 	{
-		return [=]()->int64_t
-		{
-			return (lower + upper)/2;
-		};
+		return 0;
 	}
 
-	vstd::TRand getDoubleRange(double lower, double upper) override
+	int nextBinomialInt(int coinsCount, double coinChance) override
 	{
-		return [=]()->double
-		{
-			return (lower + upper)/2;
-		};
+		return coinsCount * coinChance;
+	}
+
+	int nextInt(int lower, int upper) override
+	{
+		return (lower + upper) / 2;
+	}
+	int64_t nextInt64(int64_t lower, int64_t upper) override
+	{
+		return (lower + upper) / 2;
+	}
+	double nextDouble(double lower, double upper) override
+	{
+		return (lower + upper) / 2;
+	}
+
+	int nextInt(int upper) override
+	{
+		return upper / 2;
+	}
+	int64_t nextInt64(int64_t upper) override
+	{
+		return upper / 2;
+	}
+	double nextDouble(double upper) override
+	{
+		return upper / 2;
 	}
 };
 
@@ -48,8 +67,11 @@ public:
 	std::vector<Bonus> bonusesToAdd;
 	std::vector<Bonus> bonusesToUpdate;
 	std::set<std::shared_ptr<Bonus>> bonusesToRemove;
+	int treeVersionLocal;
 
-	StackWithBonuses(const HypotheticBattle * Owner, const CStack * Stack);
+	StackWithBonuses(const HypotheticBattle * Owner, const battle::CUnitState * Stack);
+
+	StackWithBonuses(const HypotheticBattle * Owner, const battle::Unit * Stack);
 
 	StackWithBonuses(const HypotheticBattle * Owner, const battle::UnitInfo & info);
 
@@ -63,15 +85,14 @@ public:
 	int32_t unitBaseAmount() const override;
 
 	uint32_t unitId() const override;
-	ui8 unitSide() const override;
+	BattleSide unitSide() const override;
 	PlayerColor unitOwner() const override;
 	SlotID unitSlot() const override;
 
 	///IBonusBearer
-	TConstBonusListPtr getAllBonuses(const CSelector & selector, const CSelector & limit,
-		const CBonusSystemNode * root = nullptr, const std::string & cachingStr = "") const override;
+	TConstBonusListPtr getAllBonuses(const CSelector & selector, const std::string & cachingStr = "") const override;
 
-	int64_t getTreeVersion() const override;
+	int32_t getTreeVersion() const override;
 
 	void addUnitBonus(const std::vector<Bonus> & bonus);
 	void updateUnitBonus(const std::vector<Bonus> & bonus);
@@ -80,6 +101,7 @@ public:
 	void removeUnitBonus(const CSelector & selector);
 
 	void spendMana(ServerCallback * server, const int spellCost) const override;
+	std::string getDescription() const override;
 
 private:
 	const IBonusBearer * origBearer;
@@ -88,12 +110,12 @@ private:
 	const CCreature * type;
 	ui32 baseAmount;
 	uint32_t id;
-	ui8 side;
+	BattleSide side;
 	PlayerColor player;
 	SlotID slot;
 };
 
-class HypotheticBattle : public BattleProxy, public battle::IUnitEnvironment
+class HypotheticBattle final : public BattleProxy, public battle::IUnitEnvironment
 {
 public:
 	std::map<uint32_t, std::shared_ptr<StackWithBonuses>> stackStates;
@@ -107,24 +129,26 @@ public:
 
 	std::shared_ptr<StackWithBonuses> getForUpdate(uint32_t id);
 
+	BattleID getBattleID() const override;
+
 	int32_t getActiveStackID() const override;
 
-	battle::Units getUnitsIf(battle::UnitFilter predicate) const override;
+	battle::Units getUnitsIf(const battle::UnitFilter & predicate) const override;
 
-	void nextRound(int32_t roundNr) override;
-	void nextTurn(uint32_t unitId) override;
+	void nextRound() override;
+	void nextTurn(uint32_t unitId, BattleUnitTurnReason reason) override;
 
 	void addUnit(uint32_t id, const JsonNode & data) override;
-	void setUnitState(uint32_t id, const JsonNode & data, int64_t healthDelta) override;
-	void moveUnit(uint32_t id, BattleHex destination) override;
+	void updateUnit(uint32_t id, const JsonNode & data, int64_t healthDelta) override;
+	void moveUnit(uint32_t id, const BattleHex & destination) override;
 	void removeUnit(uint32_t id) override;
-	void updateUnit(uint32_t id, const JsonNode & data) override;
 
 	void addUnitBonus(uint32_t id, const std::vector<Bonus> & bonus) override;
 	void updateUnitBonus(uint32_t id, const std::vector<Bonus> & bonus) override;
 	void removeUnitBonus(uint32_t id, const std::vector<Bonus> & bonus) override;
 
-	void setWallState(int partOfWall, si8 state) override;
+	EWallState getWallState(EWallPart partOfWall) const override;
+	void setWallState(EWallPart partOfWall, EWallState state) override;
 
 	void addObstacle(const ObstacleChanges & changes) override;
 	void updateObstacle(const ObstacleChanges& changes) override;
@@ -132,15 +156,25 @@ public:
 
 	uint32_t nextUnitId() const override;
 
-	int64_t getActualDamage(const TDmgRange & damage, int32_t attackerCount, vstd::RNG & rng) const override;
+	int64_t getActualDamage(const DamageRange & damage, int32_t attackerCount, vstd::RNG & rng) const override;
+	std::vector<SpellID> getUsedSpells(BattleSide side) const override;
+	int3 getLocation() const override;
+	BattleLayout getLayout() const override;
 
-	int64_t getTreeVersion() const;
+	int32_t getTreeVersion() const;
 
-	scripting::Pool * getContextPool() const override;
+	void makeWait(const battle::Unit * activeStack);
+
+	void resetActiveUnit()
+	{
+		activeUnitId = -1;
+	}
 
 	ServerCallback * getServerCallback();
+	const scripting::Pool & getScriptContextPool() const override;
 
 private:
+	std::map<EWallPart, EWallState> wallStates;
 
 	class HypotheticServerCallback : public ServerCallback
 	{
@@ -151,16 +185,17 @@ private:
 		bool describeChanges() const override;
 
 		vstd::RNG * getRNG() override;
+		bool rollCombatAbility(const IBattleInfoCallback & battle, const battle::Unit & actor, int percentageChance) override;
 
-		void apply(CPackForClient * pack) override;
+		void apply(CPackForClient & pack) override;
 
-		void apply(BattleLogMessage * pack) override;
-		void apply(BattleStackMoved * pack) override;
-		void apply(BattleUnitsChanged * pack) override;
-		void apply(SetStackEffect * pack) override;
-		void apply(StacksInjured * pack) override;
-		void apply(BattleObstaclesChanged * pack) override;
-		void apply(CatapultAttack * pack) override;
+		void apply(BattleLogMessage & pack) override;
+		void apply(BattleStackMoved & pack) override;
+		void apply(BattleUnitsChanged & pack) override;
+		void apply(SetStackEffect & pack) override;
+		void apply(StacksInjured & pack) override;
+		void apply(BattleObstaclesChanged & pack) override;
+		void apply(CatapultAttack & pack) override;
 	private:
 		HypotheticBattle * owner;
 		RNGStub rngStub;
@@ -172,10 +207,8 @@ private:
 		HypotheticEnvironment(HypotheticBattle * owner_, const Environment * upperEnvironment);
 
 		const Services * services() const override;
-		const BattleCb * battle() const override;
+		const BattleCb * battle(const BattleID & battleID) const override;
 		const GameCb * game() const override;
-		vstd::CLoggerBase * logger() const override;
-		events::EventBus * eventBus() const override;
 
 	private:
 		HypotheticBattle * owner;
@@ -188,7 +221,4 @@ private:
 
 	std::unique_ptr<HypotheticServerCallback> serverCallback;
 	std::unique_ptr<HypotheticEnvironment> localEnvironment;
-
-	mutable std::shared_ptr<scripting::Pool> pool;
-	mutable std::shared_ptr<events::EventBus> eventBus;
 };

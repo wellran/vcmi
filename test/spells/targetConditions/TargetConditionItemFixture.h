@@ -12,11 +12,11 @@
 
 #include <vstd/RNG.h>
 
-#include "../../../lib/NetPacksBase.h"
 #include "../../../lib/spells/TargetCondition.h"
 
 
 #include "mock/mock_spells_Mechanics.h"
+#include "mock/mock_spells_Spell.h"
 #include "mock/mock_BonusBearer.h"
 #include "mock/mock_battle_Unit.h"
 
@@ -30,12 +30,14 @@ public:
 
 	::testing::StrictMock<spells::MechanicsMock> mechanicsMock;
 	::testing::StrictMock<UnitMock> unitMock;
+	::testing::StrictMock<spells::SpellMock> spellMock;
+
 	BonusBearerMock unitBonuses;
 protected:
 	void SetUp() override
 	{
 		using namespace ::testing;
-		ON_CALL(unitMock, getAllBonuses(_, _, _, _)).WillByDefault(Invoke(&unitBonuses, &BonusBearerMock::getAllBonuses));
+		ON_CALL(unitMock, getAllBonuses(_, _)).WillByDefault(Invoke(&unitBonuses, &BonusBearerMock::getAllBonuses));
 		ON_CALL(unitMock, getTreeVersion()).WillByDefault(Invoke(&unitBonuses, &BonusBearerMock::getTreeVersion));
 	}
 };

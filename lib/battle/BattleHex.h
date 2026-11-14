@@ -9,16 +9,10 @@
  */
 #pragma once
 
-//TODO: change to enum class
+#include "BattleSide.h"
+#include <vcmi/scripting/ApiTags.h>
 
-namespace BattleSide
-{
-	enum
-	{
-		ATTACKER = 0,
-		DEFENDER = 1
-	};
-}
+//TODO: change to enum class
 
 namespace GameConstants
 {
@@ -27,58 +21,285 @@ namespace GameConstants
 	const int BFIELD_SIZE = BFIELD_WIDTH * BFIELD_HEIGHT;
 }
 
-typedef boost::optional<ui8> BattleSideOpt;
+class BattleHexArray;
 
-// for battle stacks' positions
-struct DLL_LINKAGE BattleHex //TODO: decide if this should be changed to class for better code design
+/**
+ * @brief Represents a battlefield hexagonal tile.
+ *
+ * Valid hexes are within the range 0 to 186, excluding some invalid values, ex. castle towers (-2, -3, -4).
+ * Available hexes are those valid ones but NOT in the first or last column.
+ */
+class DLL_LINKAGE BattleHex : public scripting::ApiCopyable<BattleHex>
 {
-	si16 hex;
-	static const si16 INVALID = -1;
+public:
+
+	// helpers for siege
+	static constexpr si16 CASTLE_CENTRAL_TOWER = -2;
+	static constexpr si16 CASTLE_BOTTOM_TOWER = -3;
+	static constexpr si16 CASTLE_UPPER_TOWER = -4;
+
+	// hexes for interaction with heroes
+	static constexpr si16 HERO_ATTACKER = 0;
+	static constexpr si16 HERO_DEFENDER = GameConstants::BFIELD_WIDTH - 1;
+
+	// helpers for rendering
+	static constexpr si16 HEX_BEFORE_ALL = std::numeric_limits<si16>::min();
+	static constexpr si16 HEX_AFTER_ALL = std::numeric_limits<si16>::max();
+
+	static constexpr si16 DESTRUCTIBLE_WALL_1 = 29;
+	static constexpr si16 DESTRUCTIBLE_WALL_2 = 78;
+	static constexpr si16 DESTRUCTIBLE_WALL_3 = 130;
+	static constexpr si16 DESTRUCTIBLE_WALL_4 = 182;
+	static constexpr si16 GATE_BRIDGE = 94;
+	static constexpr si16 GATE_OUTER = 95;
+	static constexpr si16 GATE_INNER = 96;
+
+	static constexpr si16 INVALID = -1;
+
 	enum EDir
 	{
+		NONE = -1,
+
 		TOP_LEFT,
 		TOP_RIGHT,
 		RIGHT,
 		BOTTOM_RIGHT,
 		BOTTOM_LEFT,
 		LEFT,
-		NONE
+
+		//Note: unused by BattleHex class, used by other code
+		TOP,
+		BOTTOM
 	};
 
-	BattleHex();
-	BattleHex(si16 _hex);
-	BattleHex(si16 x, si16 y);
-	BattleHex(std::pair<si16, si16> xy);
-	operator si16() const;
-	bool isValid() const;
-	bool isAvailable() const; //valid position not in first or last column
-	void setX(si16 x);
-	void setY(si16 y);
-	void setXY(si16 x, si16 y, bool hasToBeValid = true);
-	void setXY(std::pair<si16, si16> xy);
-	si16 getX() const;
-	si16 getY() const;
-	std::pair<si16, si16> getXY() const;
-	BattleHex& moveInDirection(EDir dir, bool hasToBeValid = true);
-	BattleHex& operator+=(EDir dir);
-	BattleHex cloneInDirection(EDir dir, bool hasToBeValid = true) const;
-	BattleHex operator+(EDir dir) const;
-	std::vector<BattleHex> neighbouringTiles() const;
-	static signed char mutualPosition(BattleHex hex1, BattleHex hex2);
-	static char getDistance(BattleHex hex1, BattleHex hex2);
-	static void checkAndPush(BattleHex tile, std::vector<BattleHex> & ret);
-	static BattleHex getClosestTile(ui8 side, BattleHex initialPos, std::set<BattleHex> & possibilities); //TODO: vector or set? copying one to another is bad
+	BattleHex() noexcept
+		: hex(INVALID) 
+	{}
+	BattleHex(si16 _hex) noexcept
+		: hex(_hex) 
+	{}
+	BattleHex(si16 x, si16 y)
+	{
+		setXY(x, y);
+	}
+	BattleHex(std::pair<si16, si16> xy)
+	{
+		setXY(xy);
+	}
+
+	[[nodiscard]] bool isValid() const noexcept
+	{
+		return hex >= 0 && hex < GameConstants::BFIELD_SIZE;
+	}
+	
+	[[nodiscard]] bool isAvailable() const noexcept //valid position not in first or last column
+	{
+		return isValid() && getX() > 0 && getX() < GameConstants::BFIELD_WIDTH - 1;
+	}
+
+	[[nodiscard]] inline bool isTower() const noexcept
+	{
+		return hex == BattleHex::CASTLE_CENTRAL_TOWER || hex == BattleHex::CASTLE_UPPER_TOWER || hex == BattleHex::CASTLE_BOTTOM_TOWER;
+	}
+
+	void setX(si16 x)
+	{
+		setXY(x, getY());
+	}
+
+	void setY(si16 y)
+	{
+		setXY(getX(), y);
+	}
+
+	void setXY(si16 x, si16 y, bool hasToBeValid = true)
+	{
+		if(hasToBeValid)
+		{
+			if(x < 0 || x >= GameConstants::BFIELD_WIDTH || y < 0 || y >= GameConstants::BFIELD_HEIGHT)
+				throw std::out_of_range("Hex at (" + std::to_string(x) + ", " + std::to_string(y) + ") is not valid!");
+		}
+
+		hex = x + y * GameConstants::BFIELD_WIDTH;
+	}
+
+	void setXY(std::pair<si16, si16> xy)
+	{
+		setXY(xy.first, xy.second);
+	}
+
+	/// Column of this hex, 0 to BFIELD_WIDTH - 1. Columns 0 and BFIELD_WIDTH - 1 are not part of the
+	/// playable field - they only hold the heroes, so no unit ever stands there (see isAvailable).
+	[[nodiscard]] si16 getX() const noexcept
+	{
+		return hex % GameConstants::BFIELD_WIDTH;
+	}
+
+	/// Row of this hex, 0 to BFIELD_HEIGHT - 1. Odd rows are drawn shifted half a hex to the right.
+	[[nodiscard]] si16 getY() const noexcept
+	{
+		return hex / GameConstants::BFIELD_WIDTH;
+	}
+
+	[[nodiscard]] std::pair<si16, si16> getXY() const noexcept
+	{
+		return std::make_pair(getX(), getY());
+	}
+
+	BattleHex & moveInDirection(EDir dir, bool hasToBeValid = true)
+	{
+		si16 x = getX();
+		si16 y = getY();
+		switch(dir)
+		{
+		case TOP_LEFT:
+			setXY((y % 2) ? x - 1 : x, y - 1, hasToBeValid);
+			break;
+		case TOP_RIGHT:
+			setXY((y % 2) ? x : x + 1, y - 1, hasToBeValid);
+			break;
+		case RIGHT:
+			setXY(x + 1, y, hasToBeValid);
+			break;
+		case BOTTOM_RIGHT:
+			setXY((y % 2) ? x : x + 1, y + 1, hasToBeValid);
+			break;
+		case BOTTOM_LEFT:
+			setXY((y % 2) ? x - 1 : x, y + 1, hasToBeValid);
+			break;
+		case LEFT:
+			setXY(x - 1, y, hasToBeValid);
+			break;
+		case NONE:
+			break;
+		default:
+			throw std::runtime_error("Disaster: wrong direction in BattleHex::operator+=!\n");
+			break;
+		}
+		return *this;
+	}
+
+	[[nodiscard]] BattleHex cloneInDirection(EDir dir, bool hasToBeValid = true) const
+	{
+		BattleHex result(hex);
+		result.moveInDirection(dir, hasToBeValid);
+		return result;
+	}
+
+	[[nodiscard]] BattleHex copyToNorthWest() const { return cloneInDirection(TOP_LEFT,     false); }
+	[[nodiscard]] BattleHex copyToNorthEast() const { return cloneInDirection(TOP_RIGHT,    false); }
+	[[nodiscard]] BattleHex copyToEast()      const { return cloneInDirection(RIGHT,        false); }
+	[[nodiscard]] BattleHex copyToSouthEast() const { return cloneInDirection(BOTTOM_RIGHT, false); }
+	[[nodiscard]] BattleHex copyToSouthWest() const { return cloneInDirection(BOTTOM_LEFT,  false); }
+	[[nodiscard]] BattleHex copyToWest()      const { return cloneInDirection(LEFT,         false); }
+
+	[[nodiscard]] static uint8_t getDistance(const BattleHex & hex1, const BattleHex & hex2) noexcept
+	{
+		int y1 = hex1.getY();
+		int y2 = hex2.getY();
+
+		int x1 = hex1.getX() + y1 / 2;
+		int x2 = hex2.getX() + y2 / 2;
+
+		int xDst = x2 - x1;
+		int yDst = y2 - y1;
+
+		if((xDst >= 0 && yDst >= 0) || (xDst < 0 && yDst < 0))
+			return std::max(std::abs(xDst), std::abs(yDst));
+
+		return std::abs(xDst) + std::abs(yDst);
+	}
+
+	[[nodiscard]] static BattleHex getClosestTile(BattleSide side, const BattleHex & initialPos, const BattleHexArray & hexes);
+
+	//Constexpr defined array with all directions used in battle
+	[[nodiscard]] static constexpr auto hexagonalDirections() noexcept
+	{
+		return std::array<EDir,6>{TOP_LEFT, TOP_RIGHT, RIGHT, BOTTOM_RIGHT, BOTTOM_LEFT, LEFT};
+	}
+
+	[[nodiscard]] static EDir mutualPosition(const BattleHex & hex1, const BattleHex & hex2)
+	{
+		for(auto dir : hexagonalDirections())
+		{
+			try
+			{
+				if(hex2 == hex1.cloneInDirection(dir, true))
+					return dir;
+			}
+			catch (const std::out_of_range &)
+			{
+				continue;
+			}
+		}
+		return NONE;
+	}
+
+	/// get (precomputed) all possible surrounding tiles
+	[[nodiscard]] const BattleHexArray & getAllNeighbouringTiles() const noexcept;
+
+	/// get (precomputed) only valid and available surrounding tiles
+	[[nodiscard]] const BattleHexArray & getNeighbouringTiles() const noexcept;
+
+	/// get (precomputed) only valid and available surrounding tiles for double wide creatures
+	[[nodiscard]] const BattleHexArray & getNeighbouringTilesDoubleWide(BattleSide side) const noexcept;
+
+	/// get integer hex value
+	[[nodiscard]] si16 toInt() const noexcept
+	{
+		return hex;
+	}
+
+	BattleHex & operator+=(EDir dir)
+	{
+		return moveInDirection(dir);
+	}
+
+	[[nodiscard]] BattleHex operator+(EDir dir) const
+	{
+		return cloneInDirection(dir);
+	}
+
+	// Prefix increment
+	BattleHex & operator++() noexcept
+	{
+		++hex;
+		return *this;
+	}
+
+	// Postfix increment is deleted; use prefix increment as it has better performance
+	BattleHex operator++(int) = delete;
+
+	[[nodiscard]] bool operator ==(const BattleHex & other) const noexcept
+	{
+		return hex == other.hex;
+	}
+
+	[[nodiscard]] bool operator !=(const BattleHex & other) const noexcept
+	{
+		return hex != other.hex;
+	}
+
+	[[nodiscard]] bool operator <(const BattleHex & other) const noexcept
+	{
+		return hex < other.hex;
+	}
+
+	[[nodiscard]] bool operator <=(const BattleHex & other) const noexcept
+	{
+		return hex <= other.hex;
+	}
+
 
 	template <typename Handler>
-	void serialize(Handler &h, const int version)
+	void serialize(Handler & h)
 	{
 		h & hex;
 	}
 
-    using NeighbouringTiles = std::array<BattleHex, 6>;
-    using NeighbouringTilesCache = std::vector<NeighbouringTiles>;
+private:
 
-    static const NeighbouringTilesCache neighbouringTilesCache;
+	si16 hex;
 };
 
 DLL_EXPORT std::ostream & operator<<(std::ostream & os, const BattleHex & hex);

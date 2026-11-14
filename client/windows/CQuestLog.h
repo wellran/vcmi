@@ -9,59 +9,44 @@
  */
 #pragma once
 
-#include "../widgets/AdventureMapClasses.h"
-#include "../widgets/TextControls.h"
-#include "../widgets/MiscWidgets.h"
+#include "CJournalWindow.h"
+
 #include "../widgets/Images.h"
-#include "CWindowObject.h"
+#include "../adventureMap/CMinimap.h"
+
+#include "../../lib/gameState/QuestInfo.h"
 
 class CCreature;
 class CStackInstance;
-class CButton;
-class CToggleButton;
 class CGHeroInstance;
-class CComponentBox;
-class LRClickableAreaWText;
-class CButton;
+struct QuestInfo;
+
 class CPicture;
 class CCreaturePic;
 class LRClickableAreaWTextComp;
-class CSlider;
 class CLabel;
-struct QuestInfo;
-
-const int QUEST_COUNT = 6;
-const int DESCRIPTION_HEIGHT_MAX = 355;
-
-class CQuestLabel : public LRClickableAreaWText, public CMultiLineLabel
-{
-public:
-	std::function<void()> callback;
-
-	CQuestLabel(Rect position, EFonts Font = FONT_SMALL, EAlignment Align = TOPLEFT, const SDL_Color &Color = Colors::WHITE, const std::string &Text =  "")
-		: CMultiLineLabel (position, FONT_SMALL, TOPLEFT, Colors::WHITE, Text){};
-	void clickLeft(tribool down, bool previousState) override;
-	void showAll(SDL_Surface * to) override;
-};
 
 class CQuestIcon : public CAnimImage
 {
 public:
 	std::function<void()> callback; //TODO: merge with other similar classes?
 
-	CQuestIcon(const std::string &defname, int index, int x=0, int y=0);
+	CQuestIcon(const AnimationPath & defname, int index, int x=0, int y=0);
 
-	void clickLeft(tribool down, bool previousState) override;
-	void showAll(SDL_Surface * to) override;
+	void clickPressed(const Point & cursorPosition) override;
+	void showAll(Canvas & to) override;
 };
 
 class CQuestMinimap : public CMinimap
 {
 	std::vector<std::shared_ptr<CQuestIcon>> icons;
+	std::vector<int3> markerTiles; // computed once per selected quest, placed each redraw
 
-	void clickLeft(tribool down, bool previousState) override{}; //minimap ignores clicking on its surface
+	void clickPressed(const Point & cursorPosition) override{}; //minimap ignores clicking on its surface
 	void iconClicked();
-	void mouseMoved (const SDL_MouseMotionEvent & sEvent) override{};
+	void mouseDragged(const Point & cursorPosition, const Point & lastUpdateDistance) override{};
+
+	void placeMarks(); // (re)create icons from markerTiles
 
 public:
 	const QuestInfo * currentQuest;
@@ -69,38 +54,24 @@ public:
 	CQuestMinimap(const Rect & position);
 	//should be called to invalidate whole map - different player or level
 	void update();
-	void addQuestMarks (const QuestInfo * q);
+	/// Select the quest whose markers are shown, recomputing the marker tiles.
+	void setQuest(const QuestInfo * q);
 
-	void showAll(SDL_Surface * to) override;
+	void showAll(Canvas & to) override;
 };
 
-class CQuestLog : public CWindowObject
+class CQuestLog : public JournalWindow
 {
-	int questIndex;
 	const QuestInfo * currentQuest;
-	std::shared_ptr<CComponentBox> componentsBox;
-	bool hideComplete;
-	std::shared_ptr<CToggleButton> hideCompleteButton;
-	std::shared_ptr<CLabel> hideCompleteLabel;
 
 	const std::vector<QuestInfo> quests;
-	std::vector<std::shared_ptr<CQuestLabel>> labels;
-	std::shared_ptr<CTextBox> description;
 	std::shared_ptr<CQuestMinimap> minimap;
-	std::shared_ptr<CSlider> slider; //scrolls quests
-	std::shared_ptr<CButton> ok;
+
+	size_t getItemCount() const override;
+	std::string getItemText(size_t itemIndex) const override;
+	void onItemSelected(size_t itemIndex) override;
+	void updateMinimap() override;
 
 public:
 	CQuestLog(const std::vector<QuestInfo> & Quests);
-
-	~CQuestLog(){};
-
-	void selectQuest (int which, int labelId);
-	void updateMinimap (int which){};
-	void printDescription (int which){};
-	void sliderMoved (int newpos);
-	void recreateLabelList();
-	void recreateQuestList (int pos);
-	void toggleComplete(bool on);
-	void showAll (SDL_Surface * to) override;
 };

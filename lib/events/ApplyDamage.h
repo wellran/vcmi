@@ -15,25 +15,21 @@
 namespace events
 {
 
-class DLL_LINKAGE CApplyDamage : public ApplyDamage
+class CApplyDamage : public ApplyDamage
 {
 public:
 	CApplyDamage(const Environment * env_, BattleStackAttacked * pack_, std::shared_ptr<battle::Unit> target_);
 
 	bool isEnabled() const override;
-	int64_t getInitalDamage() const override;
+	int64_t getInitialDamage() const override;
 	int64_t getDamage() const override;
 	void setDamage(int64_t value) override;
 	const battle::Unit * getTarget() const override;
 private:
-	int64_t initalDamage;
+	int64_t initialDamage;
 
-	const Environment * env;
 	BattleStackAttacked * pack;
 	std::shared_ptr<battle::Unit> target;
 };
 
 }
-
-
-

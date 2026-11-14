@@ -12,16 +12,14 @@
 #include "../windows/CWindowObject.h"
 
 class CMultiLineLabel;
-struct SDL_Surface;
 
 class CreditsScreen : public CIntObject
 {
-	int positionCounter;
+	int timePassed;
 	std::shared_ptr<CMultiLineLabel> credits;
 
 public:
 	CreditsScreen(Rect rect);
-	void show(SDL_Surface * to) override;
-	void clickLeft(tribool down, bool previousState) override;
-	void clickRight(tribool down, bool previousState) override;
+	void tick(uint32_t msPassed) override;
+	void clickPressed(const Point & cursorPosition) override;
 };

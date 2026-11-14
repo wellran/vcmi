@@ -11,150 +11,202 @@
 
 #include <vcmi/spells/Magic.h>
 
-#include "CCallbackBase.h"
+#include "Destination.h"
 #include "ReachabilityInfo.h"
 #include "BattleAttackInfo.h"
 
 class CGHeroInstance;
 class CStack;
 class ISpellCaster;
+class SpellCastEnvironment;
 class CSpell;
 struct CObstacleInstance;
 class IBonusBearer;
-class CRandomGenerator;
 
-namespace scripting
+namespace vstd
 {
-	class Context;
-	class Pool;
-	class Script;
+class RNG;
 }
 
 namespace spells
 {
 	class Caster;
 	class Spell;
+
+	namespace effects
+	{
+		struct SpellEffectValue;
+	}
 }
 
 struct DLL_LINKAGE AttackableTiles
 {
-	std::set<BattleHex> hostileCreaturePositions;
-	std::set<BattleHex> friendlyCreaturePositions; //for Dragon Breath
-	template <typename Handler> void serialize(Handler &h, const int version)
-	{
-		h & hostileCreaturePositions;
-		h & friendlyCreaturePositions;
-	}
+	/// Hexes on which only hostile units will be targeted
+	BattleHexArray hostileCreaturePositions;
+	/// for Dragon Breath, hexes on which both friendly and hostile creatures will be targeted
+	BattleHexArray friendlyCreaturePositions;
+	/// for animation purposes, if any of targets are on specified positions, unit should play alternative animation
+	BattleHexArray overrideAnimationPositions;
 };
 
-enum class PossiblePlayerBattleAction // actions performed at l-click
-{
-	INVALID = -1, CREATURE_INFO,
-	MOVE_TACTICS, CHOOSE_TACTICS_STACK,
-	MOVE_STACK, ATTACK, WALK_AND_ATTACK, ATTACK_AND_RETURN, SHOOT, //OPEN_GATE, //we can open castle gate during siege
-	NO_LOCATION, ANY_LOCATION, OBSTACLE, TELEPORT, SACRIFICE, RANDOM_GENIE_SPELL,
-	FREE_LOCATION, //used with Force Field and Fire Wall - all tiles affected by spell must be free
-	CATAPULT, HEAL, RISE_DEMONS,
-	AIMED_SPELL_CREATURE
+struct ForcedAction {
+	EActionType type = EActionType::NO_ACTION;
+	BattleHex position;
+	const battle::Unit * target;
 };
 
-struct DLL_LINKAGE BattleClientInterfaceData
-{
-	si32 creatureSpellToCast;
-	ui8 tacticsMode;
-};
+using SpellEffectValUptr = std::unique_ptr<spells::effects::SpellEffectValue>;
 
 class DLL_LINKAGE CBattleInfoCallback : public virtual CBattleInfoEssentials
 {
 public:
-	enum ERandomSpell
-	{
-		RANDOM_GENIE, RANDOM_AIMED
-	};
 
-	boost::optional<int> battleIsFinished() const override; //return none if battle is ongoing; otherwise the victorious side (0/1) or 2 if it is a draw
+	const scripting::Pool & getScriptContextPool() const override;
+	std::optional<BattleSide> battleIsFinished() const override; //return none if battle is ongoing; otherwise the victorious side (0/1) or 2 if it is a draw
 
-	std::vector<std::shared_ptr<const CObstacleInstance>> battleGetAllObstaclesOnPos(BattleHex tile, bool onlyBlocking = true) const override;
-	std::vector<std::shared_ptr<const CObstacleInstance>> getAllAffectedObstaclesByStack(const battle::Unit * unit) const override;
+	std::vector<std::shared_ptr<const CObstacleInstance>> battleGetAllObstaclesOnPos(const BattleHex & tile, bool onlyBlocking = true, std::optional<BattleSide> perspective = std::nullopt) const override;
+	std::vector<std::shared_ptr<const CObstacleInstance>> getAllAffectedObstaclesByStack(const battle::Unit * unit, const BattleHexArray & passed) const override;
+	//Handle obstacle damage here, requires SpellCastEnvironment
+	bool handleObstacleTriggersForUnit(SpellCastEnvironment & spellEnv, const battle::Unit & unit, const BattleHexArray & passed = {}) const;
 
-	const CStack * battleGetStackByPos(BattleHex pos, bool onlyAlive = true) const;
+	const CStack * battleGetStackByPos(const BattleHex & pos, bool onlyAlive = true) const;
 
-	const battle::Unit * battleGetUnitByPos(BattleHex pos, bool onlyAlive = true) const override;
+	const battle::Unit * battleGetUnitByPos(const BattleHex & pos, bool onlyAlive = true) const override;
+	/// Living unit on the hex, or a dead one if there is no living unit
+	const battle::Unit * battleGetUnitOrCorpseByPos(const BattleHex & pos) const;
 
 	///returns all alive units excluding turrets
 	battle::Units battleAliveUnits() const;
 	///returns all alive units from particular side excluding turrets
-	battle::Units battleAliveUnits(ui8 side) const;
+	battle::Units battleAliveUnits(BattleSide side) const;
 
-	void battleGetTurnOrder(std::vector<battle::Units> & out, const size_t maxUnits, const int maxTurns, const int turn = 0, int8_t lastMoved = -1) const;
-
-	///returns reachable hexes (valid movement destinations), DOES contain stack current position
-	std::vector<BattleHex> battleGetAvailableHexes(const battle::Unit * unit, bool addOccupiable, std::vector<BattleHex> * attackable) const;
+	void battleGetTurnOrder(std::vector<battle::Units> & out, const size_t maxUnits, const int maxTurns, const int turn = 0, BattleSide lastMoved = BattleSide::NONE) const;
 
 	///returns reachable hexes (valid movement destinations), DOES contain stack current position (lite version)
-	std::vector<BattleHex> battleGetAvailableHexes(const battle::Unit * unit) const;
+	BattleHexArray battleGetAvailableHexes(const battle::Unit * unit, bool obtainMovementRange) const;
+	BattleHexArray battleGetAvailableHexes(const ReachabilityInfo & cache, const battle::Unit * unit, bool obtainMovementRange) const;
 
-	std::vector<BattleHex> battleGetAvailableHexes(const ReachabilityInfo & cache, const battle::Unit * unit) const;
+	//returns hexes the unit can occupy, obtainMovementRange ignores tactics mode (for double-wide units includes both head and tail)
+	BattleHexArray battleGetOccupiableHexes(const battle::Unit * unit, bool obtainMovementRange) const;
+	BattleHexArray battleGetOccupiableHexes(const BattleHexArray & availableHexes, const battle::Unit * unit) const;
+	//returns from which hex the attacker would attack the adjacent target from given direction; INVALID if not possible; the hex may be inccessible
+	BattleHex fromWhichHexAttack(const battle::Unit * attacker, const BattleHex & target, const BattleHex::EDir & direction) const;
+	/// Hex that the attacker can stop at to strike the target hex approached from the direction, or INVALID.
+	/// A long weapon strikes over one free hex with any hex of the attacker on the line, otherwise the attacker stands next to the target
+	BattleHex findAttackPosition(const BattleHexArray & availableHexes, const battle::Unit * attacker, const BattleHex & target, const BattleHex::EDir & direction, bool longWeapon) const;
 
-	int battleGetSurrenderCost(PlayerColor Player) const; //returns cost of surrendering battle, -1 if surrendering is not possible
-	ReachabilityInfo::TDistances battleGetDistances(const battle::Unit * unit, BattleHex assumedPosition) const;
-	std::set<BattleHex> battleGetAttackedHexes(const CStack* attacker, BattleHex destinationTile, BattleHex attackerPos = BattleHex::INVALID) const;
+	//returns to which hex the (head of) unit would move to occupy position (possibly by tail)
+	BattleHex toWhichHexMove(const battle::Unit * unit, const BattleHex & position) const;
+	BattleHex toWhichHexMove(const BattleHexArray & availableHexes, const battle::Unit * unit, const BattleHex & position) const;
 
-	bool battleCanAttack(const CStack * stack, const CStack * target, BattleHex dest) const; //determines if stack with given ID can attack target at the selected destination
-	bool battleCanShoot(const battle::Unit * attacker, BattleHex dest) const; //determines if stack with given ID shoot at the selected destination
+	//return true iff attacker move towards and attack position from direction (spatial reasoning only)
+	/// Checks that the attacker can stop at the hex to act on the target position: the hex is available and no obstacle stops the attacker there
+	bool battleCanAttackFromHex(const BattleHexArray & availableHexes, const battle::Unit * attacker, const BattleHex & position, const BattleHex & fromHex) const;
+	bool battleCanAttackHex(const BattleHexArray & availableHexes, const battle::Unit * attacker, const BattleHex & position, const BattleHex::EDir & direction) const; //reuse availableHexes on multiple calls
+	bool battleCanAttackHex(const BattleHexArray & availableHexes, const battle::Unit * attacker, const BattleHex & position) const; //reuse availableHexes on multiple calls
+
+	int battleGetSurrenderCost(const PlayerColor & Player) const; //returns cost of surrendering battle, -1 if surrendering is not possible
+	ReachabilityInfo::TDistances battleGetDistances(const battle::Unit * unit, const BattleHex & assumedPosition) const;
+	bool isEnemyUnitWithinSpecifiedRange(const BattleHex & attackerPosition, const battle::Unit * defenderUnit, unsigned int range) const;
+	bool isHexWithinSpecifiedRange(const BattleHex & attackerPosition, const BattleHex & targetPosition, unsigned int range) const;
+
+	std::pair< BattleHexArray, int > getPath(const BattleHex & start, const BattleHex & dest, const battle::Unit * stack) const;
+
+	bool battleCanTargetEmptyHex(const battle::Unit * attacker) const; //determines of stack with given ID can target empty hex to attack - currently used only for SPELL_LIKE_ATTACK shooting
+	bool battleCanAttackUnit(const battle::Unit * attacker, const battle::Unit * target) const; //determines if attacker can attack target (no spatial reasoning)
+	bool battleCanShoot(const battle::Unit * attacker, const BattleHex & dest) const; //determines if stack with given ID shoot at the selected destination
 	bool battleCanShoot(const battle::Unit * attacker) const; //determines if stack with given ID shoot in principle
+	bool isLongWeaponAttack(const battle::Unit * attacker, const battle::Unit * defender, const BattleHex & attackerPos = BattleHex::INVALID) const;
+	//hexes of the defender that the attacker can reach in melee; empty if no melee attack is possible
+	BattleHexArray meleeAttackHexes(const battle::Unit * attacker, const battle::Unit * defender, const BattleHex & attackerPos = BattleHex::INVALID, const BattleHex & defenderPos = BattleHex::INVALID) const;
+	bool isMeleeAttackPossible(const battle::Unit * attacker, const battle::Unit * defender, const BattleHex & attackerPos = BattleHex::INVALID, const BattleHex & defenderPos = BattleHex::INVALID) const;
 	bool battleIsUnitBlocked(const battle::Unit * unit) const; //returns true if there is neighboring enemy stack
-	std::set<const battle::Unit *> battleAdjacentUnits(const battle::Unit * unit) const;
+	battle::Units battleAdjacentUnits(const battle::Unit * unit) const;
 
-	TDmgRange calculateDmgRange(const BattleAttackInfo & info) const; //charge - number of hexes travelled before attack (for champion's jousting); returns pair <min dmg, max dmg>
+	DamageEstimation calculateDmgRange(const BattleAttackInfo & info) const;
 
-	TDmgRange battleEstimateDamage(const BattleAttackInfo & bai, TDmgRange * retaliationDmg = nullptr) const; //estimates damage dealt by attacker to defender; it may be not precise especially when stack has randomly working bonuses; returns pair <min dmg, max dmg>
-	TDmgRange battleEstimateDamage(const CStack * attacker, const CStack * defender, TDmgRange * retaliationDmg = nullptr) const; //estimates damage dealt by attacker to defender; it may be not precise especially when stack has randomly working bonuses; returns pair <min dmg, max dmg>
+	/// estimates damage dealt by attacker to defender;
+	/// only non-random bonuses are considered in estimation
+	/// returns pair <min dmg, max dmg>
+	DamageEstimation battleEstimateDamage(const BattleAttackInfo & bai, DamageEstimation * retaliationDmg = nullptr) const;
+	DamageEstimation battleEstimateDamage(const battle::Unit * attacker, const battle::Unit * defender, const BattleHex & attackerPosition, DamageEstimation * retaliationDmg = nullptr) const;
+	DamageEstimation battleEstimateDamage(const battle::Unit * attacker, const battle::Unit * defender, int getMovementRange, DamageEstimation * retaliationDmg = nullptr) const;
 
-	bool battleHasDistancePenalty(const IBonusBearer * shooter, BattleHex shooterPosition, BattleHex destHex) const;
-	bool battleHasWallPenalty(const IBonusBearer * shooter, BattleHex shooterPosition, BattleHex destHex) const;
-	bool battleHasShootingPenalty(const battle::Unit * shooter, BattleHex destHex) const;
+	/// preview of damage / restored HP and units killed or raised/summoned for the aim; if an effect resolves no targets, a unit in the last aim point is evaluated alone
+	SpellEffectValUptr getSpellEffectValue(const CSpell * spell, const spells::Caster * caster, const spells::Mode spellMode, const battle::Target & aim) const;
 
-	BattleHex wallPartToBattleHex(EWallPart::EWallPart part) const;
-	EWallPart::EWallPart battleHexToWallPart(BattleHex hex) const; //returns part of destructible wall / gate / keep under given hex or -1 if not found
-	bool isWallPartPotentiallyAttackable(EWallPart::EWallPart wallPart) const; // returns true if the wall part is potentially attackable (independent of wall state), false if not
-	std::vector<BattleHex> getAttackableBattleHexes() const;
+	/// damage estimation for spell-like-attack case, eg. Death Cloud
+	DamageEstimation estimateSpellLikeAttackDamage(const battle::Unit * shooter, const CSpell * spell,const BattleHex & aimHex) const;
 
-	si8 battleMinSpellLevel(ui8 side) const; //calculates maximum spell level possible to be cast on battlefield - takes into account artifacts of both heroes; if no effects are set, 0 is returned
-	si8 battleMaxSpellLevel(ui8 side) const; //calculates minimum spell level possible to be cast on battlefield - takes into account artifacts of both heroes; if no effects are set, 0 is returned
+	int64_t getFirstAidHealValue(const CGHeroInstance * owner, const battle::Unit * target) const;
+
+	bool battleIsInsideWalls(const BattleHex & from) const;
+	bool battleHasPenaltyOnLine(const BattleHex & from, const BattleHex & dest, bool checkWall, bool checkMoat) const;
+	bool battleHasDistancePenalty(const IBonusBearer * shooter, const BattleHex & shooterPosition, const BattleHex & destHex) const;
+	bool battleHasWallPenalty(const IBonusBearer * shooter, const BattleHex & shooterPosition, const BattleHex & destHex) const;
+	bool battleHasShootingPenalty(const battle::Unit * shooter, const BattleHex & destHex) const;
+
+	BattleHex wallPartToBattleHex(EWallPart part) const override;
+	EWallPart battleHexToWallPart(const BattleHex & hex) const override; //returns part of destructible wall / gate / keep under given hex or -1 if not found
+	bool isWallPartPotentiallyAttackable(EWallPart wallPart) const; // returns true if the wall part is potentially attackable (independent of wall state), false if not
+	bool isWallPartAttackable(EWallPart wallPart) const override; // returns true if the wall part is actually attackable, false if not
+	BattleHexArray getAttackableWallParts() const;
+
+	si8 battleMinSpellLevel(BattleSide side) const; //calculates maximum spell level possible to be cast on battlefield - takes into account artifacts of both heroes; if no effects are set, 0 is returned
+	si8 battleMaxSpellLevel(BattleSide side) const; //calculates minimum spell level possible to be cast on battlefield - takes into account artifacts of both heroes; if no effects are set, 0 is returned
 	int32_t battleGetSpellCost(const spells::Spell * sp, const CGHeroInstance * caster) const; //returns cost of given spell
-	ESpellCastProblem::ESpellCastProblem battleCanCastSpell(const spells::Caster * caster, spells::Mode mode) const; //returns true if there are no general issues preventing from casting a spell
+	ESpellCastProblem battleCanCastSpell(const spells::Caster * caster, spells::Mode mode) const; //returns true if there are no general issues preventing from casting a spell
 
-	SpellID battleGetRandomStackSpell(CRandomGenerator & rand, const CStack * stack, ERandomSpell mode) const;
-	SpellID getRandomBeneficialSpell(CRandomGenerator & rand, const CStack * subject) const;
-	SpellID getRandomCastedSpell(CRandomGenerator & rand, const CStack * caster) const; //called at the beginning of turn for Faerie Dragon
+	/// Spells that a RANDOM_SPELLCASTER unit may roll for the target: castable on it, not already on it and of use in this battle
+	std::vector<SpellID> getBeneficialSpells(const battle::Unit * caster, const battle::Unit * target) const;
+	SpellID getRandomCastedSpell(vstd::RNG & rand, const CStack * caster) const; //called at the beginning of turn for Faerie Dragon
 
-	si8 battleCanTeleportTo(const battle::Unit * stack, BattleHex destHex, int telportLevel) const; //checks if teleportation of given stack to given position can take place
-	std::vector<PossiblePlayerBattleAction> getClientActionsForStack(const CStack * stack, const BattleClientInterfaceData & data);
-	PossiblePlayerBattleAction getCasterAction(const CSpell * spell, const spells::Caster * caster, spells::Mode mode) const;
 
 	//convenience methods using the ones above
-	bool isInTacticRange(BattleHex dest) const;
+	bool isInTacticRange(const BattleHex & dest) const;
 	si8 battleGetTacticDist() const; //returns tactic distance for calling player or 0 if this player is not in tactic phase (for ALL_KNOWING actual distance for tactic side)
 
-	AttackableTiles getPotentiallyAttackableHexes(const  battle::Unit* attacker, BattleHex destinationTile, BattleHex attackerPos) const; //TODO: apply rotation to two-hex attacker
-	AttackableTiles getPotentiallyShootableHexes(const  battle::Unit* attacker, BattleHex destinationTile, BattleHex attackerPos) const;
-	std::vector<const battle::Unit *> getAttackedBattleUnits(const battle::Unit* attacker, BattleHex destinationTile, bool rangedAttack, BattleHex attackerPos = BattleHex::INVALID) const; //calculates range of multi-hex attacks
-	std::set<const CStack*> getAttackedCreatures(const CStack* attacker, BattleHex destinationTile, bool rangedAttack, BattleHex attackerPos = BattleHex::INVALID) const; //calculates range of multi-hex attacks
-	bool isToReverse(BattleHex hexFrom, BattleHex hexTo, bool curDir /*if true, creature is in attacker's direction*/, bool toDoubleWide, bool toDir) const; //determines if creature should be reversed (it stands on hexFrom and should 'see' hexTo)
-	bool isToReverseHlp(BattleHex hexFrom, BattleHex hexTo, bool curDir) const; //helper for isToReverse
+	AttackableTiles getPotentiallyAttackableHexes(
+		const  battle::Unit* attacker,
+		const  battle::Unit* defender,
+		BattleHex destinationTile,
+		BattleHex attackerPos,
+		BattleHex defenderPos) const; //TODO: apply rotation to two-hex attacker
+
+	AttackableTiles getPotentiallyAttackableHexes(
+		const  battle::Unit * attacker,
+		BattleHex destinationTile,
+		BattleHex attackerPos) const;
+
+	AttackableTiles getPotentiallyShootableHexes(const  battle::Unit* attacker, const BattleHex & destinationTile, const BattleHex & attackerPos) const;
+
+	battle::Units getAttackedBattleUnits(
+		const battle::Unit* attacker,
+		const  battle::Unit * defender,
+		BattleHex destinationTile,
+		bool rangedAttack,
+		BattleHex attackerPos = BattleHex::INVALID,
+		BattleHex defenderPos = BattleHex::INVALID) const; //calculates range of multi-hex attacks
+	
+	/// Units a multi-hex attack strikes besides its primary target, in battlefield hex order, and
+	/// whether a custom hit animation is to be played. Ordered rather than a set, because who is hit
+	/// first decides in which order their abilities react and how the rolls of the attack are drawn.
+	std::pair<battle::Units, bool> getAttackedCreatures(const CStack* attacker, const BattleHex & destinationTile, bool rangedAttack, BattleHex attackerPos = BattleHex::INVALID) const;
+	bool isToReverse(const battle::Unit * attacker, const battle::Unit * defender, BattleHex attackerHex = BattleHex::INVALID, BattleHex defenderHex = BattleHex::INVALID) const; //determines if attacker standing at attackerHex should reverse in order to attack defender
 
 	ReachabilityInfo getReachability(const battle::Unit * unit) const;
 	ReachabilityInfo getReachability(const ReachabilityInfo::Parameters & params) const;
-	AccessibilityInfo getAccesibility() const;
-	AccessibilityInfo getAccesibility(const battle::Unit * stack) const; //Hexes ocupied by stack will be marked as accessible.
-	AccessibilityInfo getAccesibility(const std::vector<BattleHex> & accessibleHexes) const; //given hexes will be marked as accessible
-	std::pair<const battle::Unit *, BattleHex> getNearestStack(const battle::Unit * closest) const;
+	AccessibilityInfo getAccessibility() const;
+	AccessibilityInfo getAccessibility(const battle::Unit * stack) const; //Hexes occupied by stack will be marked as accessible.
+	AccessibilityInfo getAccessibility(const BattleHexArray & accessibleHexes) const; //given hexes will be marked as accessible
+	ForcedAction getBerserkForcedAction(const battle::Unit * berserker) const;
+	BattleHex getClosestHexToTargetInRange(const ReachabilityInfo& cache, const battle::Unit& unit, const BattleHex& targetHex) const;
 
-	BattleHex getAvaliableHex(CreatureID creID, ui8 side, int initialPos = -1) const; //find place for adding new stack
+	/// find free hex suitable to place new unit. If no initial position was provided, hex located on left size (attacker) or right side (defender) will be selected
+	BattleHex getAvailableHex(const Creature * creature, BattleSide side, BattleHex initialPos = {}) const override;
 protected:
 	ReachabilityInfo getFlyingReachability(const ReachabilityInfo::Parameters & params) const;
 	ReachabilityInfo makeBFS(const AccessibilityInfo & accessibility, const ReachabilityInfo::Parameters & params) const;
-	bool isInObstacle(BattleHex hex, const std::set<BattleHex> & obstacles, const ReachabilityInfo::Parameters & params) const;
-	std::set<BattleHex> getStoppers(BattlePerspective::BattlePerspective whichSidePerspective) const; //get hexes with stopping obstacles (quicksands)
+	bool isInObstacle(const BattleHex & hex, const BattleHexArray & obstacles, const ReachabilityInfo::Parameters & params) const;
+	BattleHexArray getStoppers(BattleSide whichSidePerspective) const; //get hexes with stopping obstacles (quicksands)
 };

@@ -11,6 +11,8 @@
 #include "StdInc.h"
 #include "CZipSaver.h"
 
+#include <vstd/DateUtils.h>
+
 ///CZipOutputStream
 CZipOutputStream::CZipOutputStream(CZipSaver * owner_, zipFile archive, const std::string & archiveFilename):
 	handle(archive),
@@ -21,13 +23,13 @@ CZipOutputStream::CZipOutputStream(CZipSaver * owner_, zipFile archive, const st
 	std::time_t t = time(nullptr);
 	fileInfo.dosDate = 0;
 
-	struct tm * localTime = std::localtime(&t);
-	fileInfo.tmz_date.tm_hour = localTime->tm_hour;
-	fileInfo.tmz_date.tm_mday = localTime->tm_mday;
-	fileInfo.tmz_date.tm_min  = localTime->tm_min;
-	fileInfo.tmz_date.tm_mon  = localTime->tm_mon;
-	fileInfo.tmz_date.tm_sec  = localTime->tm_sec;
-	fileInfo.tmz_date.tm_year = localTime->tm_year;
+	std::tm localTime = vstd::safeLocalTime(t);
+	fileInfo.tmz_date.tm_hour = localTime.tm_hour;
+	fileInfo.tmz_date.tm_mday = localTime.tm_mday;
+	fileInfo.tmz_date.tm_min  = localTime.tm_min;
+	fileInfo.tmz_date.tm_mon  = localTime.tm_mon;
+	fileInfo.tmz_date.tm_sec  = localTime.tm_sec;
+	fileInfo.tmz_date.tm_year = localTime.tm_year;
 
 	fileInfo.external_fa = 0; //???
 	fileInfo.internal_fa = 0;
@@ -50,7 +52,7 @@ CZipOutputStream::CZipOutputStream(CZipSaver * owner_, zipFile archive, const st
 						nullptr,//password
 						0,//crcForCrypting
 						20,//versionMadeBy
-						0,//flagBase
+						(1 << 11),//flagBase - UTF-8 file names
 						0//zip64
 						);
 
@@ -70,7 +72,7 @@ CZipOutputStream::~CZipOutputStream()
 
 si64 CZipOutputStream::write(const ui8 * data, si64 size)
 {
-	int ret = zipWriteInFileInZip(handle, (const void*)data, (unsigned)size);
+	int ret = zipWriteInFileInZip(handle, data, static_cast<unsigned>(size));
 
 	if (ret == ZIP_OK)
 		return size;
@@ -80,12 +82,11 @@ si64 CZipOutputStream::write(const ui8 * data, si64 size)
 
 ///CZipSaver
 CZipSaver::CZipSaver(std::shared_ptr<CIOApi> api, const boost::filesystem::path & path):
-	ioApi(api),
+	ioApi(std::move(api)),
 	zipApi(ioApi->getApiStructure()),
-	handle(nullptr),
+	handle(zipOpen2_64(path.c_str(), APPEND_STATUS_CREATE, nullptr, &zipApi)),
 	activeStream(nullptr)
 {
-	handle = zipOpen2_64((const void *) & path, APPEND_STATUS_CREATE, nullptr, &zipApi);
 
 	if (handle == nullptr)
 		throw std::runtime_error("CZipSaver: Failed to create archive");

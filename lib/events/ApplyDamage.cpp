@@ -12,25 +12,22 @@
 #include <vcmi/Environment.h>
 
 #include "ApplyDamage.h"
-
-#include "../../lib/NetPacks.h"
+#include "../networkPacks/PacksForClientBattle.h"
 
 namespace events
 {
 
 SubscriptionRegistry<ApplyDamage> * ApplyDamage::getRegistry()
 {
-	static std::unique_ptr<SubscriptionRegistry<ApplyDamage>> Instance = make_unique<SubscriptionRegistry<ApplyDamage>>();
+	static auto Instance = std::make_unique<SubscriptionRegistry<ApplyDamage>>();
 	return Instance.get();
 }
 
 CApplyDamage::CApplyDamage(const Environment * env_, BattleStackAttacked * pack_, std::shared_ptr<battle::Unit> target_)
-	: env(env_),
-	pack(pack_),
-	target(target_)
-
+	: pack(pack_),
+	target(std::move(target_))
 {
-	initalDamage = pack->damageAmount;
+	initialDamage = pack->damageAmount;
 }
 
 bool CApplyDamage::isEnabled() const
@@ -38,9 +35,9 @@ bool CApplyDamage::isEnabled() const
 	return true;
 }
 
-int64_t CApplyDamage::getInitalDamage() const
+int64_t CApplyDamage::getInitialDamage() const
 {
-	return initalDamage;
+	return initialDamage;
 }
 
 int64_t CApplyDamage::getDamage() const

@@ -11,13 +11,14 @@
 #pragma once
 
 #include "SubscriptionRegistry.h"
+#include <vcmi/scripting/ApiTags.h>
 
 class Environment;
 
 namespace events
 {
 
-class DLL_LINKAGE EventBus : public boost::noncopyable
+class DLL_LINKAGE EventBus : public boost::noncopyable, public scripting::ApiRawPointer<EventBus>
 {
 public:
 	template <typename E>

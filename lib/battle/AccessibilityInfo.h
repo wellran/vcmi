@@ -25,14 +25,20 @@ enum class EAccessibility
 	DESTRUCTIBLE_WALL,
 	GATE, //sieges -> gate opens only for defender stacks
 	UNAVAILABLE, //indestructible wall parts, special battlefields (like boat-to-boat)
-	SIDE_COLUMN //used for first and last columns of hexes that are unavailable but wat machines can stand there
+	SIDE_COLUMN //used for first and last columns of hexes that are unavailable but war machines can stand there
 };
 
 
-typedef std::array<EAccessibility, GameConstants::BFIELD_SIZE> TAccessibilityArray;
+using TAccessibilityArray = std::array<EAccessibility, GameConstants::BFIELD_SIZE>;
+using TBattlefieldTurnsArray = std::array<int16_t, GameConstants::BFIELD_SIZE>;
 
 struct DLL_LINKAGE AccessibilityInfo : TAccessibilityArray
 {
-	bool accessible(BattleHex tile, const battle::Unit * stack) const; //checks for both tiles if stack is double wide
-	bool accessible(BattleHex tile, bool doubleWide, ui8 side) const; //checks for both tiles if stack is double wide
+	std::shared_ptr<const TBattlefieldTurnsArray> destructibleEnemyTurns; //used only as a view for destructibleEnemyTurns from ReachabilityInfo::Parameters
+
+	public:
+		bool accessible(const BattleHex & tile, const battle::Unit * stack) const; //checks for both tiles if stack is double wide
+		bool accessible(const BattleHex & tile, bool doubleWide, BattleSide side, bool canUseGate) const; //checks for both tiles if stack is double wide
+	private:
+		bool tileAccessibleWithGate(const BattleHex & tile, bool canUseGate) const;
 };

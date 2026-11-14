@@ -8,103 +8,46 @@
  *
  */
 #include "StdInc.h"
+#include "Global.h"
 #include "Client.h"
 
-#include <SDL.h>
-
-#include "CMusicHandler.h"
-#include "../lib/mapping/CCampaignHandler.h"
-#include "../CCallback.h"
-#include "../lib/CConsoleHandler.h"
-#include "CGameInfo.h"
-#include "../lib/CGameState.h"
 #include "CPlayerInterface.h"
-#include "../lib/StartInfo.h"
-#include "../lib/battle/BattleInfo.h"
-#include "../lib/CModHandler.h"
-#include "../lib/CArtHandler.h"
-#include "../lib/CGeneralTextHandler.h"
-#include "../lib/CHeroHandler.h"
-#include "../lib/CTownHandler.h"
-#include "../lib/CBuildingHandler.h"
-#include "../lib/spells/CSpellHandler.h"
-#include "../lib/serializer/CTypeList.h"
-#include "../lib/serializer/Connection.h"
-#include "../lib/serializer/CLoadIntegrityValidator.h"
-#include "../lib/NetPacks.h"
-#include "../lib/VCMI_Lib.h"
-#include "../lib/VCMIDirs.h"
-#include "../lib/mapping/CMap.h"
-#include "../lib/mapping/CMapService.h"
-#include "../lib/JsonNode.h"
-#include "mapHandler.h"
-#include "../lib/CConfigHandler.h"
-#include "mainmenu/CMainMenu.h"
-#include "mainmenu/CCampaignScreen.h"
-#include "lobby/CBonusSelection.h"
-#include "battle/CBattleInterface.h"
-#include "../lib/CThreadHelper.h"
-#include "../lib/registerTypes/RegisterTypes.h"
-#include "gui/CGuiHandler.h"
-#include "CMT.h"
+#include "PlayerLocalState.h"
 #include "CServerHandler.h"
-#include "../lib/ScriptHandler.h"
+#include "ClientNetPackVisitors.h"
+#include "adventureMap/AdventureMapInterface.h"
+#include "battle/BattleInterface.h"
+#include "GameEngine.h"
+#include "GameInstance.h"
+#include "gui/WindowHandler.h"
+#include "mapView/mapHandler.h"
+
+#include "../lib/CConfigHandler.h"
+#include "../lib/GameLibrary.h"
+#include "../lib/battle/BattleInfo.h"
+#include "../lib/battle/CPlayerBattleCallback.h"
+#include "../lib/callback/CCallback.h"
+#include "../lib/callback/AIFactory.h"
+#include "../lib/callback/CGlobalAI.h"
+#include "../lib/callback/IGameInfoCallback.h"
+#include "../lib/filesystem/Filesystem.h"
+#include "../lib/gameState/CGameState.h"
+#include "../lib/CPlayerState.h"
+#include "../lib/CThreadHelper.h"
+#include "../lib/VCMIDirs.h"
+#include "../lib/UnlockGuard.h"
+#include "../lib/mapObjects/army/CArmedInstance.h"
+#include "../lib/mapping/CMapService.h"
+#include "../lib/pathfinder/CGPathNode.h"
+#include "../lib/serializer/GameConnection.h"
+
+#include <memory>
 #include <vcmi/events/EventBus.h>
+
 
 #ifdef VCMI_ANDROID
 #include "lib/CAndroidVMHelper.h"
 #endif
-
-#ifdef VCMI_ANDROID
-std::atomic_bool androidTestServerReadyFlag;
-#endif
-
-ThreadSafeVector<int> CClient::waitingRequest;
-
-template<typename T> class CApplyOnCL;
-
-class CBaseForCLApply
-{
-public:
-	virtual void applyOnClAfter(CClient * cl, void * pack) const =0;
-	virtual void applyOnClBefore(CClient * cl, void * pack) const =0;
-	virtual ~CBaseForCLApply(){}
-
-	template<typename U> static CBaseForCLApply * getApplier(const U * t = nullptr)
-	{
-		return new CApplyOnCL<U>();
-	}
-};
-
-template<typename T> class CApplyOnCL : public CBaseForCLApply
-{
-public:
-	void applyOnClAfter(CClient * cl, void * pack) const override
-	{
-		T * ptr = static_cast<T *>(pack);
-		ptr->applyCl(cl);
-	}
-	void applyOnClBefore(CClient * cl, void * pack) const override
-	{
-		T * ptr = static_cast<T *>(pack);
-		ptr->applyFirstCl(cl);
-	}
-};
-
-template<> class CApplyOnCL<CPack>: public CBaseForCLApply
-{
-public:
-	void applyOnClAfter(CClient * cl, void * pack) const override
-	{
-		logGlobal->error("Cannot apply on CL plain CPack!");
-		assert(0);
-	}
-	void applyOnClBefore(CClient * cl, void * pack) const override
-	{
-		logGlobal->error("Cannot apply on CL plain CPack!");
-		assert(0);
-	}
-};
 
 CPlayerEnvironment::CPlayerEnvironment(PlayerColor player_, CClient * cl_, std::shared_ptr<CCallback> mainCallback_)
 	: player(player_),
@@ -116,22 +59,12 @@ CPlayerEnvironment::CPlayerEnvironment(PlayerColor player_, CClient * cl_, std::
 
 const Services * CPlayerEnvironment::services() const
 {
-	return VLC;
+	return LIBRARY;
 }
 
-vstd::CLoggerBase * CPlayerEnvironment::logger() const
+const CPlayerEnvironment::BattleCb * CPlayerEnvironment::battle(const BattleID & battleID) const
 {
-	return logGlobal;
-}
-
-events::EventBus * CPlayerEnvironment::eventBus() const
-{
-	return cl->eventBus();//always get actual value
-}
-
-const CPlayerEnvironment::BattleCb * CPlayerEnvironment::battle() const
-{
-	return mainCallback.get();
+	return mainCallback->getBattle(battleID).get();
 }
 
 const CPlayerEnvironment::GameCb * CPlayerEnvironment::game() const
@@ -139,257 +72,104 @@ const CPlayerEnvironment::GameCb * CPlayerEnvironment::game() const
 	return mainCallback.get();
 }
 
-
 CClient::CClient()
 {
 	waitingRequest.clear();
-	applier = std::make_shared<CApplier<CBaseForCLApply>>();
-	registerTypesClientPacks1(*applier);
-	registerTypesClientPacks2(*applier);
-	IObjectInterface::cb = this;
-	gs = nullptr;
 }
 
-CClient::~CClient()
+CClient::~CClient() = default;
+
+IGameInfoCallback & CClient::gameInfo()
 {
-	IObjectInterface::cb = nullptr;
+	return *gamestate;
 }
 
 const Services * CClient::services() const
 {
-	return VLC; //todo: this should be CGI
+	return LIBRARY; //todo: this should be LIBRARY
 }
 
-const CClient::BattleCb * CClient::battle() const
+const CClient::BattleCb * CClient::battle(const BattleID & battleID) const
 {
-	return this;
+	return nullptr; //todo?
 }
 
 const CClient::GameCb * CClient::game() const
 {
-	return this;
+	return gamestate.get();
 }
 
-vstd::CLoggerBase * CClient::logger() const
+void CClient::newGame(std::shared_ptr<CGameState> initializedGameState)
 {
-	return logGlobal;
-}
-
-events::EventBus * CClient::eventBus() const
-{
-	return clientEventBus.get();
-}
-
-void CClient::newGame()
-{
-	CSH->th->update();
-	CMapService mapService;
-	gs = new CGameState();
-	gs->preInit(VLC);
-	logNetwork->trace("\tCreating gamestate: %i", CSH->th->getDiff());
-	gs->init(&mapService, CSH->si.get(), settings["general"]["saveRandomMaps"].Bool());
-	logNetwork->trace("Initializing GameState (together): %d ms", CSH->th->getDiff());
+	GAME->server().th->update();
+	assert(initializedGameState);
+	gamestate = initializedGameState;
+	gamestate->preInit(LIBRARY);
+	logNetwork->trace("\tCreating gamestate: %i", GAME->server().th->getDiff());
 
 	initMapHandler();
-	reinitScripting();
 	initPlayerEnvironments();
 	initPlayerInterfaces();
 }
 
-void CClient::loadGame()
+void CClient::loadGame(std::shared_ptr<CGameState> initializedGameState)
 {
 	logNetwork->info("Loading procedure started!");
 
-	std::unique_ptr<CLoadFile> loader;
-	try
-	{
-		boost::filesystem::path clientSaveName = *CResourceHandler::get("local")->getResourceName(ResourceID(CSH->si->mapname, EResType::CLIENT_SAVEGAME));
-		boost::filesystem::path controlServerSaveName;
+	logNetwork->info("Game state was transferred over network, loading.");
+	gamestate = initializedGameState;
+	gamestate->preInit(LIBRARY);
+	gamestate->updateOnLoad(*GAME->server().si);
+	logNetwork->info("Game loaded, initialize interfaces.");
 
-		if(CResourceHandler::get("local")->existsResource(ResourceID(CSH->si->mapname, EResType::SERVER_SAVEGAME)))
-		{
-			controlServerSaveName = *CResourceHandler::get("local")->getResourceName(ResourceID(CSH->si->mapname, EResType::SERVER_SAVEGAME));
-		}
-		else // create entry for server savegame. Triggered if save was made after launch and not yet present in res handler
-		{
-			controlServerSaveName = boost::filesystem::path(clientSaveName).replace_extension(".vsgm1");
-			CResourceHandler::get("local")->createResource(controlServerSaveName.string(), true);
-		}
-
-		if(clientSaveName.empty())
-			throw std::runtime_error("Cannot open client part of " + CSH->si->mapname);
-		if(controlServerSaveName.empty() || !boost::filesystem::exists(controlServerSaveName))
-			throw std::runtime_error("Cannot open server part of " + CSH->si->mapname);
-
-		{
-			CLoadIntegrityValidator checkingLoader(clientSaveName, controlServerSaveName, MINIMAL_SERIALIZATION_VERSION);
-			loadCommonState(checkingLoader);
-			loader = checkingLoader.decay();
-		}
-
-	}
-	catch(std::exception & e)
-	{
-		logGlobal->error("Cannot load game %s. Error: %s", CSH->si->mapname, e.what());
-		throw; //obviously we cannot continue here
-	}
-	logNetwork->trace("Loaded common part of save %d ms", CSH->th->getDiff());
-	gs->preInit(VLC);
-	gs->updateOnLoad(CSH->si.get());
 	initMapHandler();
-
-	reinitScripting();
-
 	initPlayerEnvironments();
-
-	serialize(loader->serializer, loader->serializer.fileVersion);
-
 	initPlayerInterfaces();
 }
 
-void CClient::serialize(BinarySerializer & h, const int version)
+void CClient::endNetwork()
 {
-	assert(h.saving);
-	ui8 players = static_cast<ui8>(playerint.size());
-	h & players;
+	GAME->map().endNetwork();
 
-	for(auto i = playerint.begin(); i != playerint.end(); i++)
-	{
-		logGlobal->trace("Saving player %s interface", i->first);
-		assert(i->first == i->second->playerID);
-		h & i->first;
-		h & i->second->dllName;
-		h & i->second->human;
-		i->second->saveGame(h, version);
-	}
+	if (CPlayerInterface::battleInt)
+		CPlayerInterface::battleInt->endNetwork();
 
-	if(version >= 800)
+	for(auto & i : playerint)
 	{
-		JsonNode scriptsState;
-		clientScripts->serializeState(h.saving, scriptsState);
-		h & scriptsState;
+		auto interface = std::dynamic_pointer_cast<CPlayerInterface>(i.second);
+		if (interface)
+			interface->endNetwork();
 	}
 }
 
-void CClient::serialize(BinaryDeserializer & h, const int version)
+void CClient::finishGameplay()
 {
-	assert(!h.saving);
-	if(version < 787)
-	{
-		bool hotSeat = false;
-		h & hotSeat;
-	}
-
-	ui8 players = 0;
-	h & players;
-
-	for(int i = 0; i < players; i++)
-	{
-		std::string dllname;
-		PlayerColor pid;
-		bool isHuman = false;
-
-		h & pid;
-		h & dllname;
-		h & isHuman;
-		assert(dllname.length() == 0 || !isHuman);
-		if(pid == PlayerColor::NEUTRAL)
-		{
-			logGlobal->trace("Neutral battle interfaces are not serialized.");
-			continue;
-		}
-
-		logGlobal->trace("Loading player %s interface", pid);
-		std::shared_ptr<CGameInterface> nInt;
-		if(dllname.length())
-			nInt = CDynLibHandler::getNewAI(dllname);
-		else
-			nInt = std::make_shared<CPlayerInterface>(pid);
-
-		nInt->dllName = dllname;
-		nInt->human = isHuman;
-		nInt->playerID = pid;
-
-		nInt->loadGame(h, version);
-
-		// Client no longer handle this player at all
-		if(!vstd::contains(CSH->getAllClientPlayers(CSH->c->connectionID), pid))
-		{
-			logGlobal->trace("Player %s is not belong to this client. Destroying interface", pid);
-		}
-		else if(isHuman && !vstd::contains(CSH->getHumanColors(), pid))
-		{
-			logGlobal->trace("Player %s is no longer controlled by human. Destroying interface", pid);
-		}
-		else if(!isHuman && vstd::contains(CSH->getHumanColors(), pid))
-		{
-			logGlobal->trace("Player %s is no longer controlled by AI. Destroying interface", pid);
-		}
-		else
-		{
-			installNewPlayerInterface(nInt, pid);
-			continue;
-		}
-		nInt.reset();
-	}
-
-	{
-		JsonNode scriptsState;
-		if(version >= 800)
-		{
-			h & scriptsState;
-		}
-
-		clientScripts->serializeState(h.saving, scriptsState);
-	}
-
-	logNetwork->trace("Loaded client part of save %d ms", CSH->th->getDiff());
-}
-
-void CClient::save(const std::string & fname)
-{
-	if(gs->curB)
-	{
-		logNetwork->error("Game cannot be saved during battle!");
-		return;
-	}
-
-	SaveGame save_game(fname);
-	sendRequest(&save_game, PlayerColor::NEUTRAL);
-}
-
-void CClient::endGame()
-{
-	clientScripts.reset();
+	waitingRequest.requestTermination();
 
 	//suggest interfaces to finish their stuff (AI should interrupt any bg working threads)
 	for(auto & i : playerint)
 		i.second->finish();
+}
 
-	GH.curInt = nullptr;
-	{
-		boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
-		logNetwork->info("Ending current game!");
-		if(GH.topInt())
-		{
-			GH.topInt()->deactivate();
-		}
-		GH.listInt.clear();
-		GH.objsToBlit.clear();
-		GH.statusbar = nullptr;
-		logNetwork->info("Removed GUI.");
+void CClient::endGame()
+{
+	logNetwork->info("Ending current game!");
+	removeGUI();
 
-		vstd::clear_pointer(const_cast<CGameInfo *>(CGI)->mh);
-		vstd::clear_pointer(gs);
+	GAME->setMapInstance(nullptr);
 
-		logNetwork->info("Deleted mapHandler and gameState.");
-		LOCPLINT = nullptr;
-	}
+	logNetwork->info("Deleted mapHandler and gameState.");
 
+	CPlayerInterface::battleInt.reset();
 	playerint.clear();
 	battleints.clear();
 	battleCallbacks.clear();
 	playerEnvironments.clear();
+
+	//FIXME: gamestate->currentBattles.clear() will use gamestate. So it shoule be callded before gamestate.reset()
+	gamestate->currentBattles.clear();
+	gamestate.reset();
+
 	logNetwork->info("Deleted playerInts.");
 	logNetwork->info("Client stopped.");
 }
@@ -399,56 +179,72 @@ void CClient::initMapHandler()
 	// TODO: CMapHandler initialization can probably go somewhere else
 	// It's can't be before initialization of interfaces
 	// During loading CPlayerInterface from serialized state it's depend on MH
-	if(!settings["session"]["headless"].Bool())
-	{
-		const_cast<CGameInfo *>(CGI)->mh = new CMapHandler();
-		CGI->mh->map = gs->map;
-		logNetwork->trace("Creating mapHandler: %d ms", CSH->th->getDiff());
-		CGI->mh->init();
-		logNetwork->trace("Initializing mapHandler (together): %d ms", CSH->th->getDiff());
-	}
-
-	pathCache.clear();
+	GAME->setMapInstance(std::make_unique<CMapHandler>(&gameState().getMap()));
+	logNetwork->trace("Creating mapHandler: %d ms", GAME->server().th->getDiff());
 }
 
 void CClient::initPlayerEnvironments()
 {
 	playerEnvironments.clear();
 
-	auto allPlayers = CSH->getAllClientPlayers(CSH->c->connectionID);
-
+	auto allPlayers = GAME->server().getAllClientPlayers(GAME->server().logicConnection->connectionID);
+	bool hasHumanPlayer = false;
 	for(auto & color : allPlayers)
 	{
-		logNetwork->info("Preparing environment for player %s", color.getStr());
-		playerEnvironments[color] = std::make_shared<CPlayerEnvironment>(color, this, std::make_shared<CCallback>(gs, color, this));
+		// getAllClientPlayers is derived from lobby StartInfo, which still lists players
+		// pruned during random map generation; skip those absent from the actual game
+		if(color.isValidPlayer() && !gameState().players.count(color))
+			continue;
+
+		logNetwork->info("Preparing environment for player %s", color.toString());
+		playerEnvironments[color] = std::make_shared<CPlayerEnvironment>(color, this, std::make_shared<CCallback>(gamestate, color, this));
+
+		if(color.isValidPlayer() && !hasHumanPlayer && gameState().players.at(color).isHuman())
+			hasHumanPlayer = true;
 	}
 
+	if(!hasHumanPlayer && !settings["session"]["headless"].Bool())
+	{
+		Settings session = settings.write["session"];
+		session["spectate"].Bool() = true;
+		session["spectate-skip-battle-result"].Bool() = true;
+		session["spectate-ignore-hero"].Bool() = true;
+	}
+	
 	if(settings["session"]["spectate"].Bool())
 	{
-		playerEnvironments[PlayerColor::SPECTATOR] = std::make_shared<CPlayerEnvironment>(PlayerColor::SPECTATOR, this, std::make_shared<CCallback>(gs, boost::none, this));
+		playerEnvironments[PlayerColor::SPECTATOR] = std::make_shared<CPlayerEnvironment>(
+			PlayerColor::SPECTATOR,
+			this,
+			std::make_shared<CCallback>(gamestate, findPlayerColorForSpectatorInterface(), this));
 	}
 }
 
 void CClient::initPlayerInterfaces()
 {
-	for(auto & elem : gs->scenarioOps->playerInfos)
+	for(const auto & playerInfo : gameState().getStartInfo()->playerInfos)
 	{
-		PlayerColor color = elem.first;
-		if(!vstd::contains(CSH->getAllClientPlayers(CSH->c->connectionID), color))
+		PlayerColor color = playerInfo.first;
+		if(!vstd::contains(GAME->server().getAllClientPlayers(GAME->server().logicConnection->connectionID), color))
 			continue;
 
 		if(!vstd::contains(playerint, color))
 		{
-			logNetwork->info("Preparing interface for player %s", color.getStr());
-			if(elem.second.isControlledByAI())
+			logNetwork->info("Preparing interface for player %s", color.toString());
+			if(playerInfo.second.isControlledByAI() || settings["session"]["onlyai"].Bool())
 			{
-				auto AiToGive = aiNameForPlayer(elem.second, false);
-				logNetwork->info("Player %s will be lead by %s", color.getStr(), AiToGive);
-				installNewPlayerInterface(CDynLibHandler::getNewAI(AiToGive), color);
+				bool alliedToHuman = false;
+				for(const auto & allyInfo : gameState().getStartInfo()->playerInfos)
+					if (gameState().getPlayerTeam(allyInfo.first) == gameState().getPlayerTeam(playerInfo.first) && allyInfo.second.isControlledByHuman())
+						alliedToHuman = true;
+
+				auto AiToGive = aiNameForPlayer(playerInfo.second, false, alliedToHuman);
+				logNetwork->info("Player %s will be lead by %s", color.toString(), AiToGive);
+				installNewPlayerInterface(AIFactory::createAdventureAI(AiToGive), color);
 			}
 			else
 			{
-				logNetwork->info("Player %s will be lead by human", color.getStr());
+				logNetwork->info("Player %s will be lead by human", color.toString());
 				installNewPlayerInterface(std::make_shared<CPlayerInterface>(color), color);
 			}
 		}
@@ -456,31 +252,48 @@ void CClient::initPlayerInterfaces()
 
 	if(settings["session"]["spectate"].Bool())
 	{
-		installNewPlayerInterface(std::make_shared<CPlayerInterface>(PlayerColor::SPECTATOR), PlayerColor::SPECTATOR, true);
+		const PlayerColor spectatorInterfacePlayer = findPlayerColorForSpectatorInterface().value_or(PlayerColor(0));
+		installNewPlayerInterface(std::make_shared<CPlayerInterface>(spectatorInterfacePlayer), PlayerColor::SPECTATOR, true);
 	}
 
-	if(CSH->getAllClientPlayers(CSH->c->connectionID).count(PlayerColor::NEUTRAL))
-		installNewBattleInterface(CDynLibHandler::getNewBattleAI(settings["server"]["neutralAI"].String()), PlayerColor::NEUTRAL);
+	if(GAME->server().getAllClientPlayers(GAME->server().logicConnection->connectionID).count(PlayerColor::NEUTRAL))
+		installNewBattleInterface(AIFactory::createBattleAI(settings["ai"]["combatNeutralAI"].String()), PlayerColor::NEUTRAL);
 
-	logNetwork->trace("Initialized player interfaces %d ms", CSH->th->getDiff());
+	logNetwork->trace("Initialized player interfaces %d ms", GAME->server().th->getDiff());
 }
 
-std::string CClient::aiNameForPlayer(const PlayerSettings & ps, bool battleAI)
+std::optional<PlayerColor> CClient::findPlayerColorForSpectatorInterface() const
 {
-	if(ps.name.size())
+	// The adventure UI is not fully spectator-aware and still reads player-local state via CPlayerInterface::playerID.
+	for(const PlayerColor & color : gameState().actingPlayers)
 	{
-		const boost::filesystem::path aiPath = VCMIDirs::get().fullLibraryPath("AI", ps.name);
-		if(boost::filesystem::exists(aiPath))
-			return ps.name;
+		if(color.isValidPlayer() && gameState().players.count(color))
+			return color;
 	}
 
-	return aiNameForPlayer(battleAI);
+	for(const auto & playerState : gameState().players)
+	{
+		if(playerState.first.isValidPlayer())
+			return playerState.first;
+	}
+
+	return std::nullopt;
 }
 
-std::string CClient::aiNameForPlayer(bool battleAI)
+std::string CClient::aiNameForPlayer(const PlayerSettings & ps, bool battleAI, bool alliedToHuman) const
+{
+	if(ps.name.size() && AIFactory::isAvailableAdventureAI(ps.name))
+		return ps.name;
+
+	return aiNameForPlayer(battleAI, alliedToHuman);
+}
+
+std::string CClient::aiNameForPlayer(bool battleAI, bool alliedToHuman) const
 {
 	const int sensibleAILimit = settings["session"]["oneGoodAI"].Bool() ? 1 : PlayerColor::PLAYER_LIMIT_I;
-	std::string goodAI = battleAI ? settings["server"]["neutralAI"].String() : settings["server"]["playerAI"].String();
+	std::string goodAdventureAI = alliedToHuman ? settings["ai"]["adventureAlliedAI"].String() : settings["ai"]["adventureEnemyAI"].String();
+	std::string goodBattleAI = settings["ai"]["combatNeutralAI"].String();
+	std::string goodAI = battleAI ? goodBattleAI : goodAdventureAI;
 	std::string badAI = battleAI ? "StupidAI" : "EmptyAI";
 
 	//TODO what about human players
@@ -492,294 +305,388 @@ std::string CClient::aiNameForPlayer(bool battleAI)
 
 void CClient::installNewPlayerInterface(std::shared_ptr<CGameInterface> gameInterface, PlayerColor color, bool battlecb)
 {
-	boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
-
 	playerint[color] = gameInterface;
 
-	logGlobal->trace("\tInitializing the interface for player %s", color.getStr());
-	auto cb = std::make_shared<CCallback>(gs, color, this);
+	logGlobal->trace("\tInitializing the interface for player %s", color.toString());
+	std::optional<PlayerColor> callbackPlayer = color;
+	if(color == PlayerColor::SPECTATOR)
+		callbackPlayer = findPlayerColorForSpectatorInterface();
+
+	auto cb = std::make_shared<CCallback>(gamestate, callbackPlayer, this);
 	battleCallbacks[color] = cb;
-	gameInterface->init(playerEnvironments.at(color), cb);
+	gameInterface->initGameInterface(playerEnvironments.at(color), cb);
 
 	installNewBattleInterface(gameInterface, color, battlecb);
 }
 
 void CClient::installNewBattleInterface(std::shared_ptr<CBattleGameInterface> battleInterface, PlayerColor color, bool needCallback)
 {
-	boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
-
 	battleints[color] = battleInterface;
 
 	if(needCallback)
 	{
-		logGlobal->trace("\tInitializing the battle interface for player %s", color.getStr());
+		logGlobal->trace("\tInitializing the battle interface for player %s", color.toString());
 		auto cbc = std::make_shared<CBattleCallback>(color, this);
 		battleCallbacks[color] = cbc;
-		battleInterface->init(playerEnvironments.at(color), cbc);
+		battleInterface->initBattleInterface(playerEnvironments.at(color), cbc);
 	}
 }
 
-void CClient::handlePack(CPack * pack)
+void CClient::handlePack(CPackForClient & pack)
 {
-	CBaseForCLApply * apply = applier->getApplier(typeList.getTypeID(pack)); //find the applier
-	if(apply)
+	ApplyClientNetPackVisitor afterVisitor(*this, gameState());
+	ApplyFirstClientNetPackVisitor beforeVisitor(*this, gameState());
+
+	pack.visit(beforeVisitor);
+	logNetwork->trace("\tMade first apply on cl: %s", typeid(pack).name());
 	{
-		boost::unique_lock<boost::recursive_mutex> guiLock(*CPlayerInterface::pim);
-		apply->applyOnClBefore(this, pack);
-		logNetwork->trace("\tMade first apply on cl: %s", typeList.getTypeInfo(pack)->name());
-		gs->apply(pack);
-		logNetwork->trace("\tApplied on gs: %s", typeList.getTypeInfo(pack)->name());
-		apply->applyOnClAfter(this, pack);
-		logNetwork->trace("\tMade second apply on cl: %s", typeList.getTypeInfo(pack)->name());
+		std::unique_lock lock(CGameState::mutex);
+		gameState().apply(pack);
 	}
-	else
-	{
-		logNetwork->error("Message %s cannot be applied, cannot find applier!", typeList.getTypeInfo(pack)->name());
-	}
-	delete pack;
+	logNetwork->trace("\tApplied on gs: %s", typeid(pack).name());
+	pack.visit(afterVisitor);
+	logNetwork->trace("\tMade second apply on cl: %s", typeid(pack).name());
 }
 
-int CClient::sendRequest(const CPackForServer * request, PlayerColor player)
+void CClient::applyPackSilently(CPackForClient & pack)
 {
-	static ui32 requestCounter = 0;
+	std::unique_lock lock(CGameState::mutex);
+	gameState().apply(pack);
+}
+
+ClientSession CClient::swapSession(ClientSession replacement)
+{
+	return std::exchange(static_cast<ClientSession &>(*this), std::move(replacement));
+}
+
+void CClient::installObserverInterface(PlayerColor color)
+{
+	assert(gamestate);
+
+	playerEnvironments[color] = std::make_shared<CPlayerEnvironment>(color, this, std::make_shared<CCallback>(gamestate, color, this));
+
+	auto interfacePtr = std::make_shared<CPlayerInterface>(color);
+	installNewPlayerInterface(interfacePtr, color);
+}
+
+void CClient::installSpectatorInterface()
+{
+	assert(gamestate);
+
+	playerEnvironments[PlayerColor::SPECTATOR] = std::make_shared<CPlayerEnvironment>(
+		PlayerColor::SPECTATOR,
+		this,
+		std::make_shared<CCallback>(gamestate, findPlayerColorForSpectatorInterface(), this));
+
+	const PlayerColor spectatorInterfacePlayer = findPlayerColorForSpectatorInterface().value_or(PlayerColor(0));
+	installNewPlayerInterface(std::make_shared<CPlayerInterface>(spectatorInterfacePlayer), PlayerColor::SPECTATOR, true);
+}
+
+void CClient::removeSpectatorInterface()
+{
+	playerint.erase(PlayerColor::SPECTATOR);
+	battleints.erase(PlayerColor::SPECTATOR);
+	battleCallbacks.erase(PlayerColor::SPECTATOR);
+	playerEnvironments.erase(PlayerColor::SPECTATOR);
+}
+
+void CClient::giveTurnLocally(PlayerColor color)
+{
+	PlayerStartsTurn yt;
+	yt.player = color;
+	yt.questionID = QuestionID::NONE;
+
+	ApplyClientNetPackVisitor visitor(*this, gameState());
+	yt.visit(visitor);
+}
+
+void CClient::toggleAiSolo(EAiSoloMode mode, bool ownVision)
+{
+	Settings session = settings.write["session"];
+
+	const auto & playerInfos = gameInfo().getStartInfo()->playerInfos;
+
+	std::vector<PlayerColor> humanPlayers;
+	for(const auto & color : GAME->server().getAllClientPlayers(GAME->server().logicConnection->connectionID))
+		if(color.isValidPlayer() && playerInfos.count(color) && playerInfos.at(color).isControlledByHuman())
+			humanPlayers.push_back(color);
+
+	if(humanPlayers.empty())
+	{
+		logGlobal->warn("No human player on this client to hand over to an AI");
+		return;
+	}
+
+	// any further use of the cheat gives control back, whichever mode it asked for
+	const bool aiTakesOver = !session["aiSolo"].Bool();
+
+	if(aiTakesOver && !GAME->interface())
+	{
+		logGlobal->warn("No human player interface to replace with an AI");
+		return;
+	}
+
+	if(!aiTakesOver)
+	{
+		// the player acts again, so the spectator and everything set up for him has to go
+		removeGUI();
+		removeSpectatorInterface();
+
+		session["aiSolo"].Bool() = false;
+		session["aiSoloAskEachTurn"].Bool() = false;
+		session["aiSoloStopRequested"].Bool() = false;
+		session["spectate"].Bool() = false;
+		session["spectate-own-vision"].Bool() = false;
+		session["spectate-skip-battle"].Bool() = false;
+		session["spectate-skip-battle-result"].Bool() = false;
+
+		PlayerColor turnOwner = humanPlayers.front();
+		for(const auto & color : humanPlayers)
+		{
+			installNewPlayerInterface(std::make_shared<CPlayerInterface>(color), color);
+
+			if(gameState().actingPlayers.count(color))
+				turnOwner = color;
+		}
+
+		// giveTurnLocally puts the adventure map that removeGUI() dropped back onto the window stack
+		ENGINE->windows().totalRedraw();
+		giveTurnLocally(turnOwner);
+		return;
+	}
+
+	PlayerColor currentColor = GAME->interface()->playerID;
+
+	std::map<PlayerColor, std::string> aiForPlayer;
+	for(const auto & color : humanPlayers)
+	{
+		aiForPlayer[color] = aiNameForPlayer(*gameInfo().getPlayerSettings(color), false, false);
+		logGlobal->info("Player %s will be lead by %s", color.toString(), aiForPlayer[color]);
+	}
+
+	removeGUI();
+
+	for(const auto & [color, aiName] : aiForPlayer)
+		installNewPlayerInterface(AIFactory::createAdventureAI(aiName), color);
+
+	// set before the AI starts acting - the map renderer and battleStarted() read these right away
+	session["aiSolo"].Bool() = true;
+	session["aiSoloAskEachTurn"].Bool() = mode == EAiSoloMode::ASK_EACH_TURN;
+	session["aiSoloStopRequested"].Bool() = false;
+	session["spectate-own-vision"].Bool() = ownVision;
+	session["spectate-skip-battle"].Bool() = mode == EAiSoloMode::SKIP_BATTLES;
+	// the AI answers the battle end question, so a result window would only be in the way
+	session["spectate-skip-battle-result"].Bool() = true;
+
+	if(mode != EAiSoloMode::HIDDEN)
+	{
+		// without an interface of our own nothing would draw the game that the AI now plays
+		installSpectatorInterface();
+
+		ENGINE->windows().pushWindow(adventureInt);
+		adventureInt->onEnemyTurnStarted(currentColor, false);
+		adventureInt->onMapTilesChanged(std::nullopt);
+
+		// set last: it makes onEnemyTurnStarted a no-op, so the map stays in the state set above
+		session["spectate"].Bool() = true;
+	}
+
+	ENGINE->windows().totalRedraw();
+	giveTurnLocally(currentColor);
+}
+
+std::optional<BattleAction> CClient::makeSurrenderRetreatDecision(PlayerColor player, const BattleID & battleID, const BattleStateInfoForRetreat & battleState)
+{
+	return playerint[player]->makeSurrenderRetreatDecision(battleID, battleState);
+}
+
+int CClient::sendRequest(const CPackForServer & request, PlayerColor player, bool waitTillRealize)
+{
+	if(observerMode)
+	{
+		logNetwork->trace("Dropped request \"%s\" - a replay is in progress", typeid(request).name());
+		return 0;
+	}
 
 	ui32 requestID = requestCounter++;
-	logNetwork->trace("Sending a request \"%s\". It'll have an ID=%d.", typeid(*request).name(), requestID);
+	logNetwork->trace("Sending a request \"%s\". It'll have an ID=%d.", typeid(request).name(), requestID);
 
 	waitingRequest.pushBack(requestID);
-	request->requestID = requestID;
-	request->player = player;
-	CSH->c->sendPack(request);
+	request.requestID = requestID;
+	request.player = player;
+	GAME->server().sendGamePack(request);
 	if(vstd::contains(playerint, player))
-		playerint[player]->requestSent(request, requestID);
+		playerint[player]->requestSent(&request, requestID);
+
+	if(waitTillRealize)
+	{
+		logGlobal->trace("We'll wait till request %d is answered.\n", requestID);
+		auto gsUnlocker = vstd::makeUnlockSharedGuard(CGameState::mutex);
+		waitingRequest.waitWhileContains(requestID);
+	}
 
 	return requestID;
 }
 
-void CClient::battleStarted(const BattleInfo * info)
+void CClient::battleStarted(const BattleID & battleID)
 {
-	setBattle(info);
+	const BattleInfo * info = gameState().getBattle(battleID);
+
+	std::shared_ptr<CPlayerInterface> att;
+	std::shared_ptr<CPlayerInterface> def;
+	const auto & leftSide = info->getSide(BattleSide::LEFT_SIDE);
+	const auto & rightSide = info->getSide(BattleSide::RIGHT_SIDE);
+
 	for(auto & battleCb : battleCallbacks)
 	{
-		if(vstd::contains_if(info->sides, [&](const SideInBattle& side) {return side.color == battleCb.first; })
-			|| battleCb.first >= PlayerColor::PLAYER_LIMIT)
-		{
-			battleCb.second->setBattle(info);
-		}
+		if(!battleCb.first.isValidPlayer() || battleCb.first == leftSide.color || battleCb.first == rightSide.color)
+			battleCb.second->onBattleStarted(info);
 	}
 
-	std::shared_ptr<CPlayerInterface> att, def;
-	auto & leftSide = info->sides[0], & rightSide = info->sides[1];
-
 	//If quick combat is not, do not prepare interfaces for battleint
-	if(!settings["adventure"]["quickCombat"].Bool())
+	auto callBattleStart = [&](PlayerColor color, BattleSide side)
 	{
-		if(vstd::contains(playerint, leftSide.color) && playerint[leftSide.color]->human)
-			att = std::dynamic_pointer_cast<CPlayerInterface>(playerint[leftSide.color]);
+		if(vstd::contains(battleints, color))
+			battleints[color]->battleStart(info->battleID, leftSide.getArmy(), rightSide.getArmy(), info->tile, leftSide.getHero(), rightSide.getHero(), side, info->replayAllowed);
+	};
+	
+	callBattleStart(leftSide.color, BattleSide::LEFT_SIDE);
+	callBattleStart(rightSide.color, BattleSide::RIGHT_SIDE);
+	callBattleStart(PlayerColor::UNFLAGGABLE, BattleSide::RIGHT_SIDE);
+	if(settings["session"]["spectate"].Bool() && !settings["session"]["spectate-skip-battle"].Bool())
+		callBattleStart(PlayerColor::SPECTATOR, BattleSide::RIGHT_SIDE);
+	
+	if(vstd::contains(playerint, leftSide.color) && playerint[leftSide.color]->human)
+		att = std::dynamic_pointer_cast<CPlayerInterface>(playerint[leftSide.color]);
 
-		if(vstd::contains(playerint, rightSide.color) && playerint[rightSide.color]->human)
-			def = std::dynamic_pointer_cast<CPlayerInterface>(playerint[rightSide.color]);
+	if(vstd::contains(playerint, rightSide.color) && playerint[rightSide.color]->human)
+		def = std::dynamic_pointer_cast<CPlayerInterface>(playerint[rightSide.color]);
+	
+	//Remove player interfaces for auto battle (quickCombat option)
+	if((att && att->isAutoFightOn) || (def && def->isAutoFightOn))
+	{
+		auto endTacticPhaseIfEligible = [info](const CPlayerInterface * interface)
+		{
+			if (interface->cb->getBattle(info->battleID)->battleGetTacticDist())
+			{
+				auto side = interface->cb->getBattle(info->battleID)->playerToSide(interface->playerID);
+
+				if(interface->playerID == info->getSide(info->tacticsSide).color)
+				{
+					auto action = BattleAction::makeEndOFTacticPhase(side);
+					interface->cb->battleMakeTacticAction(info->battleID, action);
+				}
+			}
+		};
+
+		if(att && att->isAutoFightOn)
+			endTacticPhaseIfEligible(att.get());
+		else // def && def->isAutoFightOn
+			endTacticPhaseIfEligible(def.get());
+
+		att.reset();
+		def.reset();
 	}
 
 	if(!settings["session"]["headless"].Bool())
 	{
-		Rect battleIntRect((screen->w - 800)/2, (screen->h - 600)/2, 800, 600);
-		if(!!att || !!def)
+		if(att || def)
 		{
-			boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
-			GH.pushIntT<CBattleInterface>(leftSide.armyObject, rightSide.armyObject, leftSide.hero, rightSide.hero, battleIntRect, att, def);
+			CPlayerInterface::battleInt = std::make_shared<BattleInterface>(info->getBattleID(), leftSide.getArmy(), rightSide.getArmy(), leftSide.getHero(), rightSide.getHero(), att, def);
 		}
 		else if(settings["session"]["spectate"].Bool() && !settings["session"]["spectate-skip-battle"].Bool())
 		{
 			//TODO: This certainly need improvement
 			auto spectratorInt = std::dynamic_pointer_cast<CPlayerInterface>(playerint[PlayerColor::SPECTATOR]);
-			spectratorInt->cb->setBattle(info);
-			boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
-			GH.pushIntT<CBattleInterface>(leftSide.armyObject, rightSide.armyObject, leftSide.hero, rightSide.hero, battleIntRect, att, def, spectratorInt);
+
+			// under gosolo the spectator stands in for a real player: battles he has no side in are
+			// none of his business, and his callback could not tell which side he is watching from
+			const bool ownBattlesOnly = settings["session"]["spectate-own-vision"].Bool();
+			const bool isOwnBattle = spectratorInt->playerID == leftSide.color || spectratorInt->playerID == rightSide.color;
+
+			if(!ownBattlesOnly || isOwnBattle)
+			{
+				spectratorInt->cb->onBattleStarted(info);
+				CPlayerInterface::battleInt = std::make_shared<BattleInterface>(info->getBattleID(), leftSide.getArmy(), rightSide.getArmy(), leftSide.getHero(), rightSide.getHero(), att, def, spectratorInt);
+			}
 		}
 	}
 
-	auto callBattleStart = [&](PlayerColor color, ui8 side)
+	if(info->tacticDistance)
 	{
-		if(vstd::contains(battleints, color))
-			battleints[color]->battleStart(leftSide.armyObject, rightSide.armyObject, info->tile, leftSide.hero, rightSide.hero, side);
+		auto tacticianColor = info->getSide(info->tacticsSide).color;
+
+		if (vstd::contains(battleints, tacticianColor))
+			battleints[tacticianColor]->yourTacticPhase(info->battleID, info->tacticDistance);
+	}
+}
+
+void CClient::battleFinished(const BattleID & battleID)
+{
+	// Mirror of battleStarted(): whoever was told that the battle started has to be told that it
+	// ended, or keeps a CPlayerBattleCallback pointing at the BattleInfo the gamestate now frees.
+	// Which callbacks those are depends on the spectate settings, so ask them instead of guessing.
+	for(auto & battleCb : battleCallbacks)
+		if(battleCb.second->getActiveBattles().count(battleID))
+			battleCb.second->onBattleEnded(battleID);
+
+	// the spectator interface holds a callback of its own, separate from battleCallbacks[SPECTATOR]
+	auto spectator = playerint.find(PlayerColor::SPECTATOR);
+	if(spectator != playerint.end())
+	{
+		auto spectatorInt = std::dynamic_pointer_cast<CPlayerInterface>(spectator->second);
+		if(spectatorInt && spectatorInt->cb->getActiveBattles().count(battleID))
+			spectatorInt->cb->onBattleEnded(battleID);
+	}
+}
+
+void CClient::startPlayerBattleAction(const BattleID & battleID, PlayerColor color)
+{
+	if (battleints.count(color) == 0)
+		return; // not our combat in MP
+
+	auto battleint = battleints.at(color);
+	auto activateStack = [&]()
+	{
+		battleint->activeStack(battleID, gameState().getBattle(battleID)->battleGetStackByID(gameState().getBattle(battleID)->activeStack, false));
 	};
 
-	callBattleStart(leftSide.color, 0);
-	callBattleStart(rightSide.color, 1);
-	callBattleStart(PlayerColor::UNFLAGGABLE, 1);
-	if(settings["session"]["spectate"].Bool() && !settings["session"]["spectate-skip-battle"].Bool())
-		callBattleStart(PlayerColor::SPECTATOR, 1);
-
-	if(info->tacticDistance && vstd::contains(battleints, info->sides[info->tacticsSide].color))
+	if (!battleint->human)
 	{
-		boost::thread(&CClient::commenceTacticPhaseForInt, this, battleints[info->sides[info->tacticsSide].color]);
-	}
-}
-
-void CClient::commenceTacticPhaseForInt(std::shared_ptr<CBattleGameInterface> battleInt)
-{
-	setThreadName("CClient::commenceTacticPhaseForInt");
-	try
-	{
-		battleInt->yourTacticPhase(gs->curB->tacticDistance);
-		if(gs && !!gs->curB && gs->curB->tacticDistance) //while awaiting for end of tactics phase, many things can happen (end of battle... or game)
+		// we want to avoid locking gamestate and causing UI to freeze while AI is making turn
+		if(ENGINE)
 		{
-			MakeAction ma(BattleAction::makeEndOFTacticPhase(gs->curB->playerToSide(battleInt->playerID).get()));
-			sendRequest(&ma, battleInt->playerID);
+			auto unlockInterface = vstd::makeUnlockGuard(ENGINE->interfaceMutex);
+			activateStack();
 		}
-	}
-	catch(...)
-	{
-		handleException();
-	}
-}
-
-void CClient::battleFinished()
-{
-	stopAllBattleActions();
-	for(auto & side : gs->curB->sides)
-		if(battleCallbacks.count(side.color))
-			battleCallbacks[side.color]->setBattle(nullptr);
-
-	if(settings["session"]["spectate"].Bool() && !settings["session"]["spectate-skip-battle"].Bool())
-		battleCallbacks[PlayerColor::SPECTATOR]->setBattle(nullptr);
-
-	setBattle(nullptr);
-}
-
-void CClient::startPlayerBattleAction(PlayerColor color)
-{
-	stopPlayerBattleAction(color);
-
-	if(vstd::contains(battleints, color))
-	{
-		auto thread = std::make_shared<boost::thread>(std::bind(&CClient::waitForMoveAndSend, this, color));
-		playerActionThreads[color] = thread;
-	}
-}
-
-void CClient::stopPlayerBattleAction(PlayerColor color)
-{
-	if(vstd::contains(playerActionThreads, color))
-	{
-		auto thread = playerActionThreads.at(color);
-		if(thread->joinable())
+		else
 		{
-			thread->interrupt();
-			thread->join();
+			activateStack();
 		}
-		playerActionThreads.erase(color);
-	}
-
-}
-
-void CClient::stopAllBattleActions()
-{
-	while(!playerActionThreads.empty())
-		stopPlayerBattleAction(playerActionThreads.begin()->first);
-}
-
-void CClient::waitForMoveAndSend(PlayerColor color)
-{
-	try
-	{
-		setThreadName("CClient::waitForMoveAndSend");
-		assert(vstd::contains(battleints, color));
-		BattleAction ba = battleints[color]->activeStack(gs->curB->battleGetStackByID(gs->curB->activeStack, false));
-		if(ba.actionType != EActionType::CANCEL)
-		{
-			logNetwork->trace("Send battle action to server: %s", ba.toString());
-			MakeAction temp_action(ba);
-			sendRequest(&temp_action, color);
-		}
-	}
-	catch(boost::thread_interrupted &)
-	{
-		logNetwork->debug("Wait for move thread was interrupted and no action will be send. Was a battle ended by spell?");
-	}
-	catch(...)
-	{
-		handleException();
-	}
-}
-
-void CClient::invalidatePaths()
-{
-	boost::unique_lock<boost::mutex> pathLock(pathCacheMutex);
-	pathCache.clear();
-}
-
-std::shared_ptr<const CPathsInfo> CClient::getPathsInfo(const CGHeroInstance * h)
-{
-	assert(h);
-	boost::unique_lock<boost::mutex> pathLock(pathCacheMutex);
-
-	auto iter = pathCache.find(h);
-
-	if(iter == std::end(pathCache))
-	{
-		std::shared_ptr<CPathsInfo> paths = std::make_shared<CPathsInfo>(getMapSize(), h);
-
-		gs->calculatePaths(h, *paths.get());
-
-		pathCache[h] = paths;
-		return paths;
 	}
 	else
 	{
-		return iter->second;
+		activateStack();
 	}
 }
 
-PlayerColor CClient::getLocalPlayer() const
+void CClient::removeGUI() const
 {
-	if(LOCPLINT)
-		return LOCPLINT->playerID;
-	return getCurrentPlayer();
+	// CClient::endGame
+	if(ENGINE)
+		ENGINE->windows().clear();
+	adventureInt.reset();
+	logGlobal->info("Removed GUI.");
+
+	GAME->setInterfaceInstance(nullptr);
 }
 
-scripting::Pool * CClient::getGlobalContextPool() const
+void CClient::registerBattleInterface(std::shared_ptr<IBattleEventsReceiver> battleEvents, PlayerColor color)
 {
-	return clientScripts.get();
+	additionalBattleInts[color].push_back(battleEvents);
 }
 
-scripting::Pool * CClient::getContextPool() const
+void CClient::unregisterBattleInterface(std::shared_ptr<IBattleEventsReceiver> battleEvents, PlayerColor color)
 {
-	return clientScripts.get();
+	additionalBattleInts[color] -= battleEvents;
 }
-
-void CClient::reinitScripting()
-{
-	clientEventBus = make_unique<events::EventBus>();
-	clientScripts.reset(new scripting::PoolImpl(this));
-}
-
-
-#ifdef VCMI_ANDROID
-extern "C" JNIEXPORT void JNICALL Java_eu_vcmi_vcmi_NativeMethods_notifyServerClosed(JNIEnv * env, jobject cls)
-{
-	logNetwork->info("Received server closed signal");
-	if (CSH) {
-		CSH->campaignServerRestartLock.setn(false);
-	}
-}
-
-extern "C" JNIEXPORT void JNICALL Java_eu_vcmi_vcmi_NativeMethods_notifyServerReady(JNIEnv * env, jobject cls)
-{
-	logNetwork->info("Received server ready signal");
-	androidTestServerReadyFlag.store(true);
-}
-
-extern "C" JNIEXPORT bool JNICALL Java_eu_vcmi_vcmi_NativeMethods_tryToSaveTheGame(JNIEnv * env, jobject cls)
-{
-	logGlobal->info("Received emergency save game request");
-	if(!LOCPLINT || !LOCPLINT->cb)
-	{
-		return false;
-	}
-
-	LOCPLINT->cb->save("Saves/_Android_Autosave");
-	return true;
-}
-#endif

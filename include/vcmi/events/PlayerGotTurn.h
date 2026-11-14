@@ -12,13 +12,14 @@
 
 #include "Event.h"
 #include "SubscriptionRegistry.h"
+#include "../scripting/ApiTags.h"
 
 class PlayerColor;
 
 namespace events
 {
 
-class DLL_LINKAGE PlayerGotTurn : public Event
+class DLL_LINKAGE PlayerGotTurn : public Event, public scripting::ApiRawPointer<PlayerGotTurn>
 {
 public:
 	using Sub = SubscriptionRegistry<PlayerGotTurn>;
@@ -27,7 +28,7 @@ public:
 	using ExecHandler = Sub::ExecHandler;
 
 	static Sub * getRegistry();
-	static void defaultExecute(const EventBus * bus, const ExecHandler & execHandler, PlayerColor & player);
+	static void defaultExecute(const EventBus * bus, const PlayerColor & player);
 
 	virtual PlayerColor getPlayer() const = 0;
 	virtual void setPlayer(const PlayerColor & value) = 0;

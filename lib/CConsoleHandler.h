@@ -9,86 +9,94 @@
  */
 #pragma once
 
-namespace EConsoleTextColor
-{
 /** The color enum is used for colored text console output. */
-enum EConsoleTextColor
+enum class EConsoleTextColor : int8_t
 {
-    DEFAULT = -1,
-    GREEN,
-    RED,
-    MAGENTA,
-    YELLOW,
-    WHITE,
-    GRAY,
-    TEAL = -2
+	DEFAULT = -1,
+	GREEN,
+	RED,
+	MAGENTA,
+	YELLOW,
+	WHITE,
+	GRAY,
+	TEAL = -2
 };
-}
 
 /// Class which wraps the native console. It can print text based on
 /// the chosen color
 class DLL_LINKAGE CConsoleHandler
 {
 public:
-    CConsoleHandler();
-    ~CConsoleHandler();
-    void start(); //starts listening thread
+	CConsoleHandler(const std::function<void(const std::string &, bool)> & callback);
+	CConsoleHandler();
+	~CConsoleHandler();
+	void start(); //starts listening thread
 
-    template<typename T> void print(const T &data, bool addNewLine = false, EConsoleTextColor::EConsoleTextColor color = EConsoleTextColor::DEFAULT, bool printToStdErr = false)
+	template<typename T> void print(const T &data, bool addNewLine = false, EConsoleTextColor color = EConsoleTextColor::DEFAULT, bool printToStdErr = false)
 	{
-        TLockGuard _(smx);
+		std::lock_guard _(smx);
 #ifndef VCMI_WINDOWS
 		// with love from ffmpeg - library is trying to print some warnings from separate thread
 		// this results in broken console on Linux. Lock stdout to print all our data at once
 		flockfile(stdout);
 #endif
-        if(color != EConsoleTextColor::DEFAULT) setColor(color);
-        if(printToStdErr)
-        {
-            std::cerr << data;
-            if(addNewLine)
-            {
-                std::cerr << std::endl;
-            }
-            else
-            {
-                std::cerr << std::flush;
-            }
-        }
-        else
-        {
-            std::cout << data;
-            if(addNewLine)
-            {
-                std::cout << std::endl;
-            }
-            else
-            {
-                std::cout << std::flush;
-            }
-        }
+		if(color != EConsoleTextColor::DEFAULT) setColor(color);
+		if(printToStdErr)
+		{
+			std::cerr << data;
+			if(addNewLine)
+			{
+				std::cerr << std::endl;
+			}
+			else
+			{
+				std::cerr << std::flush;
+			}
+		}
+		else
+		{
+			std::cout << data;
+			if(addNewLine)
+			{
+				std::cout << std::endl;
+			}
+			else
+			{
+				std::cout << std::flush;
+			}
+		}
 
-        if(color != EConsoleTextColor::DEFAULT) setColor(EConsoleTextColor::DEFAULT);
+		if(color != EConsoleTextColor::DEFAULT) setColor(EConsoleTextColor::DEFAULT);
 #ifndef VCMI_WINDOWS
 		funlockfile(stdout);
 #endif
 	}
 
-    std::function<void(const std::string &)> *cb; //function to be called when message is received
-
 private:
-    int run();
 
-    void end(); //kills listening thread
+#ifndef VCMI_WINDOWS
+	using TColor = std::string;
+#else
+	using TColor = int32_t;
+#endif
 
-    void setColor(EConsoleTextColor::EConsoleTextColor color); //sets color of text appropriate for given logging level
+	int run();
 
-    /// FIXME: Implement CConsoleHandler as singleton, move some logic into CLogConsoleTarget, etc... needs to be disussed:)
-    /// Without static, application will crash complaining about mutex deleted. In short: CConsoleHandler gets deleted before
-    /// the logging system.
-    static boost::mutex smx;
+	void end(); //kills listening thread
 
-    boost::thread * thread;
+	void setColor(EConsoleTextColor color); //sets color of text appropriate for given logging level
+
+	TColor defColor;
+	TColor defErrColor;
+
+	//function to be called when message is received - string: message, bool: whether call was made from in-game console
+	std::function<void(const std::string &, bool)> cb;
+
+	std::condition_variable shutdownVariable;
+	std::mutex shutdownMutex;
+	std::atomic<bool> shutdownPending = false;
+
+	std::mutex smx;
+
+	std::thread thread;
 };
-
-extern DLL_LINKAGE CConsoleHandler * console;

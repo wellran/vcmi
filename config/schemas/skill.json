@@ -1,21 +1,22 @@
 {
-
 	"type" : "object",
 	"$schema" : "http://json-schema.org/draft-04/schema",
-
 	"title" : "VCMI skill format",
 	"description" : "Format used to replace bonuses provided by secondary skills in VCMI",
-
 	"definitions" : {
-
 		"skillBonus" : {
 			"type" : "object",
 			"description" : "Set of bonuses provided by skill at given level",
 			"required" : ["description", "effects"],
 			"properties" : {
+				"description" : {
+					"type" : "string",
+					"description" : "localizable description"
+				},
 				"images" : {
 					"type" : "object",
-					"description" : "skill icons of varying size",
+					"description" : "Skill icons of varying size",
+					"required" : [ "small", "medium", "large", "scenarioBonus"],
 					"properties" : {
 						"small" : {
 							"type" : "string",
@@ -31,56 +32,67 @@
 							"type" : "string",
 							"description" : "82x93 skill icon",
 							"format" : "imageFile"
+						},
+						"scenarioBonus" : {
+							"type" : "string",
+							"description" : "58x64 skill icon for use as campaign scenario bonus",
+							"format" : "imageFile"
 						}
 					}
-				},
-				"description" : {
-					"type" : "string",
-					"description" : "localizable description"
 				},
 				"effects" : {
 					"type" : "object",
 					"additionalProperties" : {
-						"$ref" : "bonus.json"
+						"$ref" : "bonusInstance.json"
 					}
 				}
 			}
 		}
-		
 	},
-
-	"required" : ["name", "basic", "advanced", "expert"],
-
+	"required" : ["name", "basic", "advanced", "expert", "specialty", "gainChance" ],
 	"properties" : {
-		"index" : {
-			"type": "number",
-			"description": "numeric id of skill, required for existing skills"
+		"compatibilityIdentifiers" : {
+			"type" : "array",
+			"items" : {
+				"type" : "string"
+			},
+			"description" : "Additional identifiers that may refer to this object, to provide compatibility after object has been renamed"
 		},
 		"name" : {
-			"type": "string",
-			"description": "localizable skill name"
+			"type" : "string",
+			"description" : "Mandatory, localizable skill name"
+		},
+		"index" : {
+			"type" : "number",
+			"description" : "Internal, numeric id of skill, required for existing skills"
+		},
+		"obligatoryMajor" : { "deprecated" : "Use \"tags\" : { \"wisdom\" : true } instead" },
+		"obligatoryMinor" : { "deprecated" : "Use \"tags\" : { \"spellSchool\" : true } instead" },
+		"special" : { "deprecated" : "Use \"tags\" : { \"special\" : true } instead" },
+		"onlyOnWaterMap" : { "deprecated" : "Use \"tags\" : { \"onlyOnWaterMap\" : true } instead" },
+		"specialty" : {
+			"type" : "array",
+			"description" : "List of bonuses that are affected by hero specialty",
+			"items" : { "type" : "string" }
 		},
 		"gainChance" : {
 			"description" : "Chance for the skill to be offered on level-up (heroClass may override)",
-			"anyOf" : [
-				{
-					"type" : "number"
+			"type" : "object",
+			"required" : ["might", "magic"],
+			"properties" : {
+				"might" : {
+					"type" : "number",
+					"description" : "Chance for hero classes with might affinity"
 				},
-				{
-					"type" : "object",
-					"required" : ["might", "magic"],
-					"properties" : {
-						"might" : {
-							"type" : "number",
-							"description" : "Chance for hero classes with might affinity"
-						},
-						"magic" : {
-							"type" : "number",
-							"description" : "Chance for hero classes with magic affinity"
-						}
-					}
+				"magic" : {
+					"type" : "number",
+					"description" : "Chance for hero classes with magic affinity"
 				}
-			]
+			}
+		},
+		"offerCooldown" : {
+			"type" : "number",
+			"description" : "After the skill is gained or upgraded, it is not offered for upgrade on this many following level-ups, unless the hero has nothing else to upgrade"
 		},
 		"base" : {
 			"type" : "object",
@@ -95,6 +107,13 @@
 		},
 		"expert" : {
 			"$ref" : "#/definitions/skillBonus"
+		},
+		"tags" : {
+			"type" : "object",
+			"description" : "List of tags describing this skill",
+			"additionalProperties" : {
+				"type" : "boolean"
+			}
 		}
 	}
 }

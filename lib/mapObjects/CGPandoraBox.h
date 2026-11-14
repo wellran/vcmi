@@ -1,4 +1,4 @@
-﻿/*
+/*
  * CGPandoraBox.h, part of VCMI engine
  *
  * Authors: listed in file AUTHORS in main folder
@@ -9,74 +9,63 @@
  */
 #pragma once
 
-#include "CObjectHandler.h"
-#include "CArmedInstance.h"
+#include "CRewardableObject.h"
 #include "../ResourceSet.h"
+#include "../mapping/MapDifficulty.h"
 
 struct InfoWindow;
 
-class DLL_LINKAGE CGPandoraBox : public CArmedInstance
+class DLL_LINKAGE CGPandoraBox : public CRewardableObject
 {
 public:
-	std::string message;
-	mutable bool hasGuardians; //helper - after battle even though we have no stacks, allows us to know that there was battle
+	MapDifficultySet presentOnDifficulties;
 
-	//gained things:
-	ui32 gainedExp;
-	si32 manaDiff; //amount of gained / lost mana
-	si32 moraleDiff; //morale modifier
-	si32 luckDiff; //luck modifier
-	TResources resources;//gained / lost resources
-	std::vector<si32> primskills;//gained / lost prim skills
-	std::vector<SecondarySkill> abilities; //gained abilities
-	std::vector<si32> abilityLevels; //levels of gained abilities
-	std::vector<ArtifactID> artifacts; //gained artifacts
-	std::vector<SpellID> spells; //gained spells
-	CCreatureSet creatures; //gained creatures
+	using CRewardableObject::CRewardableObject;
 
-	CGPandoraBox();
-	void initObj(CRandomGenerator & rand) override;
-	void onHeroVisit(const CGHeroInstance * h) const override;
-	void battleFinished(const CGHeroInstance *hero, const BattleResult &result) const override;
-	void blockingDialogAnswered(const CGHeroInstance *hero, ui32 answer) const override;
-	void heroLevelUpDone(const CGHeroInstance *hero) const override;
+	MetaString message;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	/// Name of the map-script handler to run when a hero visits, replacing the default reward. Empty if none.
+	std::string heroVisitScriptHandler;
+
+	std::string getVisitScriptHandler() const override { return heroVisitScriptHandler; }
+
+	void initObj(IGameRandomizer & gameRandomizer) override;
+	void onHeroVisit(IGameEventCallback & gameEvents, const CGHeroInstance * h) const override;
+	void battleFinished(IGameEventCallback & gameEvents, const CGHeroInstance *hero, const BattleResult &result) const override;
+	void blockingDialogAnswered(IGameEventCallback & gameEvents, const CGHeroInstance *hero, int32_t answer, const JsonNode & visitState) const override;
+
+	template <typename Handler> void serialize(Handler &h)
 	{
-		h & static_cast<CArmedInstance&>(*this);
+		h & static_cast<CRewardableObject&>(*this);
 		h & message;
-		h & hasGuardians;
-		h & gainedExp;
-		h & manaDiff;
-		h & moraleDiff;
-		h & luckDiff;
-		h & resources;
-		h & primskills;
-		h & abilities;
-		h & abilityLevels;
-		h & artifacts;
-		h & spells;
-		h & creatures;
+		if(h.version >= Handler::Version::HOTA_MAP_FORMAT_EXTENSIONS)
+			h & presentOnDifficulties;
+		if(h.version >= Handler::Version::SCRIPT_VARIABLES)
+			h & heroVisitScriptHandler;
 	}
 protected:
-	void giveContentsUpToExp(const CGHeroInstance *h) const;
-	void giveContentsAfterExp(const CGHeroInstance *h) const;
+	void showRewardMessage(IGameEventCallback & gameEvents, const CGHeroInstance * contextHero, int rewardIndex) const override;
+	
+	virtual void init();
 	void serializeJsonOptions(JsonSerializeFormat & handler) override;
-private:
-	void getText( InfoWindow &iw, bool &afterBattle, int val, int negative, int positive, const CGHeroInstance * h ) const;
-	void getText( InfoWindow &iw, bool &afterBattle, int text, const CGHeroInstance * h ) const;
-	virtual void afterSuccessfulVisit() const;
 };
 
 class DLL_LINKAGE CGEvent : public CGPandoraBox  //event objects
 {
 public:
-	bool removeAfterVisit; //true if event is removed after occurring
-	ui8 availableFor; //players whom this event is available for
-	bool computerActivate; //true if computer player can activate this event
-	bool humanActivate; //true if human player can activate this event
+	CGEvent(IGameInfoCallback *cb);
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	//players whom this event is available for
+	std::set<PlayerColor> availableFor;
+
+	//true if event is removed after occurring
+	bool removeAfterVisit = false;
+	//true if computer player can activate this event
+	bool computerActivate = false;
+	//true if human player can activate this event
+	bool humanActivate = false;
+
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<CGPandoraBox &>(*this);
 		h & removeAfterVisit;
@@ -85,11 +74,13 @@ public:
 		h & humanActivate;
 	}
 
-	CGEvent();
-	void onHeroVisit(const CGHeroInstance * h) const override;
+	void onHeroVisit(IGameEventCallback & gameEvents, const CGHeroInstance * h) const override;
+	void battleFinished(IGameEventCallback & gameEvents, const CGHeroInstance *hero, const BattleResult &result) const override;
 protected:
+	void configureInfoWindow(InfoWindow & infoWindow, const CGHeroInstance * contextHero, int rewardIndex) const override;
+	
+	void init() override;
 	void serializeJsonOptions(JsonSerializeFormat & handler) override;
 private:
-	void activated(const CGHeroInstance * h) const;
-	void afterSuccessfulVisit() const override;
+	void activated(IGameEventCallback & gameEvents, const CGHeroInstance * h) const;
 };

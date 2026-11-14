@@ -9,30 +9,42 @@
  */
 #pragma once
 
-#include "../../lib/StartInfo.h"
-#include "../../lib/mapping/CMap.h"
+#include "OptionsTabBase.h"
+#include "../windows/CWindowObject.h"
+#include "../widgets/Scrollable.h"
 
-class CSlider;
+struct PlayerSettings;
+struct PlayerInfo;
+enum class PlayerStartingBonus : int8_t;
+
 class CLabel;
 class CMultiLineLabel;
 class CFilledTexture;
 class CAnimImage;
 class CComponentBox;
+class CTextBox;
+class CButton;
+class CSlider;
+class LRClickableArea;
+class CTextInputWithConfirm;
+
+class FilledTexturePlayerColored;
+class TransparentFilledRectangle;
+
 /// The options tab which is shown at the map selection phase.
-class OptionsTab : public CIntObject
+class OptionsTab : public OptionsTabBase
 {
-	std::shared_ptr<CPicture> background;
-	std::shared_ptr<CLabel> labelTitle;
-	std::shared_ptr<CMultiLineLabel> labelSubTitle;
-	std::shared_ptr<CMultiLineLabel> labelPlayerNameAndHandicap;
-	std::shared_ptr<CMultiLineLabel> labelStartingTown;
-	std::shared_ptr<CMultiLineLabel> labelStartingHero;
-	std::shared_ptr<CMultiLineLabel> labelStartingBonus;
-
-	std::shared_ptr<CLabel> labelPlayerTurnDuration;
-	std::shared_ptr<CLabel> labelTurnDurationValue;
-
+	struct PlayerOptionsEntry;
+	
+	ui8 humanPlayers;
+	std::map<PlayerColor, std::shared_ptr<PlayerOptionsEntry>> entries;
+	
 public:
+	
+	OptionsTab();
+	void recreate();
+	void onSetPlayerClicked(const PlayerSettings & ps) const;
+	
 	enum SelType
 	{
 		TOWN,
@@ -40,18 +52,35 @@ public:
 		BONUS
 	};
 
+	class HandicapWindow : public CWindowObject
+	{
+		std::shared_ptr<FilledTexturePlayerColored> backgroundTexture;
+
+		std::vector<std::shared_ptr<CLabel>> labels;
+		std::vector<std::shared_ptr<CAnimImage>> anim;
+		std::vector<std::shared_ptr<TransparentFilledRectangle>> textinputbackgrounds;
+		std::map<PlayerColor, std::map<EGameResID, std::shared_ptr<CTextInput>>> textinputs;
+		std::vector<std::shared_ptr<CButton>> buttons;
+
+		void notFocusedClick() override;
+	public:
+		HandicapWindow();
+	};
+
+private:
+	
 	struct CPlayerSettingsHelper
 	{
-		const PlayerSettings & settings;
-		const SelType type;
+		const PlayerSettings & playerSettings;
+		const SelType selectionType;
 
-		CPlayerSettingsHelper(const PlayerSettings & settings, SelType type)
-			: settings(settings), type(type)
+		CPlayerSettingsHelper(const PlayerSettings & playerSettings, SelType type)
+			: playerSettings(playerSettings), selectionType(type)
 		{}
 
 		/// visible image settings
-		size_t getImageIndex();
-		std::string getImageName();
+		size_t getImageIndex(bool big = false);
+		AnimationPath getImageName(bool big = false);
 
 		std::string getName(); /// name visible in options dialog
 		std::string getTitle(); /// title in popup box
@@ -84,23 +113,94 @@ public:
 		CPlayerOptionTooltipBox(CPlayerSettingsHelper & helper);
 	};
 
+	class SelectionWindow : public CWindowObject
+	{
+		//const int ICON_SMALL_WIDTH = 48;
+		const int ICON_SMALL_HEIGHT = 32;
+		const int ICON_BIG_WIDTH = 58;
+		const int ICON_BIG_HEIGHT = 64;
+		const int TEXT_POS_X = 29;
+		const int TEXT_POS_Y = 56;
+
+		const int MIN_LINES = 5;
+		const int MIN_ELEM_PER_LINE = 5;
+		const int MAX_LINES = 7;
+		const int MAX_ELEM_PER_LINE = 7;
+
+		int elementsPerLine;
+
+		std::shared_ptr<CSlider> slider;
+
+		PlayerColor color;
+		SelType type;
+
+		std::shared_ptr<FilledTexturePlayerColored> backgroundTexture;
+		std::vector<std::shared_ptr<CIntObject>> components;
+
+		std::vector<FactionID> factions;
+		std::vector<HeroTypeID> heroes;
+		std::set<HeroTypeID> unusableHeroes;
+
+		FactionID initialFaction;
+		HeroTypeID initialHero;
+		PlayerStartingBonus initialBonus;
+		FactionID selectedFaction;
+		HeroTypeID selectedHero;
+		PlayerStartingBonus selectedBonus;
+
+		std::set<FactionID> allowedFactions;
+		std::set<HeroTypeID> allowedHeroes;
+		std::vector<PlayerStartingBonus> allowedBonus;
+
+		void genContentGrid(int lines);
+		void genContentFactions();
+		void genContentHeroes();
+		void genContentBonus();
+
+		void drawOutlinedText(int x, int y, ColorRGBA color, std::string text);
+		std::tuple<int, int> calcLines(FactionID faction);
+		void apply();
+		void recreate(int sliderPos = 0);
+		void setSelection();
+		int getElement(const Point & cursorPosition);
+		void setElement(int element, bool doApply);
+		int getMaxElementsPerLine(int itemCount) const;
+
+		void sliderMove(int slidPos);
+
+		void notFocusedClick() override;
+		void clickReleased(const Point & cursorPosition) override;
+		void showPopupWindow(const Point & cursorPosition) override;
+
+	public:
+		void reopen();
+
+		SelectionWindow(const PlayerColor & color, SelType _type, int sliderPos = 0);
+	};
+
 	/// Image with current town/hero/bonus
-	struct SelectedBox : public CIntObject, public CPlayerSettingsHelper
+	struct SelectedBox : public Scrollable, public CPlayerSettingsHelper
 	{
 		std::shared_ptr<CAnimImage> image;
 		std::shared_ptr<CLabel> subtitle;
 
-		SelectedBox(Point position, PlayerSettings & settings, SelType type);
-		void clickRight(tribool down, bool previousState) override;
+		SelectedBox(Point position, PlayerSettings & playerSettings, SelType type);
+		void showPopupWindow(const Point & cursorPosition) override;
+		void clickReleased(const Point & cursorPosition) override;
+		void scrollBy(int distance) override;
 
+		/// Whether the player is allowed to change what this box shows
+		bool canChangeSelection() const;
 		void update();
 	};
 
 	struct PlayerOptionsEntry : public CIntObject
 	{
-		PlayerInfo pi;
-		PlayerSettings s;
+		std::string name;
+		std::unique_ptr<PlayerInfo> pi;
+		std::unique_ptr<PlayerSettings> s;
 		std::shared_ptr<CLabel> labelPlayerName;
+		std::shared_ptr<CTextInputWithConfirm> labelPlayerNameEdit;
 		std::shared_ptr<CMultiLineLabel> labelWhoCanPlay;
 		std::shared_ptr<CPicture> background;
 		std::shared_ptr<CButton> buttonTownLeft;
@@ -113,15 +213,16 @@ public:
 		std::shared_ptr<SelectedBox> town;
 		std::shared_ptr<SelectedBox> hero;
 		std::shared_ptr<SelectedBox> bonus;
+		std::shared_ptr<LRClickableArea> handicap;
+		std::shared_ptr<CMultiLineLabel> labelHandicap;
 		enum {HUMAN_OR_CPU, HUMAN, CPU} whoCanPlay;
 
-		PlayerOptionsEntry(const PlayerSettings & S);
+		PlayerOptionsEntry(const PlayerSettings & S, const OptionsTab & parentTab);
 		void hideUnavailableButtons();
+
+	private:
+		const OptionsTab & parentTab;
+
+		void updateName();
 	};
-
-	std::shared_ptr<CSlider> sliderTurnDuration;
-	std::map<PlayerColor, std::shared_ptr<PlayerOptionsEntry>> entries;
-
-	OptionsTab();
-	void recreate();
 };

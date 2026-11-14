@@ -1,0 +1,470 @@
+/*
+ * EntryPoint.cpp, part of VCMI engine
+ *
+ * Authors: listed in file AUTHORS in main folder
+ *
+ * License: GNU General Public License v2.0 or later
+ * Full text of license available in license.txt file, in main folder
+ *
+ */
+#include "StdInc.h"
+
+#include <vstd/DateUtils.h>
+
+#include "../server/CVCMIServer.h"
+#include "../server/CreatureValueEstimator.h"
+
+#include "../lib/CConsoleHandler.h"
+#include "../lib/logging/CBasicLogConfigurator.h"
+#include "../lib/VCMIDirs.h"
+#include "../lib/GameLibrary.h"
+#include "../lib/CConfigHandler.h"
+#include "../lib/filesystem/Filesystem.h"
+#include "../lib/modding/CModHandler.h"
+#include "../lib/modding/LibraryLoadContext.h"
+#include "../lib/modding/ModUtility.h"
+#include "../lib/modding/ModManager.h"
+#include "callback/EditorCallback.h"
+#include "campaign/CampaignHandler.h"
+#include "mapping/CMap.h"
+#include "mapping/CMapService.h"
+#include "modding/ModDescription.h"
+#include "texts/CGeneralTextHandler.h"
+#include "texts/Languages.h"
+#include "texts/TextOperations.h"
+#include "../luascript/LuaModule.h"
+
+#include <boost/program_options.hpp>
+
+#include <vcmi/scripting/Service.h>
+
+static const std::string SERVER_NAME_AFFIX = "server";
+static const std::string SERVER_NAME = std::string(GameConstants::VCMI_PROJECT_NAME_VERSIONED) + " (" + SERVER_NAME_AFFIX + ')';
+
+static void exportLuaApiDocs(const boost::filesystem::path & outPath)
+{
+	auto scriptHandler = std::make_unique<scripting::LuaModule>();
+	scriptHandler->exportDocs(outPath);
+
+	logGlobal->info("Lua API documentation export complete");
+	logGlobal->info("Generated files can be found in " + TextOperations::filesystemPathToUtf8(outPath) + " directory");
+}
+
+static std::unique_ptr<GameLibrary> loadLibrary()
+{
+	auto library = std::make_unique<GameLibrary>();
+	library->initializeFilesystem();
+	library->initializeLibrary();
+	return library;
+}
+
+/// Creates preset with modID and all its submods except disabledMods, and returns mod manager that uses it
+static std::unique_ptr<ModManager> activateExportPreset(const std::string & presetName, const std::string & modID, const std::set<std::string> & disabledMods)
+{
+	auto mods = std::make_unique<ModManager>();
+	mods->createNewPreset(presetName);
+	mods->activatePreset(presetName);
+	mods = std::make_unique<ModManager>();
+	mods->tryEnableMods({modID});
+
+	for (const auto & submod : mods->getModSettings(modID))
+	{
+		try
+		{
+			std::string fullModID = modID + '.' + submod.first;
+			if (!submod.second && !disabledMods.count(fullModID))
+				mods->tryEnableMods({fullModID});
+		}
+		catch (const std::exception &)
+		{
+			// failed to enable mod - ignore, will be logged later
+		}
+	}
+
+	// mods that depend on disabled ones are expected to fail
+	if (disabledMods.empty())
+	{
+		for (const auto & submod : mods->getModSettings(modID))
+			if (!submod.second)
+				logGlobal->warn("Failed to enable submod %s", submod.first);
+	}
+
+	// Disable only after enabling everything else - other submods (e.g. compatibility patches) may pull these back in as dependencies
+	for (const auto & disabledModID : disabledMods)
+	{
+		try
+		{
+			if (mods->isModActive(disabledModID))
+				mods->tryDisableMod(disabledModID);
+		}
+		catch (const std::exception & e)
+		{
+			logGlobal->warn("Failed to disable mod %s for translation export: %s", disabledModID, e.what());
+		}
+	}
+
+	return mods;
+}
+
+/// Returns all mods that are loaded before modID due to its direct or indirect (soft) dependencies
+static std::set<TModID> collectDependencies(const ModManager & mods, const TModID & modID)
+{
+	const auto allMods = mods.getAllMods();
+	std::set<TModID> result;
+	std::vector<TModID> queue = {modID};
+
+	while (!queue.empty())
+	{
+		const auto & description = mods.getModDescription(queue.back());
+		queue.pop_back();
+
+		for (const auto * dependencies : {&description.getDependencies(), &description.getSoftDependencies()})
+			for (const auto & dependency : *dependencies)
+				if (vstd::contains(allMods, dependency) && result.insert(dependency).second)
+					queue.push_back(dependency);
+	}
+	return result;
+}
+
+/// Exports texts of maps and campaigns from modID and its submods
+static void exportMapTexts(const std::string & modID, std::map<std::string, ExportedStrings> & textsByMod)
+{
+	CMapService mapService;
+
+	logGlobal->info("Searching for available maps");
+	std::unordered_set<ResourcePath> mapList = CResourceHandler::get()->getFilteredFiles([&](const ResourcePath & ident)
+	{
+		return ident.getType() == EResType::MAP;
+	});
+
+	std::vector<std::unique_ptr<CMap>> loadedMaps;
+	std::vector<std::shared_ptr<Campaign>> loadedCampaigns;
+
+	logGlobal->info("Loading maps for export");
+	for (auto const & mapName : mapList)
+	{
+		try
+		{
+			std::string mapModName = LIBRARY->modh->findResourceOrigin(mapName);
+			if (mapModName != modID && !mapModName.starts_with(modID + '.'))
+				continue;
+
+			EditorCallback cb(nullptr);
+			// load and drop loaded map - we only need loader to run over all maps
+			loadedMaps.push_back(mapService.loadMap(mapName, &cb));
+		}
+		catch(std::exception & e)
+		{
+			logGlobal->warn("Map %s is invalid. Message: %s", mapName.getName(), e.what());
+		}
+	}
+
+	logGlobal->info("Searching for available campaigns");
+	std::unordered_set<ResourcePath> campaignList = CResourceHandler::get()->getFilteredFiles([&](const ResourcePath & ident)
+	{
+		return ident.getType() == EResType::CAMPAIGN;
+	});
+
+	logGlobal->info("Loading campaigns for export");
+	for (auto const & campaignName : campaignList)
+	{
+		try
+		{
+			std::string campaignModName = LIBRARY->modh->findResourceOrigin(campaignName);
+			if (campaignModName != modID && !campaignModName.starts_with(modID + '.'))
+				continue;
+
+			loadedCampaigns.push_back(CampaignHandler::getCampaign(campaignName.getName()));
+			for (auto const & part : loadedCampaigns.back()->allScenarios())
+			{
+				EditorCallback cb(nullptr);
+				loadedMaps.push_back(loadedCampaigns.back()->getMap(part, &cb));
+			}
+		}
+		catch(std::exception & e)
+		{
+			logGlobal->warn("Campaign %s is invalid. Message: %s", campaignName.getName(), e.what());
+		}
+	}
+
+	// map and campaign texts are owned by maps and campaigns themselves, not by the library
+	for (auto const & map : loadedMaps)
+		map->texts->exportAllTexts(textsByMod, false);
+
+	for (auto const & campaign : loadedCampaigns)
+		campaign->getTexts()->exportAllTexts(textsByMod, false);
+}
+
+static void generateTranslations(const std::string & modID)
+{
+	initializeBaseFilesystem(false);
+
+	// compatibility patches must be disabled like regular mods, or they would hide strings of mods they depend on
+	{
+		Settings autoEnable = settings.write["session"]["disableCompatibilityAutoEnable"];
+		autoEnable->Bool() = true;
+	}
+
+	ModManager modsInfo;
+	std::string oldPresetName = modsInfo.getActivePreset();
+	std::vector<std::string> exportPresets;
+
+	std::map<std::string, ExportedStrings> textsByMod;
+
+	// submods that modify strings of modID, detected so far
+	std::set<std::string> overridingMods;
+
+	// Loads library without disabledMods and exports strings of non-overriding mods. Any newly found overriding submods are added to overridingMods
+	const auto exportPass = [&](const std::set<std::string> & disabledMods)
+	{
+		exportPresets.push_back("translation-export-" + std::to_string(exportPresets.size()));
+		auto mods = activateExportPreset(exportPresets.back(), modID, disabledMods);
+		setGameLibrary(loadLibrary());
+
+		std::map<std::string, ExportedStrings> passTexts;
+		LIBRARY->generaltexth->exportAllTexts(passTexts, false);
+
+		for (const auto & [exportedModID, exported] : passTexts)
+		{
+			if (exportedModID.find('.') == std::string::npos)
+				continue;
+
+			for (const auto & otherModID : exported.overridenMods)
+				if (otherModID == modID || otherModID.starts_with(modID + '.'))
+					overridingMods.insert(exportedModID);
+		}
+
+		// new strings of overriding mods are exported into their parent mod, so they are only visible while overriding mod is enabled
+		for (auto & [exportedModID, exported] : passTexts)
+			if (!overridingMods.count(exportedModID))
+				textsByMod[exportedModID].strings.merge(exported.strings);
+
+		return passTexts;
+	};
+
+	std::set<std::string> exportedOverrides;
+	for (bool firstPass = true;; firstPass = false)
+	{
+		size_t knownOverrides = overridingMods.size();
+		exportPass(overridingMods);
+
+		// map and campaign texts are not affected by overriding mods
+		if (firstPass)
+		{
+			std::map<std::string, ExportedStrings> mapTexts;
+			exportMapTexts(modID, mapTexts);
+			for (auto & [exportedModID, exported] : mapTexts)
+				textsByMod[exportedModID].strings.merge(exported.strings);
+		}
+
+		// Mod may be detected as overriding only once all mods that hide its strings are disabled
+		if (overridingMods.size() == knownOverrides)
+			break;
+
+		// Several mods may override same string (e.g. compatibility patch on top of rebalance mod), and only the last loaded one is visible
+		// So export each overriding mod with only its own dependencies enabled
+		for (;;)
+		{
+			auto nextMod = std::ranges::find_if(overridingMods, [&](const std::string & mod){ return !exportedOverrides.count(mod); });
+			if (nextMod == overridingMods.end())
+				break;
+
+			std::string overridingMod = *nextMod;
+			exportedOverrides.insert(overridingMod);
+			logGlobal->info("Exporting strings overriden by %s", overridingMod);
+
+			std::set<std::string> disabledMods = overridingMods;
+			disabledMods.erase(overridingMod);
+			for (const auto & dependency : collectDependencies(modsInfo, overridingMod))
+				disabledMods.erase(dependency);
+
+			auto passTexts = exportPass(disabledMods);
+			textsByMod[overridingMod].strings = std::move(passTexts[overridingMod].strings);
+		}
+	}
+
+	const boost::filesystem::path outPath = VCMIDirs::get().userExtractedPath() / "translationFull";
+	boost::filesystem::create_directories(outPath);
+
+	for(const auto & modEntry : textsByMod)
+	{
+		JsonNode output;
+
+		if (modEntry.first != modID && !modEntry.first.starts_with(modID + '.'))
+			continue;
+
+		for(const auto & stringEntry : modEntry.second.strings)
+			output[stringEntry.first].String() = stringEntry.second;
+
+		if (!output.isNull())
+		{
+			std::string preferredLanguage = Languages::getPreferredLanguage();
+			std::string filename = boost::replace_all_copy(modEntry.first, ".", "/Mods/");
+			const boost::filesystem::path dirPath = outPath / filename / "Content/translation/";
+			boost::filesystem::create_directories(dirPath);
+			const boost::filesystem::path filePath = dirPath / (preferredLanguage + ".json");
+			std::ofstream file(filePath.c_str());
+			file << output.toString();
+		}
+	}
+
+	ModManager mods;
+	mods.activatePreset(oldPresetName);
+	for (const auto & presetName : exportPresets)
+		mods.deletePreset(presetName);
+	logGlobal->info("Translation export complete");
+	logGlobal->info("Extracted files can be found in " + TextOperations::filesystemPathToUtf8(outPath) + " directory\n");
+
+}
+
+static void exportConfiguration(const LibraryLoadContext & context)
+{
+	const boost::filesystem::path outPath = VCMIDirs::get().userExtractedPath() / "configuration";
+
+	boost::filesystem::create_directories(outPath);
+
+	const std::vector<std::string> contentNames = { "heroClasses", "artifacts", "creatures", "factions", "objects", "heroes", "spells", "skills" };
+
+	for(const auto & contentName : contentNames)
+	{
+		const auto & content = context.content[contentName];
+
+		auto contentOutPath = outPath / contentName;
+		boost::filesystem::create_directories(contentOutPath);
+
+		for(const auto & iter : content.modData)
+		{
+			const JsonNode & modData = iter.second.modData;
+
+			for(const auto & nameAndObject : modData.Struct())
+			{
+				const JsonNode & object = nameAndObject.second;
+
+				std::string name = ModUtility::makeFullIdentifier(object.getModScope(), contentName, nameAndObject.first);
+
+				boost::algorithm::replace_all(name, ":", "_");
+
+				const boost::filesystem::path filePath = contentOutPath / (name + ".json");
+				std::ofstream file(filePath.c_str());
+				file << object.toString();
+			}
+		}
+	}
+
+	logGlobal->info("Configuration export complete");
+	logGlobal->info("Extracted files can be found in " + TextOperations::filesystemPathToUtf8(outPath) + " directory");
+}
+
+static void handleCommandOptions(int argc, const char * argv[], boost::program_options::variables_map & options)
+{
+	boost::program_options::options_description opts("Allowed options");
+	opts.add_options()
+	("help,h", "display help and exit")
+	("version,v", "display version information and exit")
+	("run-by-client", "indicate that server launched by client on same machine")
+	("dummy-run", "Shutdown immediately after loading was sucessful")
+	("creature-values", "Compute AI values and fight values of all creatures and compare them against configured values")
+	("export-config", "Export configuration of game objects from all active mods into json files")
+	("translate-mod", boost::program_options::value<std::string>(), "Export translations for specified mod")
+	("export-lua-docs", boost::program_options::value<std::string>(), "Export Lua scripting API documentation to specified directory")
+	("port", boost::program_options::value<ui16>(), "port at which server will listen to connections from client")
+	("lobby", "start server in lobby mode in which server connects to a global lobby");
+
+	if(argc > 1)
+	{
+		try
+		{
+			boost::program_options::store(boost::program_options::parse_command_line(argc, argv, opts), options);
+		}
+		catch(boost::program_options::error & e)
+		{
+			std::cerr << "Failure during parsing command-line options:\n" << e.what() << std::endl;
+		}
+	}
+
+	boost::program_options::notify(options);
+
+	if(options.count("help"))
+	{
+		auto time = std::time(nullptr);
+		std::tm tm = vstd::safeLocalTime(time);
+		printf("%s - A Heroes of Might and Magic 3 clone\n", GameConstants::VCMI_PROJECT_NAME_VERSIONED);
+		printf("Copyright (C) 2007-%d VCMI dev team - see AUTHORS file\n", tm.tm_year + 1900);
+		printf("This is free software; see the source for copying conditions. There is NO\n");
+		printf("warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n");
+		printf("\n");
+		std::cout << opts;
+		exit(0);
+	}
+
+	if(options.count("translate-mod"))
+	{
+		std::string modID = options["translate-mod"].as<std::string>();
+		generateTranslations(modID);
+		exit(0);
+	}
+
+	if(options.count("export-lua-docs"))
+	{
+		exportLuaApiDocs(options["export-lua-docs"].as<std::string>());
+		exit(0);
+	}
+
+	if(options.count("version"))
+	{
+		printf("%s\n", GameConstants::VCMI_VERSION);
+		std::cout << VCMIDirs::get().genHelpString();
+		exit(0);
+	}
+}
+
+int main(int argc, const char * argv[])
+{
+	// Correct working dir executable folder (not bundle folder) so we can use executable relative paths
+	boost::filesystem::current_path(boost::filesystem::system_complete(argv[0]).parent_path());
+
+	CConsoleHandler console;
+	CBasicLogConfigurator logConfigurator(VCMIDirs::get().userLogsPath() / "VCMI_Server_log.txt", &console);
+	logConfigurator.configureDefault();
+	logGlobal->info(SERVER_NAME);
+
+	boost::program_options::variables_map opts;
+	handleCommandOptions(argc, argv, opts);
+	initializeBaseFilesystem(false);
+	auto library = std::make_unique<GameLibrary>();
+	library->initializeFilesystem();
+	logConfigurator.configure();
+
+	if(opts.count("export-config"))
+	{
+		LibraryLoadContext context(*library);
+		library->initializeLibrary(context);
+		exportConfiguration(context);
+	}
+	else
+		library->initializeLibrary();
+	setGameLibrary(std::move(library));
+
+	if(opts.count("creature-values"))
+	{
+		CreatureValueEstimator::run();
+	}
+	else if(!opts.count("dummy-run") && !opts.count("export-config"))
+	{
+		bool connectToLobby = opts.count("lobby");
+		bool runByClient = opts.count("runByClient");
+		uint16_t port = settings["server"]["localPort"].Integer();
+		if(opts.count("port"))
+			port = opts["port"].as<uint16_t>();
+
+		CVCMIServer server(port, runByClient);
+		server.prepare(connectToLobby, true);
+		server.run();
+		// CVCMIServer destructor must be called here - before LIBRARY cleanup
+	}
+
+	logConfigurator.deconfigure();
+
+	setGameLibrary(nullptr);
+	return 0;
+}

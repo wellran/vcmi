@@ -45,7 +45,7 @@ bool JsonComparer::isEmpty(const JsonNode & value)
 	case JsonNode::JsonType::DATA_BOOL:
 		return !value.Bool();
 	case JsonNode::JsonType::DATA_FLOAT:
-		return value.Float() == 0;
+		return vstd::isAlmostEqual(value.Float(), 0.0);
 	case JsonNode::JsonType::DATA_INTEGER:
 		return value.Integer() == 0;
 	case JsonNode::JsonType::DATA_STRING:
@@ -80,7 +80,7 @@ void JsonComparer::checkEqualInteger(const si64 actual, const si64 expected)
 {
 	if(actual != expected)
 	{
-		check(false, boost::str(boost::format("'%d' != '%d'") % actual % expected));
+		check(false, boost::str(boost::format("actual: '%d' ,expected: '%d'") % actual % expected));
 	}
 }
 
@@ -88,7 +88,7 @@ void JsonComparer::checkEqualFloat(const double actual, const double expected)
 {
 	if(std::abs(actual - expected) > 1e-8)
 	{
-		check(false, boost::str(boost::format("'%d' != '%d' (diff %d)") % actual % expected % (expected - actual)));
+		check(false, boost::str(boost::format("actual: '%lf' ,expected: '%lf' (diff %lf)") % actual % expected % (expected - actual)));
 	}
 }
 
@@ -96,7 +96,7 @@ void JsonComparer::checkEqualString(const std::string & actual, const std::strin
 {
 	if(actual != expected)
 	{
-		check(false, boost::str(boost::format("'%s' != '%s'") % actual % expected));
+		check(false, boost::str(boost::format("actual: '%s' , expected: '%s'") % actual % expected));
 	}
 }
 
@@ -116,7 +116,7 @@ void JsonComparer::checkEqualJson(const JsonVector & actual, const JsonVector & 
 
 	for(size_t idx = 0; idx < sz; idx ++)
 	{
-		auto guard = pushName(boost::to_string(idx));
+		auto guard = pushName(std::to_string(idx));
 
 		checkEqualJson(actual.at(idx), expected.at(idx));
 	}
@@ -165,7 +165,7 @@ void JsonComparer::checkEqualJson(const JsonNode & actual, const JsonNode & expe
 	}
 	else
 	{
-		check(false, "type mismatch. \n expected:\n"+expected.toJson(true)+"\n actual:\n" +actual.toJson(true));
+		check(false, "type mismatch. \n expected:\n"+expected.toCompactString()+"\n actual:\n" +actual.toCompactString());
 	}
 }
 

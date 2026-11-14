@@ -9,16 +9,19 @@
  */
 #pragma once
 
+#include "filesystem/ResourcePath.h"
+#include "IHandlerBase.h"
+
 class IBonusBearer;
 struct Bonus;
 
 ///High level interface for BonusTypeHandler
 
-class DLL_LINKAGE IBonusTypeHandler
+class DLL_LINKAGE IBonusTypeHandler : public IHandlerBase
 {
 public:
-	virtual ~IBonusTypeHandler(){};
+	virtual ~IBonusTypeHandler() = default;
 
-	virtual std::string bonusToString(const std::shared_ptr<Bonus> & bonus, const IBonusBearer * bearer, bool description) const = 0;
-	virtual std::string bonusToGraphics(const std::shared_ptr<Bonus> & bonus) const = 0;
+	virtual std::string bonusToString(const std::shared_ptr<Bonus> & bonus, const IBonusBearer * bearer) const = 0;
+	virtual ImagePath bonusToGraphics(const std::shared_ptr<Bonus> & bonus) const = 0;
 };

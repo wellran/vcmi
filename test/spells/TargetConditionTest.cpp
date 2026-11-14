@@ -11,7 +11,6 @@
 
 #include <vstd/RNG.h>
 
-#include "../../lib/NetPacksBase.h"
 #include "../../lib/spells/TargetCondition.h"
 #include "../../lib/serializer/JsonDeserializer.h"
 
@@ -41,9 +40,11 @@ public:
 	MOCK_CONST_METHOD0(createAbsoluteLevel, Object());
 	MOCK_CONST_METHOD0(createAbsoluteSpell, Object());
 	MOCK_CONST_METHOD0(createElemental, Object());
+	MOCK_CONST_METHOD0(createResistance, Object());
 	MOCK_CONST_METHOD0(createNormalLevel, Object());
 	MOCK_CONST_METHOD0(createNormalSpell, Object());
 	MOCK_CONST_METHOD3(createConfigurable, Object(std::string, std::string, std::string));
+	MOCK_CONST_METHOD1(createFromJson, Object(const JsonNode &));
 	MOCK_CONST_METHOD0(createReceptiveFeature, Object());
 	MOCK_CONST_METHOD0(createImmunityNegation, Object());
 };
@@ -59,7 +60,8 @@ public:
 
 	void setupSubject(const JsonNode & configuration)
 	{
-		JsonDeserializer handler(nullptr, configuration);
+		InstantIdentifierResolver resolver(*LIBRARY->identifiers());
+		JsonDeserializer handler(nullptr, resolver, configuration);
 
 		subject.serializeJson(handler, &factoryMock);
 	}
@@ -73,6 +75,7 @@ public:
 		ON_CALL(factoryMock, createAbsoluteLevel()).WillByDefault(Return(itemStub));
 		ON_CALL(factoryMock, createAbsoluteSpell()).WillByDefault(Return(itemStub));
 		ON_CALL(factoryMock, createElemental()).WillByDefault(Return(itemStub));
+		ON_CALL(factoryMock, createResistance()).WillByDefault(Return(itemStub));
 		ON_CALL(factoryMock, createNormalLevel()).WillByDefault(Return(itemStub));
 		ON_CALL(factoryMock, createNormalSpell()).WillByDefault(Return(itemStub));
 
@@ -120,7 +123,7 @@ TEST_F(TargetConditionTest, SerializesCorrectly)
 
 	EXPECT_CALL(factoryMock, createConfigurable(Eq(""), Eq("bonus"), Eq("UNDEAD"))).WillOnce(Return(normalItem));
 
-	JsonNode config(JsonNode::JsonType::DATA_STRUCT);
+	JsonNode config;
 	config["noneOf"]["bonus.NON_LIVING"].String() = "normal";
 	config["anyOf"]["bonus.SIEGE_WEAPON"].String() = "absolute";
 	config["allOf"]["bonus.UNDEAD"].String() = "normal";
@@ -132,12 +135,38 @@ TEST_F(TargetConditionTest, SerializesCorrectly)
 	EXPECT_THAT(subject.absolute, Contains(absoluteItem));
 }
 
+TEST_F(TargetConditionTest, SerializesObjectConditions)
+{
+	redirectFactoryToStub();
+
+	auto item = std::make_shared<StrictMock<ItemMock>>();
+	EXPECT_CALL(*item, setInverted(Eq(true))).Times(1);
+	EXPECT_CALL(*item, setExclusive(Eq(true))).Times(1);
+
+	JsonNode config;
+	JsonNode & condition = config["noneOf"]["rebirth"];
+	condition["type"].String() = "bonus";
+	condition["mode"].String() = "absolute";
+	condition["bonusType"].String() = "COMBAT_EVENT_TRIGGER";
+	condition["bonusSubtype"].String() = "rebirth";
+
+	// object without mode is reported and skipped
+	config["noneOf"]["noMode"]["type"].String() = "bonus";
+
+	EXPECT_CALL(factoryMock, createFromJson(Eq(condition))).WillOnce(Return(item));
+
+	setupSubject(config);
+
+	EXPECT_THAT(subject.absolute, Contains(item));
+}
+
 TEST_F(TargetConditionTest, CreatesSpecialConditions)
 {
 	redirectFactoryToStub();
 	EXPECT_CALL(factoryMock, createAbsoluteLevel()).Times(1);
 	EXPECT_CALL(factoryMock, createAbsoluteSpell()).Times(1);
 	EXPECT_CALL(factoryMock, createElemental()).Times(1);
+	EXPECT_CALL(factoryMock, createResistance()).Times(1);
 	EXPECT_CALL(factoryMock, createNormalLevel()).Times(1);
 	EXPECT_CALL(factoryMock, createNormalSpell()).Times(1);
 

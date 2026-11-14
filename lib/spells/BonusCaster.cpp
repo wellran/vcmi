@@ -12,42 +12,54 @@
 #include "BonusCaster.h"
 
 #include <vcmi/spells/Spell.h>
+#include <vcmi/HeroType.h>
+#include <vcmi/Artifact.h>
 
-#include "../NetPacksBase.h"
-#include "../HeroBonus.h"
 #include "../battle/Unit.h"
+#include "../bonuses/Bonus.h"
+#include "../GameLibrary.h"
+#include "../CSkillHandler.h"
 
 namespace spells
 {
 
-BonusCaster::BonusCaster(const Caster * actualCaster_, std::shared_ptr<Bonus> bonus_)
-	: ProxyCaster(actualCaster_),
-	actualCaster(actualCaster_),
-	bonus(bonus_)
+BonusCaster::BonusCaster(const Caster * actualCaster_, std::shared_ptr<Bonus> bonus_):
+	ProxyCaster(actualCaster_),
+	bonus(std::move(bonus_))
 {
-
 }
 
 BonusCaster::~BonusCaster() = default;
 
-void BonusCaster::getCasterName(MetaString & text) const
+std::string BonusCaster::getCasterNameTextID() const
 {
-	if(!bonus->description.empty())
-		text.addReplacement(bonus->description);
-	else
-		actualCaster->getCasterName(text);
+	switch(bonus->source)
+	{
+		case BonusSource::ARTIFACT:
+			return bonus->sid.as<ArtifactID>().toEntity(LIBRARY)->getNameTextID();
+		case BonusSource::SPELL_EFFECT:
+			return bonus->sid.as<SpellWithMasteryID>().getSpellID().toEntity(LIBRARY)->getNameTextID();
+		case BonusSource::CREATURE_ABILITY:
+			return bonus->sid.as<CreatureID>().toEntity(LIBRARY)->getNamePluralTextID();
+		case BonusSource::SECONDARY_SKILL:
+			return bonus->sid.as<SecondarySkill>().toEntity(LIBRARY)->getNameTextID();
+		case BonusSource::HERO_SPECIAL:
+			return bonus->sid.as<HeroTypeID>().toEntity(LIBRARY)->getNameTextID();
+		default:
+			return actualCaster->getCasterNameTextID();
+	}
 }
 
-void BonusCaster::getCastDescription(const Spell * spell, const std::vector<const battle::Unit*> & attacked, MetaString & text) const
+void BonusCaster::getCastDescription(const Spell * spell, const battle::Units & attacked, MetaString & text) const
 {
 	const bool singleTarget = attacked.size() == 1;
 	const int textIndex = singleTarget ? 195 : 196;
 
-	text.addTxt(MetaString::GENERAL_TXT, textIndex);
-	getCasterName(text);
-	text.addReplacement(MetaString::SPELL_NAME, spell->getIndex());
+	text.appendLocalString(EMetaText::GENERAL_TXT, textIndex);
+	text.replaceTextID(getCasterNameTextID());
+	text.replaceName(spell->getId());
 	if(singleTarget)
-		attacked.at(0)->addNameReplacement(text, true);
+		attacked.at(0)->addNameReplacement(text, 2);
 }
 
 void BonusCaster::spendMana(ServerCallback * server, const int spellCost) const

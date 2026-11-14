@@ -9,93 +9,46 @@
  */
 #pragma once
 
-#include <SDL_events.h>
-#include "Geometries.h"
-#include "../Graphics.h"
+#include "EventsReceiver.h"
 
-struct SDL_Surface;
-class CGuiHandler;
+#include "../../lib/Rect.h"
+#include "../../lib/Color.h"
+#include "../../lib/GameConstants.h"
+
+class GameEngine;
 class CPicture;
+class Canvas;
 
-struct SDL_KeyboardEvent;
+class CArmedInstance;
 
-using boost::logic::tribool;
-
-// Defines a activate/deactive method
-class IActivatable
+class IShowActivatable
 {
 public:
 	virtual void activate()=0;
 	virtual void deactivate()=0;
-	virtual ~IActivatable(){};
-};
 
-class IUpdateable
-{
-public:
-	virtual void update()=0;
-	virtual ~IUpdateable(){};
-};
-
-// Defines a show method
-class IShowable
-{
-public:
 	virtual void redraw()=0;
-	virtual void show(SDL_Surface * to) = 0;
-	virtual void showAll(SDL_Surface * to)
-	{
-		show(to);
-	}
-	virtual ~IShowable(){};
-};
+	virtual void show(Canvas & to) = 0;
+	virtual void showAll(Canvas & to) = 0;
 
-class IShowActivatable : public IShowable, public IActivatable
-{
-public:
-	//redraw parent flag - this int may be semi-transparent and require redraw of parent window
-	enum {BLOCK_ADV_HOTKEYS = 2, REDRAW_PARENT=8};
-	int type; //bin flags using etype
-	IShowActivatable();
-	virtual ~IShowActivatable(){};
+	virtual bool isPopupWindow() const = 0;
+	virtual void onScreenResize() = 0;
+	virtual ~IShowActivatable() = default;
 };
-
-enum class EIntObjMouseBtnType { LEFT, MIDDLE, RIGHT };
-//typedef ui16 ActivityFlag;
 
 // Base UI element
-class CIntObject : public IShowActivatable //interface object
+class CIntObject : public IShowActivatable, public AEventsReceiver //interface object
 {
-	ui16 used;//change via addUsed() or delUsed
-
-	//time handling
-	int toNextTick;
-	int timerDelay;
-
-	std::map<EIntObjMouseBtnType, bool> currentMouseState;
-
-	void onTimer(int timePassed);
+	ui16 used;
 
 	//non-const versions of fields to allow changing them in CIntObject
 	CIntObject *parent_m; //parent object
-	ui16 active_m;
 
-protected:
-	//activate or deactivate specific action (LCLICK, RCLICK...)
-	void activate(ui16 what);
-	void deactivate(ui16 what);
+	bool inputEnabled;
+	bool redrawParent;
 
 public:
-/*
- * Functions and fields that supposed to be private but are not for now.
- * Don't use them unless you really know what they are for
- */
 	std::vector<CIntObject *> children;
-
-
-/*
- * Public interface
- */
 
 	/// read-only parent access. May not be a "clean" solution but allows some compatibility
 	CIntObject * const & parent;
@@ -106,51 +59,30 @@ public:
 	CIntObject(int used=0, Point offset=Point());
 	virtual ~CIntObject();
 
-	void updateMouseState(EIntObjMouseBtnType btn, bool state) { currentMouseState[btn] = state; }
-	bool mouseState(EIntObjMouseBtnType btn) const { return currentMouseState.count(btn) ? currentMouseState.at(btn) : false; }
+	bool captureThisKey(EShortcut key) override;
 
-	virtual void click(EIntObjMouseBtnType btn, tribool down, bool previousState);
-	virtual void clickLeft(tribool down, bool previousState) {}
-	virtual void clickRight(tribool down, bool previousState) {}
-	virtual void clickMiddle(tribool down, bool previousState) {}
-
-	//hover handling
-	/*const*/ bool hovered;  //for determining if object is hovered
-	virtual void hover (bool on){}
-
-	//keyboard handling
-	bool captureAllKeys; //if true, only this object should get info about pressed keys
-	virtual void keyPressed(const SDL_KeyboardEvent & key){}
-	virtual bool captureThisEvent(const SDL_KeyboardEvent & key); //allows refining captureAllKeys against specific events (eg. don't capture ENTER)
-
-	virtual void textInputed(const SDL_TextInputEvent & event){};
-	virtual void textEdited(const SDL_TextEditingEvent & event){};
-
-	//mouse movement handling
-	bool strongInterest; //if true - report all mouse movements, if not - only when hovered
-	virtual void mouseMoved (const SDL_MouseMotionEvent & sEvent){}
-
-	//time handling
-	void setTimer(int msToTrigger);//set timer delay and activate timer if needed.
-	virtual void tick(){}
-
-	//mouse wheel
-	virtual void wheelScrolled(bool down, bool in){}
-
-	//double click
-	virtual void onDoubleClick(){}
-
-	enum {LCLICK=1, RCLICK=2, HOVER=4, MOVE=8, KEYBOARD=16, TIME=32, GENERAL=64, WHEEL=128, DOUBLECLICK=256, TEXTINPUT=512, MCLICK=1024, ALL=0xffff};
-	const ui16 & active;
 	void addUsedEvents(ui16 newActions);
 	void removeUsedEvents(ui16 newActions);
 
-	enum {ACTIVATE=1, DEACTIVATE=2, UPDATE=4, SHOWALL=8, DISPOSE=16, SHARE_POS=32};
-	ui8 defActions; //which calls will be tried to be redirected to children
+	enum {NO_ACTIONS = 0, ACTIVATE=1, DEACTIVATE=2, UPDATE=4, SHOWALL=8, SHARE_POS=16, ALL_ACTIONS=31};
 	ui8 recActions; //which calls we allow to receive from parent
 
-	void disable(); //deactivates if needed, blocks all automatic activity, allows only disposal
-	void enable(); //activates if needed, all activity enabled (Warning: may not be symetric with disable if recActions was limited!)
+	/// deactivates if needed, blocks all automatic activity, allows only disposal
+	void disable();
+	/// activates if needed, all activity enabled (Warning: may not be symmetric with disable if recActions was limited!)
+	void enable();
+	/// returns true if element was disabled via disable() call
+	bool isDisabled() const;
+
+	/// deactivates or activates UI element based on flag
+	void setEnabled(bool on);
+
+	/// Block (or allow) all user input, e.g. mouse/keyboard/touch without hiding element
+	void setInputEnabled(bool on);
+
+	/// Mark this input as one that requires parent redraw on update,
+	/// for example if current control might have semi-transparent elements and requires redrawing of background
+	void setRedrawParent(bool on);
 
 	// activate or deactivate object. Inactive object won't receive any input events (keyboard\mouse)
 	// usually used automatically by parent
@@ -158,43 +90,41 @@ public:
 	void deactivate() override;
 
 	//called each frame to update screen
-	void show(SDL_Surface * to) override;
+	void show(Canvas & to) override;
 	//called on complete redraw only
-	void showAll(SDL_Surface * to) override;
+	void showAll(Canvas & to) override;
 	//request complete redraw of this object
 	void redraw() override;
+	// Move child object to foreground
+	void moveChildForeground(const CIntObject * childToMove);
 
-	enum EAlignment {TOPLEFT, CENTER, BOTTOMRIGHT};
+	/// returns true if this element is a popup window
+	/// called only for windows
+	bool isPopupWindow() const override;
 
-	bool isItInLoc(const SDL_Rect &rect, int x, int y);
-	bool isItInLoc(const SDL_Rect &rect, const Point &p);
+	/// called only for windows whenever screen size changes
+	/// default behavior is to re-center, can be overridden
+	void onScreenResize() override;
+
+	/// returns true if UI elements wants to handle event of specific type (LCLICK, SHOW_POPUP ...)
+	/// by default, usedEvents inside UI elements are always handled
+	bool receiveEvent(const Point & position, int eventType) const override;
+
+	const Rect & getPosition() const override;
+
 	const Rect & center(const Rect &r, bool propagate = true); //sets pos so that r will be in the center of screen, assigns sizes of r to pos, returns new position
 	const Rect & center(const Point &p, bool propagate = true);  //moves object so that point p will be in its center
 	const Rect & center(bool propagate = true); //centers when pos.w and pos.h are set, returns new position
 	void fitToScreen(int borderWidth, bool propagate = true); //moves window to fit into screen
+	void fitToRect(Rect rect, int borderWidth, bool propagate = true); //moves window to fit into rect
 	void moveBy(const Point &p, bool propagate = true);
 	void moveTo(const Point &p, bool propagate = true);//move this to new position, coordinates are absolute (0,0 is topleft screen corner)
 
 	void addChild(CIntObject *child, bool adjustPosition = false);
 	void removeChild(CIntObject *child, bool adjustPosition = false);
-	//delChild - not needed, use normal "delete child" instead
-	//delChildNull - not needed, use "vstd::clear_pointer(child)" instead
 
-/*
- * Functions that should be used only by specific GUI elements. Don't use them unless you really know why they are here
- */
-
-	//functions for printing text. Use CLabel where possible instead
-	void printAtLoc(const std::string & text, int x, int y, EFonts font, SDL_Color color, SDL_Surface * dst);
-	void printAtMiddleLoc(const std::string & text, int x, int y, EFonts font, SDL_Color color, SDL_Surface * dst);
-	void printAtMiddleLoc(const std::string & text, const Point &p, EFonts font, SDL_Color color, SDL_Surface * dst);
-	void printAtMiddleWBLoc(const std::string & text, int x, int y, EFonts font, int charsPerLine, SDL_Color color, SDL_Surface * dst);
-
-	//image blitting. If possible use CPicture or CAnimImage instead
-	void blitAtLoc(SDL_Surface * src, int x, int y, SDL_Surface * dst);
-	void blitAtLoc(SDL_Surface * src, const Point &p, SDL_Surface * dst);
-
-	friend class CGuiHandler;
+protected:
+	Point adjustNegativeCoordinate(int x, int y);
 };
 
 /// Class for binding keys to left mouse button clicks
@@ -202,17 +132,98 @@ public:
 class CKeyShortcut : public virtual CIntObject
 {
 public:
-	std::set<int> assignedKeys;
+	bool shortcutPressed;
+	EShortcut assignedKey;
 	CKeyShortcut();
-	CKeyShortcut(int key);
-	CKeyShortcut(std::set<int> Keys);
-	virtual void keyPressed(const SDL_KeyboardEvent & key) override; //call-in
+	CKeyShortcut(EShortcut key);
+	void keyPressed(EShortcut key) override;
+	void keyReleased(EShortcut key) override;
+	void keyCanceled(EShortcut key) override;
 };
 
 class WindowBase : public CIntObject
 {
 public:
 	WindowBase(int used_ = 0, Point pos_ = Point());
-protected:
-	void close();
+	virtual void close();
 };
+
+class IGarrisonHolder
+{
+public:
+	bool holdsGarrisons(std::vector<const CArmedInstance *> armies)
+	{
+		for (auto const * army : armies)
+			if (holdsGarrison(army))
+				return true;
+		return false;
+	}
+
+	virtual bool holdsGarrison(const CArmedInstance * army) = 0;
+	virtual void updateGarrisons() = 0;
+};
+
+class IArtifactsHolder
+{
+public:
+	virtual void updateArtifacts() = 0;
+};
+
+class IMarketHolder
+{
+public:
+	virtual void updateResources() {};
+	virtual void updateExperience() {};
+	virtual void updateSecondarySkills() {};
+	virtual void updateArtifacts() {};
+};
+
+class ITownHolder
+{
+public:
+	virtual void buildChanged() = 0;
+};
+
+class IStatusBar
+{
+public:
+	virtual ~IStatusBar() = default;
+
+	/// set current text for the status bar
+	virtual void write(const std::string & text) = 0;
+
+	/// remove any current text from the status bar
+	virtual void clear() = 0;
+
+	/// remove text from status bar if current text matches tested text
+	virtual void clearIfMatching(const std::string & testedText) = 0;
+
+	/// enables mode for entering text instead of showing hover text
+	virtual void setEnteringMode(bool on) = 0;
+
+	/// overrides hover text from controls with text entered into in-game console (for chat/cheats)
+	virtual void setEnteredText(const std::string & text) = 0;
+
+};
+
+class EmptyStatusBar : public IStatusBar
+{
+	virtual void write(const std::string & text){};
+	virtual void clear(){};
+	virtual void clearIfMatching(const std::string & testedText){};
+	virtual void setEnteringMode(bool on){};
+	virtual void setEnteredText(const std::string & text){};
+};
+
+class ObjectConstruction : boost::noncopyable
+{
+public:
+	ObjectConstruction(CIntObject *obj);
+	~ObjectConstruction();
+};
+
+/// If used, all UI widgets created inside this scope will be added to children of 'this'
+#define OBJECT_CONSTRUCTION ObjectConstruction obj__i(this)
+
+/// If used, all UI widgets created inside this scope will be added to children of provided object
+#define OBJECT_CONSTRUCTION_TARGETED(obj) ObjectConstruction obj__i(obj)

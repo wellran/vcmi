@@ -1,15 +1,14 @@
 set(battleAI_SRCS
-		StdInc.cpp
-
 		AttackPossibility.cpp
 		BattleAI.cpp
-		common.cpp
-		EnemyInfo.cpp
-		main.cpp
+		BattleEvaluator.cpp
 		PossibleSpellcast.cpp
 		PotentialTargets.cpp
 		StackWithBonuses.cpp
+		SpellTargetsEvaluator.cpp
+		TacticsHandler.cpp
 		ThreatMap.cpp
+		BattleExchangeVariant.cpp
 )
 
 set(battleAI_HEADERS
@@ -17,27 +16,23 @@ set(battleAI_HEADERS
 
 		AttackPossibility.h
 		BattleAI.h
-		common.h
-		EnemyInfo.h
+		BattleEvaluator.h
 		PotentialTargets.h
 		PossibleSpellcast.h
 		StackWithBonuses.h
+		SpellTargetsEvaluator.h
+		TacticsHandler.h
 		ThreatMap.h
+		BattleExchangeVariant.h
 )
 
 assign_source_group(${battleAI_SRCS} ${battleAI_HEADERS})
 
-if(ANDROID) # android compiles ai libs into main lib directly, so we skip this library and just reuse sources list
-	return()
-endif()
+add_library(BattleAI OBJECT ${battleAI_SRCS} ${battleAI_HEADERS})
+target_compile_definitions(BattleAI PRIVATE VCMI_DLL=1)
 
-add_library(BattleAI SHARED ${battleAI_SRCS} ${battleAI_HEADERS})
 target_include_directories(BattleAI PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(BattleAI PRIVATE vcmi)
+target_link_libraries(BattleAI PRIVATE vcmiMain)
 
 vcmi_set_output_dir(BattleAI "AI")
-
-set_target_properties(BattleAI PROPERTIES ${PCH_PROPERTIES})
-cotire(BattleAI)
-
-install(TARGETS BattleAI RUNTIME DESTINATION ${AI_LIB_DIR} LIBRARY DESTINATION ${AI_LIB_DIR})
+enable_pch(BattleAI)

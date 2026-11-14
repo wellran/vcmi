@@ -9,124 +9,315 @@
  */
 #include "StdInc.h"
 
+#include "LobbyClientNetPackVisitors.h"
 #include "lobby/CSelectionBase.h"
 #include "lobby/CLobbyScreen.h"
+#include "lobby/CSavingScreen.h"
 
 #include "lobby/OptionsTab.h"
 #include "lobby/RandomMapTab.h"
+#include "lobby/TurnOptionsTab.h"
+#include "lobby/ExtraOptionsTab.h"
 #include "lobby/SelectionTab.h"
 #include "lobby/CBonusSelection.h"
+#include "lobby/BattleOnlyModeTab.h"
+#include "adventureMap/AdventureMapInterface.h"
+#include "globalLobby/GlobalLobbyWindow.h"
+#include "globalLobby/GlobalLobbyServerSetup.h"
+#include "globalLobby/GlobalLobbyClient.h"
 
+#include "CMT.h"
 #include "CServerHandler.h"
-#include "CGameInfo.h"
-#include "gui/CGuiHandler.h"
+#include "GameChatHandler.h"
+#include "Client.h"
+#include "GameEngine.h"
+#include "GameInstance.h"
+#include "gui/WindowHandler.h"
 #include "widgets/Buttons.h"
 #include "widgets/TextControls.h"
+#include "media/CMusicHandler.h"
+#include "media/IVideoPlayer.h"
+#include "windows/GUIClasses.h"
 
 #include "../lib/CConfigHandler.h"
-#include "../lib/CGeneralTextHandler.h"
-#include "../lib/NetPacksLobby.h"
-#include "../lib/serializer/Connection.h"
+#include "../lib/GameLibrary.h"
+#include "../lib/campaign/CampaignState.h"
+#include "../lib/serializer/GameConnection.h"
+#include "../lib/texts/CGeneralTextHandler.h"
 
-bool LobbyClientConnected::applyOnLobbyHandler(CServerHandler * handler)
+void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyQuickLoadGame(LobbyQuickLoadGame & pack)
 {
+	assert(handler.getState() == EClientState::GAMEPLAY);
+
+	handler.restartGameplay();
+	handler.sendStartGame();
+}
+
+void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyNextCampaignScenario(LobbyNextCampaignScenario & pack)
+{
+	if(handler.getState() != EClientState::CAMPAIGN_SCENARIO_WON)
+		throw std::runtime_error("Received next campaign scenario while not in finished campaign scenario!");
+
+	handler.openNextCampaignScenarioLobby();
+}
+
+void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyQuickLoadInfo(LobbyQuickLoadInfo & pack)
+{
+	if(!pack.error.empty())
+		logGlobal->debug("Quick save can not be loaded: %s", pack.error);
+
+	handler.quickSaveAvailable = pack.error.empty();
+	if(adventureInt)
+		adventureInt->updateActiveState();
+}
+
+void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyClientConnected(LobbyClientConnected & pack)
+{
+	const bool isLocalClient = pack.uuid == handler.logicConnection->uuid;
+	result = !isLocalClient;
+
 	// Check if it's LobbyClientConnected for our client
-	if(uuid == handler->c->uuid)
+	if(isLocalClient)
 	{
-		handler->c->connectionID = clientId;
-		if(!settings["session"]["headless"].Bool())
-			GH.pushIntT<CLobbyScreen>(static_cast<ESelectionScreen>(handler->screenType));
-		handler->state = EClientState::LOBBY;
-		return true;
+		handler.logicConnection->setSerializationVersion(pack.version);
+		handler.logicConnection->connectionID = pack.clientId;
+
+		// server of an older version does not reject clients of newer versions
+		if(pack.version < ESerializationVersion::MINIMAL_LOBBY)
+		{
+			handler.showServerError(LIBRARY->generaltexth->translate("vcmi.server.errors.incompatibleVersion"));
+			handler.sendClientDisconnecting();
+			return;
+		}
+
+		if(handler.scenarioToStart)
+		{
+			handler.selectScenario(*handler.scenarioToStart);
+		}
+		else if(!settings["session"]["headless"].Bool())
+		{
+			if (ENGINE->windows().topWindow<CSimpleJoinScreen>())
+				ENGINE->windows().popWindows(1);
+
+			if (!ENGINE->windows().findWindows<GlobalLobbyServerSetup>().empty())
+			{
+				assert(handler.serverMode == EServerMode::LOBBY_HOST);
+				// announce opened game room
+				// TODO: find better approach?
+				int roomType = settings["lobby"]["roomType"].Integer();
+				int roomPlayerLimit = settings["lobby"]["roomPlayerLimit"].Integer();
+
+				if (roomType != 0)
+					handler.getGlobalLobby().sendOpenRoom("private", roomPlayerLimit);
+				else
+					handler.getGlobalLobby().sendOpenRoom("public", roomPlayerLimit);
+			}
+
+			while (!ENGINE->windows().findWindows<GlobalLobbyWindow>().empty())
+			{
+				// if global lobby is open, pop all dialogs on top of it as well as lobby itself
+				ENGINE->windows().popWindows(1);
+			}
+
+			ENGINE->windows().createAndPushWindow<CLobbyScreen>(handler.screenType, handler.campaignToStart.has_value());
+		}
+		handler.setState(EClientState::LOBBY);
 	}
-	return false;
 }
 
-void LobbyClientConnected::applyOnLobbyScreen(CLobbyScreen * lobby, CServerHandler * handler)
+void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyClientDisconnected(LobbyClientDisconnected &)
 {
 }
 
-bool LobbyClientDisconnected::applyOnLobbyHandler(CServerHandler * handler)
+void ApplyOnLobbyScreenNetPackVisitor::visitLobbyClientConnected(LobbyClientConnected & pack)
 {
-	if(clientId != c->connectionID)
-		return false;
-
-	handler->stopServerConnection();
-	return true;
-}
-
-void LobbyClientDisconnected::applyOnLobbyScreen(CLobbyScreen * lobby, CServerHandler * handler)
-{
-	GH.popInts(1);
-}
-
-void LobbyChatMessage::applyOnLobbyScreen(CLobbyScreen * lobby, CServerHandler * handler)
-{
-	if(lobby)
-	{
-		lobby->card->chat->addNewMessage(playerName + ": " + message);
-		lobby->card->setChat(true);
-		if(lobby->buttonChat)
-			lobby->buttonChat->addTextOverlay(CGI->generaltexth->allTexts[531], FONT_SMALL);
-	}
-}
-
-void LobbyGuiAction::applyOnLobbyScreen(CLobbyScreen * lobby, CServerHandler * handler)
-{
-	if(!handler->isGuest())
+	if(!lobby || pack.clientId == handler.logicConnection->connectionID)
 		return;
 
-	switch(action)
+	lobby->onRemoteClientLobbyStateChanged();
+}
+
+void ApplyOnLobbyScreenNetPackVisitor::visitLobbyClientDisconnected(LobbyClientDisconnected & pack)
+{
+	if(pack.clientId == handler.logicConnection->connectionID)
 	{
-	case NO_TAB:
+		if(!ENGINE->windows().findWindows<CLobbyScreen>().empty())
+		{
+			// pop lobby screen together with all dialogs and loading screen on top of it
+			while(!ENGINE->windows().findWindows<CLobbyScreen>().empty())
+				ENGINE->windows().popWindows(1);
+			return;
+		}
+
+		if(auto w = ENGINE->windows().topWindow<CLoadingScreen>())
+			ENGINE->windows().popWindow(w);
+		
+		if(ENGINE->windows().count() > 0)
+			ENGINE->windows().popWindows(1);
+		return;
+	}
+
+	if(lobby)
+		lobby->onRemoteClientLobbyStateChanged();
+}
+
+void ApplyOnLobbyScreenNetPackVisitor::visitLobbyChatMessage(LobbyChatMessage & pack)
+{
+	handler.getGameChat().onNewLobbyMessageReceived(pack.playerName, pack.message.toString(&GAME->translator()));
+}
+
+void ApplyOnLobbyScreenNetPackVisitor::visitLobbyGuiAction(LobbyGuiAction & pack)
+{
+	if(!lobby || !handler.isGuest())
+		return;
+
+	switch(pack.action)
+	{
+	case LobbyGuiAction::NO_TAB:
 		lobby->toggleTab(lobby->curTab);
 		break;
-	case OPEN_OPTIONS:
+	case LobbyGuiAction::OPEN_OPTIONS:
 		lobby->toggleTab(lobby->tabOpt);
 		break;
-	case OPEN_SCENARIO_LIST:
+	case LobbyGuiAction::OPEN_SCENARIO_LIST:
 		lobby->toggleTab(lobby->tabSel);
 		break;
-	case OPEN_RANDOM_MAP_OPTIONS:
+	case LobbyGuiAction::OPEN_RANDOM_MAP_OPTIONS:
 		lobby->toggleTab(lobby->tabRand);
+		break;
+	case LobbyGuiAction::OPEN_TURN_OPTIONS:
+		lobby->toggleTab(lobby->tabTurnOptions);
+		break;
+	case LobbyGuiAction::OPEN_EXTRA_OPTIONS:
+		lobby->toggleTab(lobby->tabExtraOptions);
+		break;
+	case LobbyGuiAction::BATTLE_MODE:
+		lobby->toggleTab(lobby->tabBattleOnlyMode);
 		break;
 	}
 }
 
-bool LobbyStartGame::applyOnLobbyHandler(CServerHandler * handler)
+void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyRestartGame(LobbyRestartGame & pack)
 {
-	if(handler->state == EClientState::GAMEPLAY)
+	assert(handler.getState() == EClientState::GAMEPLAY);
+
+	handler.restartGameplay();
+	handler.sendStartGame();
+}
+
+void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyPrepareStartGame(LobbyPrepareStartGame & pack)
+{
+	handler.logicConnection->enterLobbyConnectionMode();
+}
+
+void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyStartGame(LobbyStartGame & pack)
+{
+	handler.setState(EClientState::STARTING);
+	// lobby state is not updated on restart or quick load, so StartInfo of client may be from the previous game
+	handler.si = pack.initializedStartInfo;
+	handler.client = std::make_unique<CClient>();
+	handler.startGameplay(pack.initializedGameState);
+}
+
+void ApplyOnLobbyScreenNetPackVisitor::visitLobbyStartGame(LobbyStartGame & pack)
+{
+	if(auto w = ENGINE->windows().topWindow<CLoadingScreen>())
 	{
-		handler->endGameplay(false, true);
+		w->finish();
+		w->tick(0);
+		w->redraw();
 	}
-	handler->state = EClientState::STARTING;
-	if(handler->si->mode != StartInfo::LOAD_GAME)
+}
+
+void ApplyOnLobbyScreenNetPackVisitor::visitLobbyLoadProgress(LobbyLoadProgress & pack)
+{
+	if(auto w = ENGINE->windows().topWindow<CLoadingScreen>())
 	{
-		handler->si = initializedStartInfo;
+		w->set(pack.progress);
+		w->tick(0);
+		w->redraw();
 	}
-	if(settings["session"]["headless"].Bool())
-		handler->startGameplay();
-	return true;
 }
 
-void LobbyStartGame::applyOnLobbyScreen(CLobbyScreen * lobby, CServerHandler * handler)
+void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyModsCheck(LobbyModsCheck & pack)
 {
-	GH.pushIntT<CLoadingScreen>(std::bind(&CServerHandler::startGameplay, handler));
+	handler.onLobbyPreviewResponse(pack);
 }
 
-bool LobbyUpdateState::applyOnLobbyHandler(CServerHandler * handler)
+void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyUpdateState(LobbyUpdateState & pack)
 {
-	hostChanged = state.hostClientId != handler->hostClientId;
-	static_cast<LobbyState &>(*handler) = state;
-	return true;
-}
-
-void LobbyUpdateState::applyOnLobbyScreen(CLobbyScreen * lobby, CServerHandler * handler)
-{
-	if(!lobby->bonusSel && handler->si->campState && handler->state == EClientState::LOBBY_CAMPAIGN)
+	pack.firstState = handler.hostClientId == GameConnectionID::INVALID;
+	static_cast<LobbyState &>(handler) = pack.state;
+	if(handler.getState() == EClientState::LOBBY && handler.si->mode == EStartMode::CAMPAIGN && handler.si->campState)
 	{
-		lobby->bonusSel = std::make_shared<CBonusSelection>();
-		GH.pushInt(lobby->bonusSel);
+		handler.setState(EClientState::LOBBY_CAMPAIGN);
+		handler.campaignToStart.reset();
+	}
+	// the campaign state the previous texts came from is gone now
+	handler.installLobbyTexts();
+	if(handler.scenarioToStart && handler.mi)
+	{
+		// debug test games are played by AI only, so the player of this client leaves its color first
+		if(settings["session"]["onlyai"].Bool() && handler.myFirstColor() != PlayerColor::CANNOT_DETERMINE)
+		{
+			handler.setPlayer(handler.myFirstColor());
+			return;
+		}
+
+		handler.scenarioToStart.reset();
+		handler.sendStartGame();
+	}
+}
+
+void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyUpdateMapInfo(LobbyUpdateMapInfo & pack)
+{
+	handler.mi = pack.mapInfo;
+	// the map info the previous texts came from is gone now
+	handler.installLobbyTexts();
+}
+
+void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyShowMessage(LobbyShowMessage & pack)
+{
+	// game started from command line has no lobby screen, so the error that blocks the start can not be resolved
+	if(settings["session"]["testmap"].isNull() && settings["session"]["testsave"].isNull())
+		return;
+
+	const std::string message = pack.message.toString(&GAME->translator());
+	if(ENGINE)
+	{
+		ENGINE->dispatchMainThread([message](){ handleFatalError(message, false); });
+	}
+	else
+	{
+		logGlobal->error("Failed to start game: %s", message);
+		GAME->onShutdownRequested(false);
+	}
+	result = false;
+}
+
+void ApplyOnLobbyScreenNetPackVisitor::visitLobbyUpdateState(LobbyUpdateState & pack)
+{
+	if(!lobby) //stub: ignore message for game mode
+		return;
+		
+	if(!lobby->bonusSel && handler.si->campState && handler.getState() == EClientState::LOBBY_CAMPAIGN)
+	{
+		auto bonusSel = std::make_shared<CBonusSelection>();
+		lobby->bonusSel = bonusSel;
+		if(!handler.si->campState->conqueredScenarios().size() && !handler.si->campState->getCampaign().getIntroVideo().empty() && ENGINE->video().open(handler.si->campState->getCampaign().getIntroVideo(), 1))
+		{
+			ENGINE->music().stopMusic();
+			auto rim = handler.si->campState->getCampaign().getVideoRim().empty() ? ImagePath::builtin("INTRORIM") : handler.si->campState->getCampaign().getVideoRim();
+			if(handler.si->campState->getCampaign().getVideoRim() == ImagePath::builtin("NONE"))
+				rim = ImagePath();
+			ENGINE->windows().createAndPushWindow<VideoWindow>(handler.si->campState->getCampaign().getIntroVideo(), rim, false, 1, [bonusSel](bool skipped){
+				if(!GAME->server().si->campState->getCampaign().getMusic().empty())
+					ENGINE->music().playMusic(GAME->server().si->campState->getCampaign().getMusic(), true, false);
+				ENGINE->windows().pushWindow(bonusSel);
+			});
+		}
+		else
+			ENGINE->windows().pushWindow(bonusSel);
 	}
 
 	if(lobby->bonusSel)
@@ -134,6 +325,48 @@ void LobbyUpdateState::applyOnLobbyScreen(CLobbyScreen * lobby, CServerHandler *
 	else
 		lobby->updateAfterStateChange();
 
-	if(hostChanged)
-		lobby->toggleMode(handler->isHost());
+	if(pack.firstState)
+		lobby->toggleMode(handler.isHost());
+
+	if(pack.firstState && handler.campaignToStart)
+		handler.startCampaign(handler.campaignToStart->fileURI, handler.campaignToStart->campaignSet);
+}
+
+void ApplyOnLobbyScreenNetPackVisitor::visitLobbyScenarioList(LobbyScenarioList & pack)
+{
+	// in-game save screen lists saves too, but it is not a lobby screen
+	auto * screen = dynamic_cast<CSelectionBase *>(SEL);
+	if(screen && screen->tabSel)
+		screen->tabSel->onScenarioListReceived(pack);
+}
+
+void ApplyOnLobbyScreenNetPackVisitor::visitLobbyScenarioInfo(LobbyScenarioInfo & pack)
+{
+	auto * screen = dynamic_cast<CSavingScreen *>(SEL);
+	if(screen)
+		screen->onScenarioInfoReceived(pack);
+}
+
+void ApplyOnLobbyScreenNetPackVisitor::visitLobbyShowMessage(LobbyShowMessage & pack)
+{
+	if(!lobby) //stub: ignore message for game mode
+		return;
+
+	if(handler.campaignToStart)
+	{
+		// campaign started outside of the list was rejected, and its lobby is hidden
+		handler.sendClientDisconnecting();
+		lobby->close();
+	}
+	else
+	{
+		lobby->buttonStart->block(false);
+	}
+	handler.showServerError(pack.message.toString(&GAME->translator()));
+}
+
+void ApplyOnLobbyScreenNetPackVisitor::visitLobbySetBattleOnlyModeStartInfo(LobbySetBattleOnlyModeStartInfo & pack)
+{
+	if(lobby && lobby->tabBattleOnlyMode)
+		lobby->tabBattleOnlyMode->applyStartInfo(pack.startInfo);
 }

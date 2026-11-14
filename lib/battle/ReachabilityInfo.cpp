@@ -12,22 +12,21 @@
 #include "ReachabilityInfo.h"
 #include "Unit.h"
 
-
-ReachabilityInfo::Parameters::Parameters()
+ReachabilityInfo::Parameters::Parameters(BattleSide perspective, const battle::Unit * Stack, const BattleHex & StartPosition, const BattleHexArray & accessibleHexes):
+	perspective(perspective),
+	startPosition(StartPosition),
+	doubleWide(Stack->doubleWide()),
+	side(Stack->unitSide()),
+	canUseGate(Stack->controllingSide() == BattleSide::DEFENDER),
+	flying(Stack->hasBonusOfType(BonusType::FLYING)),
+	knownAccessible(&accessibleHexes)
 {
-	perspective = BattlePerspective::ALL_KNOWING;
-	side = 0;
-	doubleWide = flying = false;
+	destructibleEnemyTurns.fill(-1);
 }
 
-ReachabilityInfo::Parameters::Parameters(const battle::Unit * Stack, BattleHex StartPosition)
+ReachabilityInfo::Parameters::Parameters(const battle::Unit * Stack, const BattleHex & StartPosition):
+	ReachabilityInfo::Parameters::Parameters(Stack->unitSide(), Stack, StartPosition, Stack->getHexes(StartPosition))
 {
-	perspective = (BattlePerspective::BattlePerspective)(Stack->unitSide());
-	startPosition = StartPosition;
-	doubleWide = Stack->doubleWide();
-	side = Stack->unitSide();
-	flying = Stack->hasBonusOfType(Bonus::FLYING);
-	knownAccessible = battle::Unit::getHexes(startPosition, doubleWide, side);
 }
 
 ReachabilityInfo::ReachabilityInfo()
@@ -36,24 +35,24 @@ ReachabilityInfo::ReachabilityInfo()
 	predecessors.fill(BattleHex::INVALID);
 }
 
-bool ReachabilityInfo::isReachable(BattleHex hex) const
+bool ReachabilityInfo::isReachable(const BattleHex & hex) const
 {
-	return distances[hex] < INFINITE_DIST;
+	return distances[hex.toInt()] < INFINITE_DIST;
 }
 
-int ReachabilityInfo::distToNearestNeighbour(
-	const std::vector<BattleHex> & targetHexes,
+uint32_t ReachabilityInfo::distToNearestNeighbour(
+	const BattleHexArray & targetHexes,
 	BattleHex * chosenHex) const
 {
-	int ret = 1000000;
+	uint32_t ret = 1000000;
 
-	for(auto targetHex : targetHexes)
+	for(const auto & targetHex : targetHexes)
 	{
-		for(auto & n : targetHex.neighbouringTiles())
+		for(auto & n : targetHex.getNeighbouringTiles())
 		{
-			if(distances[n] >= 0 && distances[n] < ret)
+			if(distances[n.toInt()] < ret)
 			{
-				ret = distances[n];
+				ret = distances[n.toInt()];
 				if(chosenHex)
 					*chosenHex = n;
 			}
@@ -63,12 +62,31 @@ int ReachabilityInfo::distToNearestNeighbour(
 	return ret;
 }
 
-int ReachabilityInfo::distToNearestNeighbour(
+uint32_t ReachabilityInfo::distToNearestNeighbour(
 	const battle::Unit * attacker,
 	const battle::Unit * defender,
 	BattleHex * chosenHex) const
 {
-	auto attackableHexes = defender->getAttackableHexes(attacker);
+	auto attackableHexes = defender->getHexes();
+
+	if(attacker->doubleWide())
+	{
+		if(defender->doubleWide())
+		{
+			// It can be back to back attack  o==o  or head to head  =oo=.
+			// In case of back-to-back the distance between heads (unit positions) may be up to 3 tiles
+			attackableHexes.insert(battle::Unit::getHexes(defender->occupiedHex(), true, defender->unitSide()));
+		}
+		else
+		{
+			attackableHexes.insert(battle::Unit::getHexes(defender->getPosition(), true, defender->unitSide()));
+		}
+	}
+
+	attackableHexes.eraseIf([defender](const BattleHex & h) -> bool
+		{
+			return h.getY() != defender->getPosition().getY() || !h.isAvailable();
+		});
 
 	return distToNearestNeighbour(attackableHexes, chosenHex);
 }

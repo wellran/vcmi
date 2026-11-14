@@ -11,11 +11,16 @@
 
 #include "LogicalExpression.h"
 
-#include "VCMI_Lib.h"
-#include "CGeneralTextHandler.h"
+#include "GameLibrary.h"
+#include "texts/CGeneralTextHandler.h"
 
-std::string LogicalExpressionDetail::getTextForOperator(std::string operation)
+std::string LogicalExpressionDetail::getTextForOperator(const std::string & operation)
 {
 	//placed in cpp mostly to avoid unnecessary includes in header
-	return VLC->generaltexth->localizedTexts["logicalExpressions"][operation].String();
+	return LIBRARY->generaltexth->translate("vcmi.logicalExpressions." + operation);
+}
+
+std::string LogicalExpressionDetail::getTextForSeparator(const std::string & separator)
+{
+	return LIBRARY->generaltexth->translate("vcmi.logicalExpressions.separator." + separator);
 }

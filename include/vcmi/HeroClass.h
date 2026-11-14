@@ -11,12 +11,11 @@
 #pragma once
 
 #include "Entity.h"
+#include "scripting/ApiTags.h"
 
 class HeroClassID;
 
-class DLL_LINKAGE HeroClass : public EntityT<HeroClassID>
+class DLL_LINKAGE HeroClass : public EntityT<HeroClassID>, public scripting::ApiRawPointer<HeroClass>
 {
-public:
-
 };
 

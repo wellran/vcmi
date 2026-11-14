@@ -10,23 +10,34 @@
 #pragma once
 
 #include "CSelectionBase.h"
+#include "../Translator.h"
 
-class CSelectionBase;
 struct StartInfo;
 class CMapInfo;
+class ElementInfo;
+struct LobbyScenarioInfo;
+
+class CSelectionBase;
 
 class CSavingScreen : public CSelectionBase
 {
+	std::shared_ptr<ElementInfo> selectedElement;
+	/// Texts of the selected save, from the map info received for it
+	std::optional<TranslatorOverlay> localTextOverlay;
+
 public:
-	const StartInfo * localSi;
 	std::shared_ptr<CMapInfo> localMi;
 
 	CSavingScreen();
-	~CSavingScreen();
 
-	void changeSelection(std::shared_ptr<CMapInfo> to);
+	void changeSelection(const std::shared_ptr<ElementInfo> & element);
+	/// Shows map info of the selected save; replies for a save that is no longer selected are ignored
+	void onScenarioInfoReceived(const LobbyScenarioInfo & pack);
 	void saveGame();
 
 	const CMapInfo * getMapInfo() override;
 	const StartInfo * getStartInfo() override;
+	
+protected:
+	void close() override;
 };

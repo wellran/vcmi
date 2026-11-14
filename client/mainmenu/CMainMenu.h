@@ -10,27 +10,26 @@
 #pragma once
 
 #include "../windows/CWindowObject.h"
-#include "../../lib/JsonNode.h"
+#include "../../lib/json/JsonNode.h"
+#include "../../lib/LoadProgress.h"
+#include "../../lib/network/NetworkInterface.h"
 
-class CCampaignState;
 class CTextInput;
 class CGStatusBar;
 class CTextBox;
 class CTabbedInt;
-class CAnimation;
+class CAnimImage;
 class CButton;
 class CFilledTexture;
-
+class CLabel;
+class VideoWidget;
 
 // TODO: Find new location for these enums
-enum ESelectionScreen : ui8 {
+enum class ESelectionScreen : ui8 {
 	unknown = 0, newGame, loadGame, saveGame, scenarioInfo, campaignList
 };
 
-enum ELoadMode : ui8
-{
-	NONE = 0, SINGLE, MULTI, CAMPAIGN
-};
+enum class ELoadMode : ui8;
 
 /// The main menu screens listed in the EState enum
 class CMenuScreen : public CWindowObject
@@ -39,19 +38,21 @@ class CMenuScreen : public CWindowObject
 
 	std::shared_ptr<CTabbedInt> tabs;
 
-	std::shared_ptr<CPicture> background;
+	std::shared_ptr<VideoWidget> videoPlayer;
 	std::vector<std::shared_ptr<CPicture>> images;
 
 	std::shared_ptr<CIntObject> createTab(size_t index);
+	void buildMenu();
 
 public:
 	std::vector<std::string> menuNameToEntry;
 
 	CMenuScreen(const JsonNode & configNode);
 
-	void show(SDL_Surface * to) override;
 	void activate() override;
-	void deactivate() override;
+	void onScreenResize() override;
+	void show(Canvas & to) override;
+	void keyPressed(EShortcut key) override;
 
 	void switchToTab(size_t index);
 	void switchToTab(std::string name);
@@ -75,45 +76,78 @@ class CMultiMode : public WindowBase
 public:
 	ESelectionScreen screenType;
 	std::shared_ptr<CPicture> background;
+	std::shared_ptr<CPicture> picture;
+	std::shared_ptr<CTextBox> textTitle;
+	std::shared_ptr<CTextBox> textTitleIp;
 	std::shared_ptr<CTextInput> playerName;
 	std::shared_ptr<CButton> buttonHotseat;
+	std::shared_ptr<CButton> buttonLobby;
 	std::shared_ptr<CButton> buttonHost;
 	std::shared_ptr<CButton> buttonJoin;
 	std::shared_ptr<CButton> buttonCancel;
 	std::shared_ptr<CGStatusBar> statusBar;
 
 	CMultiMode(ESelectionScreen ScreenType);
-	void hostTCP();
-	void joinTCP();
+	void openLobby();
+	void hostTCP(EShortcut shortcut);
+	void joinTCP(EShortcut shortcut);
+
+	/// Get all configured player names. The first name would always be present and initialized to its default value.
+	static std::vector<std::string> getPlayersNames();
 
 	void onNameChange(std::string newText);
+};
+
+/// Multiplayer join
+class JoinScreen : public WindowBase, public IServerDiscoveryObserver, public boost::noncopyable
+{
+public:
+	ESelectionScreen screenType;
+	std::vector<std::string> playerNames;
+	std::shared_ptr<CPicture> background;
+	std::shared_ptr<CTextBox> textTitle;
+	std::shared_ptr<CTextInput> playerName;
+	std::shared_ptr<CButton> buttonSearch;
+	std::shared_ptr<CButton> buttonCancel;
+	std::shared_ptr<CGStatusBar> statusBar;
+	std::vector<std::shared_ptr<CLabel>> labelsJoin;
+	std::vector<std::shared_ptr<CButton>> buttonsJoin;
+	std::shared_ptr<IServerDiscovery> serverDiscovery;
+
+	JoinScreen(ESelectionScreen ScreenType, const std::vector<std::string> & playerNames);
+	~JoinScreen();
+
+	void onServerDiscovered(const DiscoveredServer & server) override;
 };
 
 /// Hot seat player window
 class CMultiPlayers : public WindowBase
 {
 	bool host;
+	bool hotseat;
 	ELoadMode loadMode;
 	ESelectionScreen screenType;
 	std::shared_ptr<CPicture> background;
 	std::shared_ptr<CTextBox> textTitle;
+	std::shared_ptr<CTextBox> textSubtitle;
 	std::array<std::shared_ptr<CTextInput>, 8> inputNames;
 	std::shared_ptr<CButton> buttonOk;
 	std::shared_ptr<CButton> buttonCancel;
 	std::shared_ptr<CGStatusBar> statusBar;
 
+	size_t countEnteredNames() const;
 	void onChange(std::string newText);
 	void enterSelectionScreen();
 
 public:
-	CMultiPlayers(const std::string & firstPlayer, ESelectionScreen ScreenType, bool Host, ELoadMode LoadMode);
+	CMultiPlayers(const std::vector<std::string> & playerNames, ESelectionScreen ScreenType, bool Host, ELoadMode LoadMode, EShortcut shortcut);
 };
 
 /// Manages the configuration of pregame GUI elements like campaign screen, main menu, loading screen,...
 class CMainMenuConfig
 {
 public:
-	static CMainMenuConfig & get();
+	static const CMainMenuConfig & get();
 	const JsonNode & getConfig() const;
 	const JsonNode & getCampaigns() const;
 
@@ -125,26 +159,31 @@ private:
 };
 
 /// Handles background screen, loads graphics for victory/loss condition and random town or hero selection
-class CMainMenu : public CIntObject, public IUpdateable, public std::enable_shared_from_this<CMainMenu>
+class CMainMenu final : public CIntObject, public std::enable_shared_from_this<CMainMenu>
 {
 	std::shared_ptr<CFilledTexture> backgroundAroundMenu;
 
-	CMainMenu(); //Use CMainMenu::create
+	std::vector<VideoPath> videoPlayList;
 
 public:
+	CMainMenu();
+
 	std::shared_ptr<CMenuScreen> menu;
 
 	~CMainMenu();
-	void update() override;
-	static void openLobby(ESelectionScreen screenType, bool host, const std::vector<std::string> * names, ELoadMode loadMode);
-	static void openCampaignLobby(const std::string & campaignFileName);
-	static void openCampaignLobby(std::shared_ptr<CCampaignState> campaign);
+	void activate() override;
+	void onScreenResize() override;
+	void makeActiveInterface();
+	static void openLobby(ESelectionScreen screenType, bool host, const std::vector<std::string> & names, ELoadMode loadMode, bool battleMode, bool hotseatMode = false, std::string server = {}, ui16 port = 0);
+	static void openCampaignLobby(const std::string & campaignFileName, const std::string & campaignSet);
+	static void startTutorial();
+	static void openHighScoreScreen();
 	void openCampaignScreen(std::string name);
-
-	static std::shared_ptr<CMainMenu> create();
 
 	static std::shared_ptr<CPicture> createPicture(const JsonNode & config);
 
+	void playIntroVideos();
+	void playMusic();
 };
 
 /// Simple window to enter the server's address.
@@ -161,23 +200,25 @@ class CSimpleJoinScreen : public WindowBase
 	void connectToServer();
 	void leaveScreen();
 	void onChange(const std::string & newText);
-	void connectThread(const std::string addr = "", const ui16 inputPort = 0);
+	void startConnection(const std::string & addr = {}, ui16 port = 0);
 
 public:
-	CSimpleJoinScreen(bool host = true);
+	CSimpleJoinScreen(bool host = true, const std::string & server = {}, ui16 port = 0);
 };
 
-class CLoadingScreen : public CWindowObject
+class CLoadingScreen : virtual public CWindowObject, virtual public Load::Progress
 {
-	boost::thread loadingThread;
+	std::shared_ptr<CPicture> backimg;
+	std::vector<std::shared_ptr<CPicture>> images;
+	std::shared_ptr<CPicture> loadFrame;
+	std::vector<std::shared_ptr<CAnimImage>> progressBlocks;
 
-	std::string getBackground();
+	ImagePath getBackground();
 
-public:
-	CLoadingScreen(std::function<void()> loader);
+public:	
+	CLoadingScreen();
+	CLoadingScreen(ImagePath background);
 	~CLoadingScreen();
 
-	void showAll(SDL_Surface * to) override;
+	void tick(uint32_t msPassed) override;
 };
-
-extern std::shared_ptr<CMainMenu> CMM;

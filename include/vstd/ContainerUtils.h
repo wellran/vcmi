@@ -23,6 +23,3 @@ namespace vstd
 		return other;
 	}
 }
-
-
-

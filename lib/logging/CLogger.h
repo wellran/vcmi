@@ -9,13 +9,12 @@
  */
 #pragma once
 
-#include "../CConsoleHandler.h"
-#include "../filesystem/FileStream.h"
 
 class CLogger;
+class CConsoleHandler;
 struct LogRecord;
 class ILogTarget;
-
+enum class EConsoleTextColor : int8_t;
 
 namespace ELogLevel
 {
@@ -25,7 +24,7 @@ namespace ELogLevel
 }
 
 /// The class CLoggerDomain provides convenient access to super domains from a sub domain.
-class DLL_LINKAGE CLoggerDomain
+class CLoggerDomain
 {
 public:
 	/// Constructs a CLoggerDomain with the domain designated by name.
@@ -45,7 +44,7 @@ private:
 
 /// The logger is used to log messages to certain targets of a specific domain/name.
 /// It is thread-safe and can be used concurrently by several threads.
-class DLL_LINKAGE CLogger: public vstd::CLoggerBase
+class CLogger final: public vstd::CLoggerBase
 {
 public:
 	ELogLevel::ELogLevel getLevel() const;
@@ -69,15 +68,15 @@ public:
 
 private:
 	explicit CLogger(const CLoggerDomain & domain);
-	inline ELogLevel::ELogLevel getEffectiveLevel() const; /// Returns the log level applied on this logger whether directly or indirectly.
+	inline ELogLevel::ELogLevel getEffectiveLevel() const override; /// Returns the log level applied on this logger whether directly or indirectly.
 	inline void callTargets(const LogRecord & record) const;
 
 	CLoggerDomain domain;
 	CLogger * parent;
 	ELogLevel::ELogLevel level;
 	std::vector<std::unique_ptr<ILogTarget> > targets;
-	mutable boost::mutex mx;
-	static boost::recursive_mutex smx;
+	mutable std::mutex mx;
+	static std::recursive_mutex smx;
 };
 
 /* ---------------------------------------------------------------------------- */
@@ -85,7 +84,7 @@ private:
 /* ---------------------------------------------------------------------------- */
 
 /// The class CLogManager is a global storage for logger objects.
-class DLL_LINKAGE CLogManager : public boost::noncopyable
+class CLogManager final : public boost::noncopyable
 {
 public:
 	static CLogManager & get();
@@ -96,27 +95,22 @@ public:
 
 private:
 	CLogManager();
-	virtual ~CLogManager();
+	 ~CLogManager();
 
 	std::map<std::string, CLogger *> loggers;
-	mutable boost::mutex mx;
-	static boost::recursive_mutex smx;
+	mutable std::mutex mx;
+	static std::recursive_mutex smx;
 };
 
 /// The struct LogRecord holds the log message and additional logging information.
-struct DLL_LINKAGE LogRecord
+struct LogRecord
 {
-	LogRecord(const CLoggerDomain & domain, ELogLevel::ELogLevel level, const std::string & message)
-		: domain(domain),
-		level(level),
-		message(message),
-		timeStamp(boost::posix_time::microsec_clock::local_time()),
-		threadId(boost::lexical_cast<std::string>(boost::this_thread::get_id())) { }
+	LogRecord(const CLoggerDomain & domain, ELogLevel::ELogLevel level, const std::string & message);
 
 	CLoggerDomain domain;
 	ELogLevel::ELogLevel level;
 	std::string message;
-	boost::posix_time::ptime timeStamp;
+	std::chrono::system_clock::time_point timeStamp;
 	std::string threadId;
 };
 
@@ -128,17 +122,12 @@ struct DLL_LINKAGE LogRecord
 /// %n = Logger name
 /// %t = Thread ID
 /// %m = Message
-class DLL_LINKAGE CLogFormatter
+class CLogFormatter
 {
 public:
 	CLogFormatter();
-	CLogFormatter(const CLogFormatter & copy);
-	CLogFormatter(CLogFormatter && move);
 
-	CLogFormatter(const std::string & pattern);
-
-	CLogFormatter & operator=(const CLogFormatter & copy);
-	CLogFormatter & operator=(CLogFormatter && move);
+	CLogFormatter(std::string pattern);
 
 	void setPattern(const std::string & pattern);
 	void setPattern(std::string && pattern);
@@ -161,22 +150,22 @@ public:
 };
 
 /// The class CColorMapping maps a logger name and a level to a specific color. Supports domain inheritance.
-class DLL_LINKAGE CColorMapping
+class CColorMapping
 {
 public:
 	CColorMapping();
 
-	void setColorFor(const CLoggerDomain & domain, ELogLevel::ELogLevel level, EConsoleTextColor::EConsoleTextColor color);
-	EConsoleTextColor::EConsoleTextColor getColorFor(const CLoggerDomain & domain, ELogLevel::ELogLevel level) const;
+	void setColorFor(const CLoggerDomain & domain, ELogLevel::ELogLevel level, EConsoleTextColor color);
+	EConsoleTextColor getColorFor(const CLoggerDomain & domain, ELogLevel::ELogLevel level) const;
 
 private:
-	std::map<std::string, std::map<ELogLevel::ELogLevel, EConsoleTextColor::EConsoleTextColor> > map;
+	std::map<std::string, std::map<ELogLevel::ELogLevel, EConsoleTextColor> > map;
 };
 
 /// This target is a logging target which writes message to the console.
 /// The target may be shared among multiple loggers. All methods except write aren't thread-safe.
 /// The console target is intended to be configured once and then added to a logger.
-class DLL_LINKAGE CLogConsoleTarget : public ILogTarget
+class CLogConsoleTarget : public ILogTarget
 {
 public:
 	explicit CLogConsoleTarget(CConsoleHandler * console);
@@ -196,23 +185,25 @@ public:
 	void write(const LogRecord & record) override;
 
 private:
+#if !defined(VCMI_MOBILE)
 	CConsoleHandler * console;
+#endif
 	ELogLevel::ELogLevel threshold;
 	bool coloredOutputEnabled;
 	CLogFormatter formatter;
 	CColorMapping colorMapping;
-	mutable boost::mutex mx;
+	mutable std::mutex mx;
 };
 
 /// This target is a logging target which writes messages to a log file.
 /// The target may be shared among multiple loggers. All methods except write aren't thread-safe.
 /// The file target is intended to be configured once and then added to a logger.
-class DLL_LINKAGE CLogFileTarget : public ILogTarget
+class CLogFileTarget : public ILogTarget
 {
 public:
 	/// Constructs a CLogFileTarget and opens the file designated by filePath. If the append parameter is true, the file
 	/// will be appended to. Otherwise the file designated by filePath will be truncated before being opened.
-	explicit CLogFileTarget(boost::filesystem::path filePath, bool append = true);
+	explicit CLogFileTarget(const boost::filesystem::path & filePath, bool append = true);
 	~CLogFileTarget();
 
 	const CLogFormatter & getFormatter() const;
@@ -221,7 +212,7 @@ public:
 	void write(const LogRecord & record) override;
 
 private:
-	FileStream file;
+	std::fstream file;
 	CLogFormatter formatter;
-	mutable boost::mutex mx;
+	mutable std::mutex mx;
 };

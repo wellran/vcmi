@@ -10,29 +10,100 @@
 #pragma once
 #include <QMainWindow>
 #include <QStringList>
+#include <QTranslator>
+
+class CConsoleHandler;
 
 namespace Ui
 {
 class MainWindow;
-const QString teamName = "VCMI Team";
-const QString appName = "VCMI Launcher";
+const QString appName = "launcher";
 }
 
+class QScreen;
 class QTableWidgetItem;
+class CModList;
+class CModListView;
+class CSettingsView;
+class UpdateChecker;
+
+enum class ETranslationStatus : int8_t
+{
+	NOT_AVAILABLE, // translation for this language was not found in mod list. Could also happen if player is offline or disabled repository checkout
+	NOT_INSTALLLED, // translation mod found, but it is not installed
+	DISABLED, // translation mod found, and installed, but toggled off
+	ACTIVE // translation mod active OR game is already in specified language (e.g. English H3 for players with English language)
+};
 
 class MainWindow : public QMainWindow
 {
 	Q_OBJECT
 
-private:
+#ifdef ENABLE_QT_TRANSLATIONS
+	QTranslator translator;
+#endif
 	Ui::MainWindow * ui;
+	UpdateChecker * updateChecker;
+
+#ifndef VCMI_MOBILE
+	std::unique_ptr<CConsoleHandler> console;
+#endif
+
+	bool gamepadStartAllowed = false;
+
 	void load();
-	void startExecutable(QString name);
+	void setGamepadStartAllowed(bool allowed);
+	void startGameFromGamepad();
+	void centerWindowOnScreen(QScreen * screen);
+	void ensureWindowVisibleOnExistingScreen();
+	void handleScreenRemoved();
+	void restoreWindowSettings();
+	void saveWindowSettings();
+	void updateDisplayIndex(QScreen * screen);
+
+	enum TabRows
+	{
+		MODS = 0,
+		SETTINGS = 1,
+		SETUP = 2,
+		ABOUT = 3,
+		START = 4,
+		UPDATE = 5,
+	};
 
 public:
-	explicit MainWindow(QWidget * parent = 0);
-	~MainWindow();
+	explicit MainWindow(QWidget * parent = nullptr);
+	~MainWindow() override;
+
+	CModListView * getModView();
+	CSettingsView * getSettingsView();
+	UpdateChecker * getUpdateChecker();
+
+	void updateTranslation();
+	void computeSidePanelSizes();
+
+	void detectPreferredLanguage();
+	void enterSetup();
+	void exitSetup(bool goToMods);
+	void switchToModsTab();
+	void switchToStartTab();
+	void switchToUpdateTab();
+	void moveToScreen(int screenIndex);
+
+	void dragEnterEvent(QDragEnterEvent* event) override;
+	void dropEvent(QDropEvent *event) override;
+
+	void manualInstallFile(QString filePath);
+	ETranslationStatus getTranslationStatus();
+
+protected:
+	void changeEvent(QEvent * event) override;
+
+public slots:
+	void on_startGameButton_clicked();
 
 private slots:
-	void on_startGameButton_clicked();
+	void on_modslistButton_clicked();
+	void on_settingsButton_clicked();
+	void on_aboutButton_clicked();
 };

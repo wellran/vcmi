@@ -9,13 +9,20 @@
  */
 #include "StdInc.h"
 #include "CreaturePurchaseCard.h"
-#include "CAdvmapInterface.h"
+
 #include "CHeroWindow.h"
-#include "../widgets/Buttons.h"
-#include "../../CCallback.h"
-#include "../CreatureCostBox.h"
 #include "QuickRecruitmentWindow.h"
-#include "../gui/CGuiHandler.h"
+#include "CCreatureWindow.h"
+
+#include "../GameEngine.h"
+#include "../gui/Shortcut.h"
+#include "../gui/TextAlignment.h"
+#include "../gui/WindowHandler.h"
+#include "../widgets/Buttons.h"
+#include "../widgets/Slider.h"
+#include "../widgets/TextControls.h"
+#include "../widgets/CreatureCostBox.h"
+
 #include "../../lib/CCreatureHandler.h"
 
 void CreaturePurchaseCard::initButtons()
@@ -27,64 +34,65 @@ void CreaturePurchaseCard::initButtons()
 
 void CreaturePurchaseCard::initMaxButton()
 {
-	maxButton = std::make_shared<CButton>(Point(pos.x + 52, pos.y + 180), "QuickRecruitmentWindow/QuickRecruitmentAllButton.def", CButton::tooltip(), std::bind(&CSlider::moveToMax,slider), SDLK_LSHIFT);
+	maxButton = std::make_shared<CButton>(Point(pos.x + 52, pos.y + 180), AnimationPath::builtin("QuickRecruitmentWindow/QuickRecruitmentAllButton.def"), CButton::tooltip(), std::bind(&CSlider::scrollToMax,slider), EShortcut::RECRUITMENT_MAX);
 }
 
 void CreaturePurchaseCard::initMinButton()
 {
-	minButton = std::make_shared<CButton>(Point(pos.x, pos.y + 180), "QuickRecruitmentWindow/QuickRecruitmentNoneButton.def", CButton::tooltip(), std::bind(&CSlider::moveToMin,slider), SDLK_LCTRL);
+	minButton = std::make_shared<CButton>(Point(pos.x, pos.y + 180), AnimationPath::builtin("QuickRecruitmentWindow/QuickRecruitmentNoneButton.def"), CButton::tooltip(), std::bind(&CSlider::scrollToMin,slider), EShortcut::RECRUITMENT_MIN);
 }
 
 void CreaturePurchaseCard::initCreatureSwitcherButton()
 {
-	creatureSwitcher = std::make_shared<CButton>(Point(pos.x + 18, pos.y-37), "iDv6432.def", CButton::tooltip(), [&](){ switchCreatureLevel(); });
+	creatureSwitcher = std::make_shared<CButton>(Point(pos.x + 18, pos.y-37), AnimationPath::builtin("iDv6432.def"), CButton::tooltip(), [&](){ switchCreatureLevel(); }, EShortcut::RECRUITMENT_SWITCH_LEVEL);
 }
 
 void CreaturePurchaseCard::switchCreatureLevel()
 {
-	OBJECT_CONSTRUCTION_CAPTURING(ACTIVATE + DEACTIVATE + UPDATE + SHOWALL + SHARE_POS);
-	auto index = vstd::find_pos(upgradesID, creatureOnTheCard->idNumber);
+	OBJECT_CONSTRUCTION;
+	auto index = vstd::find_pos(upgradesID, creatureOnTheCard->getId());
 	auto nextCreatureId = vstd::circularAt(upgradesID, ++index);
 	creatureOnTheCard = nextCreatureId.toCreature();
-	picture = std::make_shared<CCreaturePic>(parent->pos.x, parent->pos.y, creatureOnTheCard);
-	parent->updateAllSliders();
-	cost->set(creatureOnTheCard->cost * slider->getValue());
+	picture = std::make_shared<CCreaturePic>(picture->pos.x - pos.x, picture->pos.y - pos.y, creatureOnTheCard);
+	creatureClickArea = std::make_shared<CCreatureClickArea>(Point(picture->pos.x - pos.x, picture->pos.y - pos.y), picture, creatureOnTheCard);
+	owner->updateAllSliders();
+	cost->set(creatureOnTheCard->getFullRecruitCost() * slider->getValue());
 }
 
 void CreaturePurchaseCard::initAmountInfo()
 {
-	availableAmount = std::make_shared<CLabel>(pos.x + 25, pos.y + 146, FONT_SMALL, CENTER, Colors::YELLOW);
-	purhaseAmount = std::make_shared<CLabel>(pos.x + 76, pos.y + 146, FONT_SMALL, CENTER, Colors::WHITE);
+	availableAmount = std::make_shared<CLabel>(pos.x + 25, pos.y + 146, FONT_SMALL, ETextAlignment::CENTER, Colors::YELLOW);
+	purchaseAmount = std::make_shared<CLabel>(pos.x + 76, pos.y + 146, FONT_SMALL, ETextAlignment::CENTER, Colors::WHITE);
 	updateAmountInfo(0);
 }
 
 void CreaturePurchaseCard::updateAmountInfo(int value)
 {
-	availableAmount->setText(boost::lexical_cast<std::string>(maxAmount-value));
-	purhaseAmount->setText(boost::lexical_cast<std::string>(value));
+	availableAmount->setText(std::to_string(maxAmount-value));
+	purchaseAmount->setText(std::to_string(value));
 }
 
 void CreaturePurchaseCard::initSlider()
 {
-	slider = std::make_shared<CSlider>(Point(pos.x, pos.y + 158), 102, std::bind(&CreaturePurchaseCard::sliderMoved, this , _1), 0, maxAmount, 0);
+	slider = std::make_shared<CSlider>(Point(pos.x, pos.y + 158), 102, std::bind(&CreaturePurchaseCard::sliderMoved, this, _1), 0, maxAmount, 0, Orientation::HORIZONTAL);
 }
 
 void CreaturePurchaseCard::initCostBox()
 {
 	cost = std::make_shared<CreatureCostBox>(Rect(pos.x+2, pos.y + 194, 97, 74), "");
-	cost->createItems(creatureOnTheCard->cost);
+	cost->createItems(creatureOnTheCard->getFullRecruitCost());
 }
 
 void CreaturePurchaseCard::sliderMoved(int to)
 {
 	updateAmountInfo(to);
-	cost->set(creatureOnTheCard->cost * to);
-	parent->updateAllSliders();
+	cost->set(creatureOnTheCard->getFullRecruitCost() * to);
+	owner->updateAllSliders();
 }
 
 CreaturePurchaseCard::CreaturePurchaseCard(const std::vector<CreatureID> & creaturesID, Point position, int creaturesMaxAmount, QuickRecruitmentWindow * parents)
 	: upgradesID(creaturesID),
-	parent(parents),
+	owner(parents),
 	maxAmount(creaturesMaxAmount)
 {
 	creatureOnTheCard = upgradesID.back().toCreature();
@@ -95,9 +103,26 @@ CreaturePurchaseCard::CreaturePurchaseCard(const std::vector<CreatureID> & creat
 void CreaturePurchaseCard::initView()
 {
 	picture = std::make_shared<CCreaturePic>(pos.x, pos.y, creatureOnTheCard);
-	background = std::make_shared<CPicture>("QuickRecruitmentWindow/CreaturePurchaseCard.png", pos.x-4, pos.y-50);
+	background = std::make_shared<CPicture>(ImagePath::builtin("QuickRecruitmentWindow/CreaturePurchaseCard.png"), pos.x-4, pos.y-50);
+	creatureClickArea = std::make_shared<CCreatureClickArea>(Point(pos.x, pos.y), picture, creatureOnTheCard);
+
 	initAmountInfo();
 	initSlider();
-	initButtons();
+	initButtons(); // order important! buttons need slider!
 	initCostBox();
+}
+
+CreaturePurchaseCard::CCreatureClickArea::CCreatureClickArea(const Point & position, const std::shared_ptr<CCreaturePic> creaturePic, const CCreature * creatureOnTheCard)
+	: CIntObject(SHOW_POPUP),
+	creatureOnTheCard(creatureOnTheCard)
+{
+	pos.x += position.x;
+	pos.y += position.y;
+	pos.w = CREATURE_WIDTH;
+	pos.h = CREATURE_HEIGHT;
+}
+
+void CreaturePurchaseCard::CCreatureClickArea::showPopupWindow(const Point & cursorPosition)
+{
+	ENGINE->windows().createAndPushWindow<CStackWindow>(creatureOnTheCard, true);
 }

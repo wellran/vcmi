@@ -9,7 +9,9 @@
  */
 #pragma once
 
-#include "../widgets/CGarrisonInt.h"
+#include "CWindowObject.h"
+
+class CGTownInstance;
 
 class CButton;
 class CreatureCostBox;
@@ -31,14 +33,16 @@ private:
 	void setBuyButton();
 	void setMaxButton();
 
-	void setCreaturePurhaseCards();
+	void setCreaturePurchaseCards();
 
 	void maxAllCards(std::vector<std::shared_ptr<CreaturePurchaseCard>> cards);
 	void maxAllSlidersAmount(std::vector<std::shared_ptr<CreaturePurchaseCard>> cards);
-	void purhaseUnits();
+	void purchaseUnits();
 
 	const CGTownInstance * town;
-	std::shared_ptr<CButton> maxButton, buyButton, cancelButton;
+	std::shared_ptr<CButton> maxButton;
+	std::shared_ptr<CButton> buyButton;
+	std::shared_ptr<CButton> cancelButton;
 	std::shared_ptr<CreatureCostBox> totalCost;
 	std::vector<std::shared_ptr<CreaturePurchaseCard>> cards;
 	std::shared_ptr<CFilledTexture> backgroundTexture;

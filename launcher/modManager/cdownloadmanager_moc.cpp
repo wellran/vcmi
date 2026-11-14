@@ -10,75 +10,71 @@
 #include "StdInc.h"
 #include "cdownloadmanager_moc.h"
 
-#include "../launcherdirs.h"
+#include "../helper.h"
+#include "../../vcmiqt/convpathqstring.h"
+#include "../../vcmiqt/launcherdirs.h"
+
+#include "../../lib/CConfigHandler.h"
+
+static constexpr int MAX_PARALLEL_DOWNLOADS = 20;
 
 CDownloadManager::CDownloadManager()
+	: downloader(*this, settings["launcher"]["httpProxy"].String(), settings["launcher"]["ignoreSslErrors"].Bool())
 {
-	connect(&manager, SIGNAL(finished(QNetworkReply *)),
-		SLOT(downloadFinished(QNetworkReply *)));
+	pollTimer.setInterval(5);
+	connect(&pollTimer, &QTimer::timeout, this, [this](){ downloader.poll(); });
 }
 
-void CDownloadManager::downloadFile(const QUrl & url, const QString & file)
+void CDownloadManager::downloadFile(const QUrl & url, const QString & file, qint64 bytesTotal)
 {
-	QNetworkRequest request(url);
 	FileEntry entry;
-	entry.file.reset(new QFile(CLauncherDirs::get().downloadsPath() + '/' + file));
+	entry.url = url;
+	entry.filename = file;
+	entry.filePath = QString{QLatin1String{"%1/%2"}}.arg(CLauncherDirs::downloadsPath(), file);
+	entry.downloadID = 0;
 	entry.bytesReceived = 0;
-	entry.totalSize = 0;
+	entry.totalSize = bytesTotal;
+	entry.status = FileEntry::QUEUED;
 
-	if(entry.file->open(QIODevice::WriteOnly | QIODevice::Truncate))
-	{
-		entry.status = FileEntry::IN_PROGRESS;
-		entry.reply = manager.get(request);
-
-		connect(entry.reply, SIGNAL(downloadProgress(qint64,qint64)),
-			SLOT(downloadProgressChanged(qint64,qint64)));
-	}
-	else
-	{
-		entry.status = FileEntry::FAILED;
-		entry.reply = nullptr;
-		encounteredErrors += entry.file->errorString();
-	}
-
-	// even if failed - add it into list to report it in finished() call
 	currentDownloads.push_back(entry);
+	startNextDownloads();
 }
 
-CDownloadManager::FileEntry & CDownloadManager::getEntry(QNetworkReply * reply)
+CDownloadManager::FileEntry & CDownloadManager::getEntry(HttpDownloadID download)
 {
-	assert(reply);
 	for(auto & entry : currentDownloads)
 	{
-		if(entry.reply == reply)
+		if(entry.status == FileEntry::IN_PROGRESS && !entry.url.isLocalFile() && entry.downloadID == download)
 			return entry;
 	}
-	assert(0);
-	static FileEntry errorValue;
-	return errorValue;
+	throw std::runtime_error("Failed to find download entry " + std::to_string(download));
 }
 
-void CDownloadManager::downloadFinished(QNetworkReply * reply)
+void CDownloadManager::onDownloadFinished(HttpDownloadID download, const std::string & errorMessage, bool certificateError)
 {
-	FileEntry & file = getEntry(reply);
+	if(certificateError)
+		certificateErrorEncountered = true;
+	finishEntry(getEntry(download), errorMessage);
+}
 
-	if(file.reply->error())
+void CDownloadManager::finishEntry(FileEntry & file, const std::string & errorMessage)
+{
+	if(errorMessage.empty())
 	{
-		encounteredErrors += file.reply->errorString();
-		file.file->remove();
-		file.status = FileEntry::FAILED;
+		file.status = FileEntry::FINISHED;
 	}
 	else
 	{
-		file.file->write(file.reply->readAll());
-		file.file->close();
-		file.status = FileEntry::FINISHED;
+		encounteredErrors += QString::fromStdString(errorMessage);
+		file.status = FileEntry::FAILED;
 	}
+
+	Q_EMIT downloadFileFinished(file.filename);
 
 	bool downloadComplete = true;
 	for(auto & entry : currentDownloads)
 	{
-		if(entry.status == FileEntry::IN_PROGRESS)
+		if(entry.status == FileEntry::IN_PROGRESS || entry.status == FileEntry::QUEUED)
 		{
 			downloadComplete = false;
 			break;
@@ -91,44 +87,102 @@ void CDownloadManager::downloadFinished(QNetworkReply * reply)
 	for(auto & entry : currentDownloads)
 	{
 		if(entry.status == FileEntry::FINISHED)
-			successful += entry.file->fileName();
+			successful += entry.filePath;
 		else
-			failed += entry.file->fileName();
+			failed += entry.filePath;
 	}
 
 	if(downloadComplete)
-		emit finished(successful, failed, encounteredErrors);
+	{
+		pollTimer.stop();
+		Q_EMIT finished(successful, failed, encounteredErrors);
+	}
 
-	file.reply->deleteLater();
-	file.reply = nullptr;
+	startNextDownloads();
 }
 
-void CDownloadManager::downloadProgressChanged(qint64 bytesReceived, qint64 bytesTotal)
+void CDownloadManager::onDownloadProgress(HttpDownloadID download, uint64_t received, uint64_t total)
 {
-	auto reply = dynamic_cast<QNetworkReply *>(sender());
-	FileEntry & entry = getEntry(reply);
+	FileEntry & entry = getEntry(download);
 
-	entry.file->write(entry.reply->readAll());
-	entry.bytesReceived = bytesReceived;
-	entry.totalSize = bytesTotal;
+	entry.bytesReceived = received;
+	if(static_cast<qint64>(total) > entry.totalSize)
+		entry.totalSize = total;
 
-	quint64 total = 0;
-	for(auto & entry : currentDownloads)
-		total += entry.totalSize > 0 ? entry.totalSize : 0;
+	quint64 totalAll = 0;
+	for(const auto & download : currentDownloads)
+		totalAll += download.totalSize > 0 ? download.totalSize : download.bytesReceived;
 
-	quint64 received = 0;
-	for(auto & entry : currentDownloads)
-		received += entry.bytesReceived > 0 ? entry.bytesReceived : 0;
+	quint64 receivedAll = 0;
+	for(const auto & download : currentDownloads)
+		receivedAll += download.bytesReceived > 0 ? download.bytesReceived : 0;
 
-	emit downloadProgress(received, total);
+	if(receivedAll > totalAll)
+		totalAll = receivedAll;
+
+	Q_EMIT downloadProgress(entry.filename, receivedAll, totalAll);
 }
 
-bool CDownloadManager::downloadInProgress(const QUrl & url)
+bool CDownloadManager::downloadInProgress(const QUrl & url) const
 {
 	for(auto & entry : currentDownloads)
 	{
-		if(entry.reply->url() == url)
+		if(entry.url == url && (entry.status == FileEntry::QUEUED || entry.status == FileEntry::IN_PROGRESS))
 			return true;
 	}
 	return false;
+}
+
+void CDownloadManager::startNextDownloads()
+{
+	int downloadsInProgress = countDownloadsInProgress();
+
+	for(qsizetype index = 0; index < currentDownloads.size() && downloadsInProgress < MAX_PARALLEL_DOWNLOADS; ++index)
+	{
+		FileEntry & entry = currentDownloads[index];
+		if(entry.status != FileEntry::QUEUED)
+			continue;
+
+		entry.status = FileEntry::IN_PROGRESS;
+		++downloadsInProgress;
+
+		if(entry.url.isLocalFile())
+		{
+			// deferred, so callers of downloadFile receive results asynchronously, same as for network downloads
+			// entries are never removed from the list, so index remains valid
+			QTimer::singleShot(0, this, [this, index](){ copyLocalFile(currentDownloads[index]); });
+		}
+		else
+		{
+			entry.downloadID = downloader.start(entry.url.toEncoded().toStdString(), qstringToPath(entry.filePath));
+			pollTimer.start();
+		}
+	}
+}
+
+void CDownloadManager::copyLocalFile(FileEntry & entry)
+{
+	// on Android, local path may be a content:// URI that only performNativeCopy can read
+	const QString sourcePath = entry.url.toLocalFile();
+
+	if(Helper::performNativeCopy(sourcePath, entry.filePath))
+		finishEntry(entry, {});
+	else
+		finishEntry(entry, tr("Failed to copy file %1").arg(Helper::getRealPath(sourcePath)).toStdString());
+}
+
+bool CDownloadManager::hasCertificateErrors() const
+{
+	return certificateErrorEncountered;
+}
+
+int CDownloadManager::countDownloadsInProgress() const
+{
+	int result = 0;
+	for(const auto & entry : currentDownloads)
+	{
+		if(entry.status == FileEntry::IN_PROGRESS)
+			++result;
+	}
+	return result;
 }

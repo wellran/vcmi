@@ -14,6 +14,7 @@
 
 class JsonNode;
 class JsonSerializeFormat;
+class CIdentifierStorage;
 
 namespace battle
 {
@@ -25,38 +26,39 @@ namespace spells
 class Mechanics;
 
 
-class DLL_LINKAGE TargetConditionItem : public IReceptiveCheck
+class TargetConditionItem : public IReceptiveCheck
 {
 public:
-	TargetConditionItem();
-	virtual ~TargetConditionItem();
-
 	virtual void setInverted(bool value) = 0;
 	virtual void setExclusive(bool value) = 0;
 
 	virtual bool isExclusive() const = 0;
 };
 
-class DLL_LINKAGE TargetConditionItemFactory
+class TargetConditionItemFactory
 {
 public:
 	using Object = std::shared_ptr<TargetConditionItem>;
 
-	static const TargetConditionItemFactory * getDefault();
+	static std::unique_ptr<TargetConditionItemFactory> create(const CIdentifierStorage & identifiers);
+	virtual ~TargetConditionItemFactory() = default;
 
 	virtual Object createAbsoluteLevel() const = 0;
 	virtual Object createAbsoluteSpell() const = 0;
 	virtual Object createElemental() const = 0;
 	virtual Object createNormalLevel() const = 0;
 	virtual Object createNormalSpell() const = 0;
+	virtual Object createResistance() const = 0;
 
 	virtual Object createConfigurable(std::string scope, std::string type, std::string identifier) const = 0;
+	/// Creates condition from json object, e.g. { "type" : "bonus", "bonusType" : "X", "bonusSubtype" : "Y" }
+	virtual Object createFromJson(const JsonNode & config) const = 0;
 
 	virtual Object createReceptiveFeature() const = 0;
 	virtual Object createImmunityNegation() const = 0;
 };
 
-class DLL_LINKAGE TargetCondition : public IReceptiveCheck
+class TargetCondition : public IReceptiveCheck
 {
 public:
 	using Item = TargetConditionItem;
@@ -66,9 +68,6 @@ public:
 	ItemVector normal;
 	ItemVector absolute;
 	ItemVector negation;
-
-	TargetCondition();
-	virtual ~TargetCondition();
 
 	bool isReceptive(const Mechanics * m, const battle::Unit * target) const override;
 

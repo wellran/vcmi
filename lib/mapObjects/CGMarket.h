@@ -1,4 +1,4 @@
-﻿/*
+/*
  * CGMarket.h, part of VCMI engine
  *
  * Authors: listed in file AUTHORS in main folder
@@ -9,61 +9,45 @@
  */
 #pragma once
 
-#include "CObjectHandler.h"
+#include "CGObjectInstance.h"
+#include "IMarket.h"
 
-class DLL_LINKAGE IMarket
+class MarketInstanceConstructor;
+
+class CGMarket : public CGObjectInstance, public IMarket
 {
+protected:
+	std::shared_ptr<MarketInstanceConstructor> getMarketHandler() const;
+
 public:
-	const CGObjectInstance *o;
+	CGMarket(IGameInfoCallback *cb);
+	///IObjectInterface
+	void onHeroVisit(IGameEventCallback & gameEvents, const CGHeroInstance * h) const override; //open trading window
+	void initObj(IGameRandomizer & gameRandomizer) override;//set skills for trade
 
-	IMarket(const CGObjectInstance *O);
-	virtual ~IMarket() {}
-
-	virtual int getMarketEfficiency() const =0;
-	virtual bool allowsTrade(EMarketMode::EMarketMode mode) const;
-	virtual int availableUnits(EMarketMode::EMarketMode mode, int marketItemSerial) const; //-1 if unlimited
-	virtual std::vector<int> availableItemsIds(EMarketMode::EMarketMode mode) const;
-
-	bool getOffer(int id1, int id2, int &val1, int &val2, EMarketMode::EMarketMode mode) const; //val1 - how many units of id1 player has to give to receive val2 units
-	std::vector<EMarketMode::EMarketMode> availableModes() const;
-
-	static const IMarket *castFrom(const CGObjectInstance *obj, bool verbose = true);
-
-	template <typename Handler> void serialize(Handler &h, const int version)
-	{
-		h & o;
-	}
-};
-
-class DLL_LINKAGE CGMarket : public CGObjectInstance, public IMarket
-{
-public:
-	CGMarket();
-	///IObjectIntercae
-	void onHeroVisit(const CGHeroInstance * h) const override; //open trading window
+	MetaString getPopupText(PlayerColor player) const override;
+	MetaString getPopupText(const CGHeroInstance * hero) const override;
 
 	///IMarket
+	ObjectInstanceID getObjInstanceID() const override;
 	int getMarketEfficiency() const override;
-	bool allowsTrade(EMarketMode::EMarketMode mode) const override;
-	int availableUnits(EMarketMode::EMarketMode mode, int marketItemSerial) const override; //-1 if unlimited
-	std::vector<int> availableItemsIds(EMarketMode::EMarketMode mode) const override;
-
-	template <typename Handler> void serialize(Handler &h, const int version)
-	{
-		h & static_cast<CGObjectInstance&>(*this);
-		h & static_cast<IMarket&>(*this);
-	}
+	int availableUnits(EMarketMode mode, int marketItemSerial) const override; //-1 if unlimited
+	std::vector<TradeItemBuy> availableItemsIds(EMarketMode mode) const override;
+	std::set<EMarketMode> availableModes() const override;
+	double getMarketExchangeEffectiveness() const override;
 };
 
 class DLL_LINKAGE CGBlackMarket : public CGMarket
 {
 public:
-	std::vector<const CArtifact *> artifacts; //available artifacts
+	using CGMarket::CGMarket;
 
-	void newTurn(CRandomGenerator & rand) const override; //reset artifacts for black market every month
-	std::vector<int> availableItemsIds(EMarketMode::EMarketMode mode) const override;
+	std::vector<ArtifactID> artifacts; //available artifacts
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	void newTurn(IGameEventCallback & gameEvents, IGameRandomizer & gameRandomizer) const override; //reset artifacts for black market every month
+	std::vector<TradeItemBuy> availableItemsIds(EMarketMode mode) const override;
+
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<CGMarket&>(*this);
 		h & artifacts;
@@ -73,13 +57,18 @@ public:
 class DLL_LINKAGE CGUniversity : public CGMarket
 {
 public:
-	std::vector<int> skills; //available skills
+	using CGMarket::CGMarket;
 
-	std::vector<int> availableItemsIds(EMarketMode::EMarketMode mode) const override;
-	void initObj(CRandomGenerator & rand) override;//set skills for trade
-	void onHeroVisit(const CGHeroInstance * h) const override; //open window
+	std::string getSpeechTranslated() const;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	std::vector<TradeItemBuy> skills; //available skills
+
+	std::vector<TradeItemBuy> availableItemsIds(EMarketMode mode) const override;
+	void onHeroVisit(IGameEventCallback & gameEvents, const CGHeroInstance * h) const override; //open window
+	std::vector<Component> getPopupComponents(PlayerColor player) const override;
+	bool wasVisited (PlayerColor player) const override;
+
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<CGMarket&>(*this);
 		h & skills;

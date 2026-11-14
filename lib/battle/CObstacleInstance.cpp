@@ -9,54 +9,34 @@
  */
 #include "StdInc.h"
 #include "CObstacleInstance.h"
-#include "../CHeroHandler.h"
-#include "../CTownHandler.h"
-#include "../VCMI_Lib.h"
-#include "../NetPacksBase.h"
+#include "../ObstacleHandler.h"
+#include "../GameLibrary.h"
 
 #include "../serializer/JsonDeserializer.h"
 #include "../serializer/JsonSerializer.h"
 
-CObstacleInstance::CObstacleInstance()
+const ObstacleInfo & CObstacleInstance::getInfo() const
 {
-	obstacleType = USUAL;
-	uniqueID = -1;
-	ID = -1;
+	assert( obstacleType == USUAL || obstacleType == ABSOLUTE_OBSTACLE);
+
+	return *Obstacle(ID).getInfo();
 }
 
-CObstacleInstance::~CObstacleInstance()
-{
-
-}
-
-const CObstacleInfo & CObstacleInstance::getInfo() const
-{
-	switch(obstacleType)
-	{
-	case ABSOLUTE_OBSTACLE:
-		return VLC->heroh->absoluteObstacles[ID];
-	case USUAL:
-		return VLC->heroh->obstacles[ID];
-	default:
-		throw std::runtime_error("Unknown obstacle type in CObstacleInstance::getInfo()");
-	}
-}
-
-std::vector<BattleHex> CObstacleInstance::getBlockedTiles() const
+BattleHexArray CObstacleInstance::getBlockedTiles() const
 {
 	if(blocksTiles())
 		return getAffectedTiles();
-	return std::vector<BattleHex>();
+	return BattleHexArray();
 }
 
-std::vector<BattleHex> CObstacleInstance::getStoppingTile() const
+BattleHexArray CObstacleInstance::getStoppingTile() const
 {
 	if(stopsMovement())
 		return getAffectedTiles();
-	return std::vector<BattleHex>();
+	return BattleHexArray();
 }
 
-std::vector<BattleHex> CObstacleInstance::getAffectedTiles() const
+BattleHexArray CObstacleInstance::getAffectedTiles() const
 {
 	switch(obstacleType)
 	{
@@ -65,25 +45,37 @@ std::vector<BattleHex> CObstacleInstance::getAffectedTiles() const
 		return getInfo().getBlocked(pos);
 	default:
 		assert(0);
-		return std::vector<BattleHex>();
+		return BattleHexArray();
 	}
 }
 
-bool CObstacleInstance::visibleForSide(ui8 side, bool hasNativeStack) const
+bool CObstacleInstance::visibleForSide(BattleSide side, bool hasNativeStack) const
 {
 	//by default obstacle is visible for everyone
 	return true;
 }
 
+const AnimationPath & CObstacleInstance::getAnimation() const
+{
+	return getInfo().animation;
+}
+
+const AnimationPath & CObstacleInstance::getAppearAnimation() const
+{
+	return getInfo().appearAnimation;
+}
+
+const AudioPath & CObstacleInstance::getAppearSound() const
+{
+	return getInfo().appearSound;
+}
+
 int CObstacleInstance::getAnimationYOffset(int imageHeight) const
 {
-	int offset = imageHeight % 42;
 	if(obstacleType == CObstacleInstance::USUAL)
-	{
-		if(getInfo().blockedTiles.front() < 0 || offset > 37) //second or part is for holy ground ID=62,65,63
-			offset -= 42;
-	}
-	return offset;
+		return 42 * getInfo().height + 10;
+
+	return imageHeight;
 }
 
 bool CObstacleInstance::stopsMovement() const
@@ -98,32 +90,61 @@ bool CObstacleInstance::blocksTiles() const
 
 bool CObstacleInstance::triggersEffects() const
 {
-	return false;
+	return getTrigger() != SpellID::NONE;
+}
+
+SpellID CObstacleInstance::getTrigger() const
+{
+	return SpellID::NONE;
+}
+
+void CObstacleInstance::serializeJson(JsonSerializeFormat & handler)
+{
+	auto hidden = false;
+	//We need only a subset of obstacle info for correct render
+	si16 posValue = pos.toInt();
+	handler.serializeInt("position", posValue);
+	pos = posValue;
+	handler.serializeBool("hidden", hidden);
+}
+
+void CObstacleInstance::toInfo(ObstacleChanges & info, BattleChanges::EOperation operation)
+{
+	info.id = uniqueID;
+	info.operation = operation;
+
+	info.data.clear();
+	JsonSerializer ser(nullptr, info.data);
+	ser.serializeStruct("obstacle", *this);
 }
 
 SpellCreatedObstacle::SpellCreatedObstacle()
 	: turnsRemaining(-1),
 	casterSpellPower(0),
 	spellLevel(0),
-	casterSide(0),
+	casterSide(BattleSide::NONE),
 	hidden(false),
 	passable(false),
 	trigger(false),
 	trap(false),
 	removeOnTrigger(false),
 	revealed(false),
-	animationYOffset(0)
+	nativeVisible(true),
+	minimalDamage(0)
 {
 	obstacleType = SPELL_CREATED;
 }
 
-bool SpellCreatedObstacle::visibleForSide(ui8 side, bool hasNativeStack) const
+bool SpellCreatedObstacle::visibleForSide(BattleSide side, bool hasNativeStack) const
 {
 	//we hide mines and not discovered quicksands
 	//quicksands are visible to the caster or if owned unit stepped into that particular patch
 	//additionally if side has a native unit, mines/quicksands will be visible
+	//but it is not a case for a moat, so, hasNativeStack should not work for moats
 
-	return casterSide == side || !hidden || revealed || hasNativeStack;
+	auto nativeVis = hasNativeStack && nativeVisible;
+
+	return casterSide == side || !hidden || revealed || nativeVis;
 }
 
 bool SpellCreatedObstacle::blocksTiles() const
@@ -136,19 +157,9 @@ bool SpellCreatedObstacle::stopsMovement() const
 	return trap;
 }
 
-bool SpellCreatedObstacle::triggersEffects() const
+SpellID SpellCreatedObstacle::getTrigger() const
 {
 	return trigger;
-}
-
-void SpellCreatedObstacle::toInfo(ObstacleChanges & info)
-{
-	info.id = uniqueID;
-	info.operation = ObstacleChanges::EOperation::ADD;
-
-	info.data.clear();
-	JsonSerializer ser(nullptr, info.data);
-	ser.serializeStruct("obstacle", *this);
 }
 
 void SpellCreatedObstacle::fromInfo(const ObstacleChanges & info)
@@ -158,42 +169,52 @@ void SpellCreatedObstacle::fromInfo(const ObstacleChanges & info)
 	if(info.operation != ObstacleChanges::EOperation::ADD && info.operation != ObstacleChanges::EOperation::UPDATE)
 		logGlobal->error("ADD or UPDATE operation expected");
 
-    JsonDeserializer deser(nullptr, info.data);
-    deser.serializeStruct("obstacle", *this);
+	InstantIdentifierResolver resolver(*LIBRARY->identifiers());
+	JsonDeserializer deser(nullptr, resolver, info.data);
+	deser.serializeStruct("obstacle", *this);
 }
 
 void SpellCreatedObstacle::serializeJson(JsonSerializeFormat & handler)
 {
 	handler.serializeInt("spell", ID);
-	handler.serializeInt("position", pos);
+	si16 posValue = pos.toInt();
+	handler.serializeInt("position", posValue);
+	pos = posValue;
 
 	handler.serializeInt("turnsRemaining", turnsRemaining);
 	handler.serializeInt("casterSpellPower", casterSpellPower);
 	handler.serializeInt("spellLevel", spellLevel);
 	handler.serializeInt("casterSide", casterSide);
+	handler.serializeInt("minimalDamage", minimalDamage);
+	handler.serializeInt("type", obstacleType);
 
 	handler.serializeBool("hidden", hidden);
 	handler.serializeBool("revealed", revealed);
 	handler.serializeBool("passable", passable);
-	handler.serializeBool("trigger", trigger);
+	handler.serializeId("trigger", trigger, SpellID::NONE);
 	handler.serializeBool("trap", trap);
 	handler.serializeBool("removeOnTrigger", removeOnTrigger);
+	handler.serializeBool("nativeVisible", nativeVisible);
 
-	handler.serializeString("appearAnimation", appearAnimation);
-	handler.serializeString("animation", animation);
-
-	handler.serializeInt("animationYOffset", animationYOffset);
+	handler.serializeStruct("appearSound", appearSound);
+	handler.serializeStruct("appearAnimation", appearAnimation);
+	handler.serializeStruct("animation", animation);
+	handler.serializeStruct("removalAnimation", removalAnimation);
 
 	{
 		JsonArraySerializer customSizeJson = handler.enterArray("customSize");
 		customSizeJson.syncSize(customSize, JsonNode::JsonType::DATA_INTEGER);
 
 		for(size_t index = 0; index < customSizeJson.size(); index++)
-			customSizeJson.serializeInt(index, customSize.at(index));
+		{
+			si16 hex = customSize.at(index).toInt();
+			customSizeJson.serializeInt(index, hex);
+			customSize.set(index, hex);
+		}
 	}
 }
 
-std::vector<BattleHex> SpellCreatedObstacle::getAffectedTiles() const
+BattleHexArray SpellCreatedObstacle::getAffectedTiles() const
 {
 	return customSize;
 }
@@ -204,19 +225,22 @@ void SpellCreatedObstacle::battleTurnPassed()
 		turnsRemaining--;
 }
 
-int SpellCreatedObstacle::getAnimationYOffset(int imageHeight) const
+const AnimationPath & SpellCreatedObstacle::getAnimation() const
 {
-	int offset = imageHeight % 42;
-
-	if(obstacleType == CObstacleInstance::SPELL_CREATED)
-	{
-		offset += animationYOffset;
-	}
-
-	return offset;
+	return animation;
 }
 
-std::vector<BattleHex> MoatObstacle::getAffectedTiles() const
+const AnimationPath & SpellCreatedObstacle::getAppearAnimation() const
 {
-	return (*VLC->townh)[ID]->town->moatHexes;
+	return appearAnimation;
+}
+
+const AudioPath & SpellCreatedObstacle::getAppearSound() const
+{
+	return appearSound;
+}
+
+int SpellCreatedObstacle::getAnimationYOffset(int imageHeight) const
+{
+	return imageHeight;
 }

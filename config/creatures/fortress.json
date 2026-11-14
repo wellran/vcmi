@@ -7,6 +7,8 @@
 		"upgrades": ["gnollMarauder"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:196",
+			"mapAttackFromLeft": "AvWattak.def:0:197",
 			"animation": "CGNOLL.DEF"
 		},
 		"sound" :
@@ -25,6 +27,8 @@
 		"faction": "fortress",
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:198",
+			"mapAttackFromLeft": "AvWattak.def:0:199",
 			"animation": "CGNOLM.DEF"
 		},
 		"sound" :
@@ -40,12 +44,22 @@
 	{
 		"index": 100,
 		"level": 2,
-		"extraNames": [ "primitiveLizardman" ],
+		"compatibilityIdentifiers": [ "primitiveLizardman" ],
 		"faction": "fortress",
 		"upgrades": ["lizardWarrior"],
 		"hasDoubleWeek": true,
+		"shots" : 12,
+		"abilities" :
+		{
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			}
+		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:200",
+			"mapAttackFromLeft": "AvWattak.def:0:201",
 			"animation": "CPLIZA.DEF",
 			"missile" :
 			{
@@ -67,8 +81,18 @@
 		"index": 101,
 		"level": 2,
 		"faction": "fortress",
+		"shots" : 24,
+		"abilities" :
+		{
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			}
+		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:202",
+			"mapAttackFromLeft": "AvWattak.def:0:203",
 			"animation": "CALIZA.DEF",
 			"missile" :
 			{
@@ -85,64 +109,22 @@
 			"wince": "ALIZWNCE.wav"
 		}
 	},
-	"gorgon" :
-	{
-		"index": 102,
-		"level": 5,
-		"faction": "fortress",
-		"upgrades": ["mightyGorgon"],
-		"graphics" :
-		{
-			"animation": "CCGORG.DEF"
-		},
-		"sound" :
-		{
-			"attack": "CGORATTK.wav",
-			"defend": "CGORDFND.wav",
-			"killed": "CGORKILL.wav",
-			"move": "CGORMOVE.wav",
-			"wince": "CGORWNCE.wav"
-		}
-	},
-	"mightyGorgon" :
-	{
-		"index": 103,
-		"level": 5,
-		"faction": "fortress",
-		"abilities":
-		{
-			"deathStare" : 
-			{
-				"type" : "DEATH_STARE",
-				"subtype" : 0,
-				"val" : 10
-			}
-		},
-		"graphics" :
-		{
-			"animation": "CBGOG.DEF"
-		},
-		"sound" :
-		{
-			"attack": "BGORATTK.wav",
-			"defend": "BGORDFND.wav",
-			"killed": "BGORKILL.wav",
-			"move": "BGORMOVE.wav",
-			"wince": "BGORWNCE.wav"
-		}
-	},
 	"serpentFly" :
 	{
 		"index": 104,
 		"level": 3,
-		"extraNames": [ "dragonFly" ],
+		"compatibilityIdentifiers": [ "dragonFly" ],
 		"faction": "fortress",
 		"abilities":
 		{
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
 			"dispellHelpful" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.dispelHelpful",
+				"subtype" : "dispelHelpful",
 				"val" : 100
 			}
 		},
@@ -150,6 +132,8 @@
 		"hasDoubleWeek": true,
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:208",
+			"mapAttackFromLeft": "AvWattak.def:0:209",
 			"animation": "CDRFLY.DEF"
 		},
 		"sound" :
@@ -168,21 +152,27 @@
 		"faction": "fortress",
 		"abilities":
 		{
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
 			"dispellHelpful" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.dispelHelpful",
+				"subtype" : "dispelHelpful",
 				"val" : 100
 			},
 			"castWeakness" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.weakness",
+				"subtype" : "weakness",
 				"val" : 100
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:210",
+			"mapAttackFromLeft": "AvWattak.def:0:211",
 			"animation": "CDRFIR.DEF"
 		},
 		"sound" :
@@ -200,18 +190,21 @@
 		"index": 106,
 		"level": 4,
 		"faction": "fortress",
+		"doubleWide" : true,
 		"abilities":
 		{
 			"petrify" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.stoneGaze",
+				"subtype" : "stoneGaze",
 				"val" : 20
 			}
 		},
 		"upgrades": ["greaterBasilisk"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:212",
+			"mapAttackFromLeft": "AvWattak.def:0:213",
 			"animation": "CBASIL.DEF"
 		},
 		"sound" :
@@ -228,17 +221,20 @@
 		"index": 107,
 		"level": 4,
 		"faction": "fortress",
+		"doubleWide" : true,
 		"abilities":
 		{
 			"petrify" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.stoneGaze",
+				"subtype" : "stoneGaze",
 				"val" : 20
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:214",
+			"mapAttackFromLeft": "AvWattak.def:0:215",
 			"animation": "CGBASI.DEF"
 		},
 		"sound" :
@@ -250,14 +246,77 @@
 			"wince": "GBASWNCE.wav"
 		}
 	},
+	"gorgon" :
+	{
+		"index": 102,
+		"level": 5,
+		"faction": "fortress",
+		"upgrades": ["mightyGorgon"],
+		"doubleWide" : true,
+		"graphics" :
+		{
+			"mapAttackFromRight": "AvWattak.def:0:204",
+			"mapAttackFromLeft": "AvWattak.def:0:205",
+			"animation": "CCGORG.DEF"
+		},
+		"sound" :
+		{
+			"attack": "CGORATTK.wav",
+			"defend": "CGORDFND.wav",
+			"killed": "CGORKILL.wav",
+			"move": "CGORMOVE.wav",
+			"wince": "CGORWNCE.wav"
+		}
+	},
+	"mightyGorgon" :
+	{
+		"index": 103,
+		"level": 5,
+		"faction": "fortress",
+		"doubleWide" : true,
+		"abilities":
+		{
+			"deathStare" :
+			{
+				"type" : "COMBAT_EVENT_TRIGGER",
+				"subtype" : "deathStare",
+				"val" : 10,
+				"addInfo" : { "situation" : "melee" }
+			}
+		},
+		"graphics" :
+		{
+			"mapAttackFromRight": "AvWattak.def:0:206",
+			"mapAttackFromLeft": "AvWattak.def:0:207",
+			"animation": "CBGOG.DEF"
+		},
+		"sound" :
+		{
+			"attack": "BGORATTK.wav",
+			"defend": "BGORDFND.wav",
+			"killed": "BGORKILL.wav",
+			"move": "BGORMOVE.wav",
+			"wince": "BGORWNCE.wav"
+		}
+	},
 	"wyvern" :
 	{
 		"index": 108,
 		"level": 6,
 		"faction": "fortress",
 		"upgrades": ["wyvernMonarch"],
+		"doubleWide" : true,
+		"abilities" :
+		{
+			"canFly" :
+			{
+				"type" : "FLYING"
+			}
+		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:216",
+			"mapAttackFromLeft": "AvWattak.def:0:217",
 			"animation": "CWYVER.DEF"
 		},
 		"sound" :
@@ -274,17 +333,24 @@
 		"index": 109,
 		"level": 6,
 		"faction": "fortress",
+		"doubleWide" : true,
 		"abilities":
 		{
-			"petrify" :
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
+			"poison" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.poison",
-				"val" : 50
+				"subtype" : "poison",
+				"val" : 30
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:218",
+			"mapAttackFromLeft": "AvWattak.def:0:219",
 			"animation": "CWYVMN.DEF"
 		},
 		"sound" :
@@ -301,20 +367,33 @@
 		"index": 110,
 		"level": 7,
 		"faction": "fortress",
+		"doubleWide" : true,
 		"abilities":
 		{
-			"noRetaliate" :
+			"attackAllAdjacent" :
+			{
+				"type" : "ATTACKS_ALL_ADJACENT"
+			},
+			"dragonSkeleton" :
+			{
+				"type" : "SKELETON_TRANSFORMER_TARGET",
+				"subtype" : "boneDragon"
+			},
+			"noRetaliation" :
 			{
 				"type" : "BLOCKS_RETALIATION"
 			},
-			"attackAll" :
+			"KING_1" : // Will be affected by Slayer with no expertise
 			{
-				"type" : "ATTACKS_ALL_ADJACENT"
+				"type" : "KING",
+				"val" : 0
 			}
 		},
 		"upgrades": ["chaosHydra"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:220",
+			"mapAttackFromLeft": "AvWattak.def:0:221",
 			"animation": "CHYDRA.DEF"
 		},
 		"sound" :
@@ -331,19 +410,32 @@
 		"index": 111,
 		"level": 7,
 		"faction": "fortress",
+		"doubleWide" : true,
 		"abilities":
 		{
-			"noRetaliate" :
+			"attackAllAdjacent" :
+			{
+				"type" : "ATTACKS_ALL_ADJACENT"
+			},
+			"dragonSkeleton" :
+			{
+				"type" : "SKELETON_TRANSFORMER_TARGET",
+				"subtype" : "boneDragon"
+			},
+			"noRetaliation" :
 			{
 				"type" : "BLOCKS_RETALIATION"
 			},
-			"attackAll" :
+			"KING_1" : // Will be affected by Slayer with no expertise
 			{
-				"type" : "ATTACKS_ALL_ADJACENT"
+				"type" : "KING",
+				"val" : 0
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:222",
+			"mapAttackFromLeft": "AvWattak.def:0:223",
 			"animation": "CCHYDR.DEF"
 		},
 		"sound" :

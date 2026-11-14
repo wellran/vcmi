@@ -10,16 +10,42 @@
 
 #pragma once
 
-#include "Entity.h"
+#include "FactionMember.h"
+#include "scripting/ApiTags.h"
 
 class CreatureID;
+class ResourceSet;
+class GameResID;
 
-class DLL_LINKAGE Creature : public EntityWithBonuses<CreatureID>
+/// Base class for creatures and battle stacks
+class DLL_LINKAGE ACreature: public AFactionMember
 {
 public:
-	virtual const std::string & getPluralName() const = 0;
-	virtual const std::string & getSingularName() const = 0;
-	virtual uint32_t getMaxHealth() const = 0;
+	bool isLiving() const; //non-undead, non-non living or alive
+	virtual ui32 getMovementRange(int turn) const; //get speed (in moving tiles) of creature with all modificators
+	virtual ui32 getMovementRange() const; //get speed (in moving tiles) of creature with all modificators
+	virtual ui32 getMaxHealth() const; //get max HP of stack with all modifiers
+	virtual int32_t getInitiative(int turn = 0) const;
+};
+
+template <typename IdType>
+class DLL_LINKAGE CreatureEntity : public EntityT<IdType>, public ACreature
+{
+};
+
+class DLL_LINKAGE Creature : public CreatureEntity<CreatureID>, public scripting::ApiRawPointer<Creature>
+{
+protected:
+	// use getNamePlural/Singular instead
+	std::string getNameTranslated() const override = 0;
+	std::string getNameTextID() const override = 0;
+
+public:
+	virtual std::string getNamePluralTranslated() const = 0;
+	virtual std::string getNameSingularTranslated() const = 0;
+
+	virtual std::string getNamePluralTextID() const = 0;
+	virtual std::string getNameSingularTextID() const = 0;
 
 	virtual int32_t getAdvMapAmountMin() const = 0;
 	virtual int32_t getAdvMapAmountMax() const = 0;
@@ -28,7 +54,6 @@ public:
 	virtual int32_t getLevel() const = 0;
 	virtual int32_t getGrowth() const = 0;
 	virtual int32_t getHorde() const = 0;
-	virtual int32_t getFactionIndex() const = 0;
 
 	virtual int32_t getBaseAttack() const = 0;
 	virtual int32_t getBaseDefense() const = 0;
@@ -39,7 +64,10 @@ public:
 	virtual int32_t getBaseSpeed() const = 0;
 	virtual int32_t getBaseShots() const = 0;
 
-	virtual int32_t getCost(int32_t resIndex) const = 0;
+	virtual int32_t getRecruitCost(GameResID resIndex) const = 0;
+	virtual const ResourceSet & getFullRecruitCost() const = 0;
+	
+	virtual bool hasUpgrades() const = 0;
 
 	virtual bool isDoubleWide() const = 0;
 };

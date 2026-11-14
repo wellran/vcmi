@@ -9,23 +9,38 @@
  */
 #pragma once
 #include "../windows/CWindowObject.h"
-#include "../../lib/mapping/CCampaignHandler.h"
+
+#include "../../lib/campaign/CampaignScenarioPrologEpilog.h"
 
 class CMultiLineLabel;
-struct SDL_Surface;
+class VideoWidget;
+class CFilledTexture;
 
 class CPrologEpilogVideo : public CWindowObject
 {
-	CCampaignScenario::SScenarioPrologEpilog spe;
+	CampaignScenarioPrologEpilog spe;
 	int positionCounter;
 	int voiceSoundHandle;
+	uint32_t voiceDurationMilliseconds;
+	uint32_t elapsedTimeMilliseconds;
+	int videoSoundHandle;
 	std::function<void()> exitCb;
 
 	std::shared_ptr<CMultiLineLabel> text;
+	std::shared_ptr<VideoWidget> videoPlayer;
+	std::shared_ptr<CFilledTexture> backgroundAroundMenu;
+
+	void exit();
+
+	bool voiceStopped = false;
+	bool videoFinished = false;
+	int videoFinishedCounter = 0;
 
 public:
-	CPrologEpilogVideo(CCampaignScenario::SScenarioPrologEpilog _spe, std::function<void()> callback);
+	CPrologEpilogVideo(CampaignScenarioPrologEpilog _spe, std::function<void()> callback);
 
-	void clickLeft(tribool down, bool previousState) override;
-	void show(SDL_Surface * to) override;
+	void tick(uint32_t msPassed) override;
+	void clickPressed(const Point & cursorPosition) override;
+	void keyPressed(EShortcut key) override;
+	void show(Canvas & to) override;
 };

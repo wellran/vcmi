@@ -9,184 +9,20 @@
  */
 #pragma once
 
-#include "CObjectHandler.h"
-#include "CGMarket.h" // For IMarket interface
-#include "CArmedInstance.h"
-
-#include "../CTownHandler.h" // For CTown
+#include "IMarket.h"
+#include "CGDwelling.h"
+#include "../entities/faction/CFaction.h" // TODO: remove
+#include "../entities/faction/CTown.h" // TODO: remove
 
 class CCastleEvent;
-class CGTownInstance;
-class CGDwelling;
+class CTown;
+class TownBuildingInstance;
+struct TownFortifications;
+class TownRewardableBuildingInstance;
+struct DamageRange;
 
-class DLL_LINKAGE CSpecObjInfo
-{
-public:
-	CSpecObjInfo();
-	virtual ~CSpecObjInfo() = default;
-
-	virtual void serializeJson(JsonSerializeFormat & handler) = 0;
-
-	const CGDwelling * owner;
-};
-
-class DLL_LINKAGE CCreGenAsCastleInfo : public virtual CSpecObjInfo
-{
-public:
-	CCreGenAsCastleInfo();
-	bool asCastle;
-	ui32 identifier;//h3m internal identifier
-
-	std::vector<bool> allowedFactions;
-
-	std::string instanceId;//vcmi map instance identifier
-	void serializeJson(JsonSerializeFormat & handler) override;
-};
-
-class DLL_LINKAGE CCreGenLeveledInfo : public virtual CSpecObjInfo
-{
-public:
-	CCreGenLeveledInfo();
-	ui8 minLevel, maxLevel; //minimal and maximal level of creature in dwelling: <1, 7>
-
-	void serializeJson(JsonSerializeFormat & handler) override;
-};
-
-class DLL_LINKAGE CCreGenLeveledCastleInfo : public CCreGenAsCastleInfo, public CCreGenLeveledInfo
-{
-public:
-	CCreGenLeveledCastleInfo() = default;
-	void serializeJson(JsonSerializeFormat & handler) override;
-};
-
-class DLL_LINKAGE CGDwelling : public CArmedInstance
-{
-public:
-	typedef std::vector<std::pair<ui32, std::vector<CreatureID> > > TCreaturesSet;
-
-	CSpecObjInfo * info; //random dwelling options; not serialized
-	TCreaturesSet creatures; //creatures[level] -> <vector of alternative ids (base creature and upgrades, creatures amount>
-
-	CGDwelling();
-	virtual ~CGDwelling();
-
-	void initRandomObjectInfo();
-protected:
-	void serializeJsonOptions(JsonSerializeFormat & handler) override;
-
-private:
-	void initObj(CRandomGenerator & rand) override;
-	void onHeroVisit(const CGHeroInstance * h) const override;
-	void newTurn(CRandomGenerator & rand) const override;
-	void setPropertyDer(ui8 what, ui32 val) override;
-	void battleFinished(const CGHeroInstance *hero, const BattleResult &result) const override;
-	void blockingDialogAnswered(const CGHeroInstance *hero, ui32 answer) const override;
-
-	void updateGuards() const;
-	void heroAcceptsCreatures(const CGHeroInstance *h) const;
-
-public:
-	template <typename Handler> void serialize(Handler &h, const int version)
-	{
-		h & static_cast<CArmedInstance&>(*this);
-		h & creatures;
-	}
-};
-
-class DLL_LINKAGE CGTownBuilding : public IObjectInterface
-{
-///basic class for town structures handled as map objects
-public:
-	si32 indexOnTV; //identifies its index on towns vector
-	CGTownInstance *town;
-	CGTownBuilding() : bType(BuildingSubID::NONE), indexOnTV(0), town(nullptr) {};
-
-	STRONG_INLINE
-	BuildingSubID::EBuildingSubID getBuildingSubtype() const
-	{
-		return bType;
-	}
-
-	STRONG_INLINE
-	const BuildingID & getBuildingType() const
-	{
-		return bID;
-	}
-
-	STRONG_INLINE
-	void setBuildingSubtype(BuildingSubID::EBuildingSubID subId)
-	{
-		bType = subId;
-	}
-
-	PlayerColor getOwner() const override;
-	int32_t getObjGroupIndex() const override;
-	int32_t getObjTypeIndex() const override;
-
-	int3 visitablePos() const override;
-	int3 getPosition() const override;
-
-	template <typename Handler> void serialize(Handler &h, const int version)
-	{
-		h & bID;
-		h & indexOnTV;
-
-		if(version >= 792)
-			h & bType;
-	}
-
-protected:
-	BuildingID bID; //from buildig list
-	BuildingSubID::EBuildingSubID bType;
-
-	const std::string getVisitingBonusGreeting() const;
-	static const std::string getCustomBonusGreeting(const Bonus & bonus);
-};
-
-class DLL_LINKAGE COPWBonus : public CGTownBuilding
-{///used for OPW bonusing structures
-public:
-	std::set<si32> visitors;
-	void setProperty(ui8 what, ui32 val) override;
-	void onHeroVisit (const CGHeroInstance * h) const override;
-
-	COPWBonus (BuildingID index, BuildingSubID::EBuildingSubID subId, CGTownInstance *TOWN);
-	COPWBonus () {};
-
-	template <typename Handler> void serialize(Handler &h, const int version)
-	{
-		h & static_cast<CGTownBuilding&>(*this);
-		h & visitors;
-	}
-};
-
-class DLL_LINKAGE CTownBonus : public CGTownBuilding
-{
-///used for one-time bonusing structures
-///feel free to merge inheritance tree
-public:
-	std::set<ObjectInstanceID> visitors;
-	void setProperty(ui8 what, ui32 val) override;
-	void onHeroVisit (const CGHeroInstance * h) const override;
-
-	CTownBonus (BuildingID index, BuildingSubID::EBuildingSubID subId, CGTownInstance *TOWN);
-	CTownBonus () {};
-
-	template <typename Handler> void serialize(Handler &h, const int version)
-	{
-		h & static_cast<CGTownBuilding&>(*this);
-		h & visitors;
-	}
-
-private:
-	void applyBonuses(CGHeroInstance * h, const BonusList & bonuses) const;
-};
-
-class DLL_LINKAGE CTownAndVisitingHero : public CBonusSystemNode
-{
-public:
-	CTownAndVisitingHero();
-};
+template<typename ContainedClass>
+class LogicalExpression;
 
 struct DLL_LINKAGE GrowthInfo
 {
@@ -195,52 +31,75 @@ struct DLL_LINKAGE GrowthInfo
 		int count;
 		std::string description;
 		Entry(const std::string &format, int _count);
-		Entry(int subID, BuildingID building, int _count);
-		Entry(int _count, const std::string &fullDescription);
+		Entry(int subID, const BuildingID & building, int _count);
+		Entry(int _count, std::string fullDescription);
 	};
 
 	std::vector<Entry> entries;
 	int totalGrowth() const;
+	int handicapPercentage;
 };
 
-class DLL_LINKAGE CGTownInstance : public CGDwelling, public IShipyard, public IMarket
+class DLL_LINKAGE CGTownInstance : public CGDwelling, public IShipyard, public IMarket, public INativeTerrainProvider, public ICreatureUpgrader, public scripting::ApiRawPointer<CGTownInstance>
 {
+public:
+	// Disambiguate the scripting tag: CGTownInstance is ApiRawPointer both directly and via CGObjectInstance
+	using ScriptingApiName = CGTownInstance;
+
+private:
+	friend class CTownInstanceConstructor;
+	friend class CGameState;
+	std::string nameTextId; // identifier of town name, registered in the map text container
+
+	std::map<BuildingID, TownRewardableBuildingInstance*> convertOldBuildings(std::vector<TownRewardableBuildingInstance*> oldVector);
+	std::set<BuildingID> builtBuildings;
+
+	ObjectInstanceID garrisonHero;
+	ObjectInstanceID visitingHero;
 public:
 	enum EFortLevel {NONE = 0, FORT = 1, CITADEL = 2, CASTLE = 3};
 
-	CTownAndVisitingHero townAndVis;
-	const CTown * town;
-	std::string name; // name of town
-	si32 builded; //how many buildings has been built this turn
-	si32 destroyed; //how many buildings has been destroyed this turn
-	ConstTransitivePtr<CGHeroInstance> garrisonHero, visitingHero;
+	CBonusSystemNode townAndVis;
+	si32 built; //how many buildings have been built this turn
+	si32 destroyed; //how many buildings have been destroyed this turn
 	ui32 identifier; //special identifier from h3m (only > RoE maps)
-	si32 alignment;
+	PlayerColor alignmentToPlayer; // if set to non-neutral, random town will have same faction as specified player
+	bool alignmentExcludesPlayer = false; // random town will have any faction other than one of alignmentToPlayer
 	std::set<BuildingID> forbiddenBuildings;
-	std::set<BuildingID> builtBuildings;
-	std::set<BuildingID> overriddenBuildings; ///buildings which bonuses are overridden and should not be applied
-	std::vector<CGTownBuilding*> bonusingBuildings;
+	/// Faction-specific buildings of random town, applied once its faction is picked. Not serialized - only used before game start
+	std::map<FactionID, std::set<BuildingID>> randomTownBuildings;
+	std::map<FactionID, std::set<BuildingID>> randomTownForbiddenBuildings;
+	std::map<BuildingID, std::unique_ptr<TownRewardableBuildingInstance>> rewardableBuildings;
 	std::vector<SpellID> possibleSpells, obligatorySpells;
 	std::vector<std::vector<SpellID> > spells; //spells[level] -> vector of spells, first will be available in guild
-	std::list<CCastleEvent> events;
-	std::pair<si32, si32> bonusValue;//var to store town bonuses (rampart = resources from mystic pond);
+	std::vector<CCastleEvent> events;
+	std::pair<si32, si32> bonusValue;//var to store town bonuses (rampart = resources from mystic pond, factory = save debts);
+	int32_t spellResearchCounterDay;
+	int32_t spellResearchAcceptedCounter;
+	std::vector<si32> spellResearchPendingRerollsCounters;
+	bool spellResearchAllowed;
 
 	//////////////////////////////////////////////////////////////////////////
-	static std::vector<const CArtifact *> merchantArtifacts; //vector of artifacts available at Artifact merchant, NULLs possible (for making empty space when artifact is bought)
-	static std::vector<int> universitySkills;//skills for university of magic
-
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<CGDwelling&>(*this);
-		h & static_cast<IShipyard&>(*this);
-		h & static_cast<IMarket&>(*this);
-		h & name;
-		h & builded;
+		h & nameTextId;
+		if(!h.hasFeature(Handler::Version::TOWN_NAME_TEXT_ID))
+		{
+			// pre-migration saves stored the player's rename as free-form text;
+			// CGameState::updateOnLoad registers it and drops it
+			h & legacyCustomName;
+		}
+		h & built;
 		h & destroyed;
 		h & identifier;
+
 		h & garrisonHero;
 		h & visitingHero;
-		h & alignment;
+
+		h & alignmentToPlayer;
+		if(h.hasFeature(Handler::Version::TOWN_ALIGNMENT_EXCLUSION))
+			h & alignmentExcludesPlayer;
 		h & forbiddenBuildings;
 		h & builtBuildings;
 		h & bonusValue;
@@ -248,62 +107,66 @@ public:
 		h & obligatorySpells;
 		h & spells;
 		h & events;
-		h & bonusingBuildings;
-
-		for(auto * bonusingBuilding : bonusingBuildings)
-			bonusingBuilding->town = this;
-
-		h & town;
+		h & spellResearchCounterDay;
+		h & spellResearchAcceptedCounter;
+		h & spellResearchAllowed;
+		h & rewardableBuildings;
 		h & townAndVis;
-		BONUS_TREE_DESERIALIZATION_FIX
 
-		vstd::erase_if(builtBuildings, [this](BuildingID building) -> bool
+		if(h.hasFeature(Handler::Version::SPELL_RESEARCH_IMPROVEMENTS))
+			h & spellResearchPendingRerollsCounters;
+
+		if(!h.saving)
 		{
-			if(!town->buildings.count(building) ||  !town->buildings.at(building))
-			{
-				logGlobal->error("#1444-like issue in CGTownInstance::serialize. From town %s at %s removing the bogus builtBuildings item %s", name, pos.toString(), building);
-				return true;
-			}
-			return false;
-		});
+			postDeserialize();
 
-		if(!h.saving && version < 793)
-			updateBonusingBuildings();
-
-		if(version >= 794)
-			h & overriddenBuildings;
-		else if(!h.saving)
-			updateTown794();
+			//buildings of towns saved before this version did not provide any retreat permission bonuses
+			if(!h.hasFeature(Handler::Version::RETREAT_PERMISSION_BONUSES) && getFactionID().hasValue())
+				recreateBuildingsBonuses();
+		}
 	}
 	//////////////////////////////////////////////////////////////////////////
 
-	CBonusSystemNode *whatShouldBeAttached() override;
+	CBonusSystemNode & whatShouldBeAttached() override;
 	std::string nodeName() const override;
 	void updateMoraleBonusFromArmy() override;
-	void deserializationFix();
+	void postDeserialize();
 	void recreateBuildingsBonuses();
 	void setVisitingHero(CGHeroInstance *h);
 	void setGarrisonedHero(CGHeroInstance *h);
 	const CArmedInstance *getUpperArmy() const; //garrisoned hero if present or the town itself
+	const CGHeroInstance * getVisitingHero() const;
+	const CGHeroInstance * getGarrisonHero() const;
+
+	std::string getNameTextID() const;
+
+	/// Only set when loading a pre-TOWN_NAME_TEXT_ID save, consumed by CGameState::updateOnLoad
+	std::string legacyCustomName;
+	void setNameTextId(const std::string & newName);
+	/// Registers the player-chosen name in the map text container and points this town at it
+	void setCustomName(CMap & map, const std::string & newName);
 
 	//////////////////////////////////////////////////////////////////////////
 
 	bool passableFor(PlayerColor color) const override;
 	//int3 getSightCenter() const override; //"center" tile from which the sight distance is calculated
 	int getSightRadius() const override; //returns sight distance
-	int getBoatType() const override; //0 - evil (if a ship can be evil...?), 1 - good, 2 - neutral
+	BoatId getBoatType() const override; //0 - evil (if a ship can be evil...?), 1 - good, 2 - neutral
+	EPathfindingLayer getBoatLayer() const override;
 	void getOutOffsets(std::vector<int3> &offsets) const override; //offsets to obj pos when we boat can be placed. Parameter will be cleared
+	EGeneratorState shipyardStatus() const override;
+	const IObjectInterface * getObject() const override;
 	int getMarketEfficiency() const override; //=market count
-	bool allowsTrade(EMarketMode::EMarketMode mode) const override;
-	std::vector<int> availableItemsIds(EMarketMode::EMarketMode mode) const override;
-
-	void setType(si32 ID, si32 subID) override;
+	std::set<EMarketMode> availableModes() const override;
+	std::vector<TradeItemBuy> availableItemsIds(EMarketMode mode) const override;
+	ObjectInstanceID getObjInstanceID() const override;
 	void updateAppearance();
 
 	//////////////////////////////////////////////////////////////////////////
 
 	bool needsLastStack() const override;
 	CGTownInstance::EFortLevel fortLevel() const;
+	TownFortifications fortificationsLevel() const;
 	int hallLevel() const; // -1 - none, 0 - village, 1 - town, 2 - city, 3 - capitol
 	int mageGuildLevel() const; // -1 - none, 0 - village, 1 - town, 2 - city, 3 - capitol
 	int getHordeLevel(const int & HID) const; //HID - 0 or 1; returns creature level or -1 if that horde structure is not present
@@ -311,56 +174,78 @@ public:
 	GrowthInfo getGrowthInfo(int level) const;
 	bool hasFort() const;
 	bool hasCapitol() const;
-	const CGTownBuilding * getBonusingBuilding(BuildingSubID::EBuildingSubID subId) const;
-	bool hasBuiltSomeTradeBuilding() const;
+	bool hasBuiltResourceMarketplace() const;
 	//checks if special building with type buildingID is constructed
 	bool hasBuilt(BuildingSubID::EBuildingSubID buildingID) const;
 	//checks if building is constructed and town has same subID
-	bool hasBuilt(BuildingID buildingID) const;
-	bool hasBuilt(BuildingID buildingID, int townID) const;
+	bool hasBuilt(const BuildingID & buildingID) const;
+	void addBuilding(const BuildingID & buildingID);
+	void removeBuilding(const BuildingID & buildingID);
+	void removeAllBuildings();
+	std::set<BuildingID> getBuildings() const;
 
-	TResources getBuildingCost(BuildingID buildingID) const;
-	TResources dailyIncome() const; //calculates daily income of this town
+	ResourceSet getBuildingCost(const BuildingID & buildingID) const;
+	ResourceSet dailyIncome() const override;
+	std::vector<CreatureID> providedCreatures() const override;
+
 	int spellsAtLevel(int level, bool checkGuild) const; //levels are counted from 1 (1 - 5)
 	bool armedGarrison() const; //true if town has creatures in garrison or garrisoned hero
 	int getTownLevel() const;
 
-	CBuilding::TRequired genBuildingRequirements(BuildingID build, bool deep = false) const;
+	LogicalExpression<BuildingID> genBuildingRequirements(const BuildingID & build, bool deep = false) const;
 
-	void mergeGarrisonOnSiege() const; // merge garrison into army of visiting hero
-	void removeCapitols (PlayerColor owner) const;
-	void clearArmy() const;
-	void addHeroToStructureVisitors(const CGHeroInstance *h, si64 structureInstanceID) const; //hero must be visiting or garrisoned in town
-	void deleteTownBonus(BuildingID::EBuildingID bid);
+	void mergeGarrisonOnSiege(IGameEventCallback & gameEvents) const; // merge garrison into army of visiting hero
+	void removeCapitols(IGameEventCallback & gameEvents, const PlayerColor & owner) const;
+	void clearArmy(IGameEventCallback & gameEvents) const;
+	void addHeroToStructureVisitors(IGameEventCallback & gameEvents, const CGHeroInstance *h, si64 structureInstanceID) const; //hero must be visiting or garrisoned in town
+	void deleteTownBonus(BuildingID bid);
 
-	const CTown * getTown() const ;
+	const CTown * getTown() const;
+	const CFaction * getFaction() const;
 
-	CGTownInstance();
+	/// INativeTerrainProvider
+	FactionID getFactionID() const override;
+	bool isNativeTerrain(TerrainId terrain) const override;
+	TerrainId getBattleTerrain() const override;
+
+	/// Returns ID of war machine that is produced by specified building or NONE if this is not built or if building does not produce war machines
+	ArtifactID getWarMachineInBuilding(BuildingID) const;
+	/// Returns true if provided war machine is available in any of built buildings of this town
+	bool isWarMachineAvailable(ArtifactID) const;
+
+	CGTownInstance(IGameInfoCallback *cb);
 	virtual ~CGTownInstance();
 
 	///IObjectInterface overrides
-	void newTurn(CRandomGenerator & rand) const override;
-	void onHeroVisit(const CGHeroInstance * h) const override;
-	void onHeroLeave(const CGHeroInstance * h) const override;
-	void initObj(CRandomGenerator & rand) override;
-	void battleFinished(const CGHeroInstance *hero, const BattleResult &result) const override;
-	std::string getObjectName() const override;
+	void newTurn(IGameEventCallback & gameEvents, IGameRandomizer & gameRandomizer) const override;
+	void onHeroVisit(IGameEventCallback & gameEvents, const CGHeroInstance * h) const override;
+	void onHeroLeave(IGameEventCallback & gameEvents, const CGHeroInstance * h) const override;
+	void blockingDialogAnswered(IGameEventCallback & gameEvents, const CGHeroInstance * hero, int32_t answer, const JsonNode & visitState) const override;
+	void initObj(IGameRandomizer & gameRandomizer) override;
+	void pickRandomObject(IGameRandomizer & gameRandomizer) override;
+	void battleFinished(IGameEventCallback & gameEvents, const CGHeroInstance * hero, const BattleResult & result) const override;
+	MetaString getObjectName() const override;
+
+	void fillUpgradeInfo(UpgradeInfo & info, const CStackInstance &stack) const override;
 
 	void afterAddToMap(CMap * map) override;
-	static void reset();
+	void afterRemoveFromMap(CMap * map) override;
 
+	inline bool isBattleOutsideTown(const CGHeroInstance * defendingHero) const
+	{
+		return defendingHero && getGarrisonHero() && defendingHero != getGarrisonHero();
+	}
 protected:
-	void setPropertyDer(ui8 what, ui32 val) override;
+	void setPropertyDer(ObjProperty what, ObjPropertyID identifier) override;
 	void serializeJsonOptions(JsonSerializeFormat & handler) override;
 
 private:
-	int getDwellingBonus(const std::vector<CreatureID>& creatureIds, const std::vector<ConstTransitivePtr<CGDwelling> >& dwellings) const;
-	void updateBonusingBuildings();
-	bool hasBuiltInOldWay(ETownType::ETownType type, BuildingID bid) const;
+	void setTownHero(ObjectInstanceID & slot, CGHeroInstance * hero, bool garrisoned);
+	FactionID randomizeFaction(vstd::RNG & rand);
+	void setOwner(IGameEventCallback & gameEvents, const PlayerColor & owner) const;
+	void onTownCaptured(IGameEventCallback & gameEvents, const PlayerColor & winner) const;
+	int getDwellingBonus(const std::vector<CreatureID>& creatureIds, const std::vector<const CGObjectInstance* >& dwellings) const;
 	bool townEnvisagesBuilding(BuildingSubID::EBuildingSubID bid) const;
-	void tryAddOnePerWeekBonus(BuildingSubID::EBuildingSubID subID);
-	void tryAddVisitingBonus(BuildingSubID::EBuildingSubID subID);
-	void initOverriddenBids();
-	void addTownBonuses();
-	void updateTown794(); //populate overriddenBuildings and vanila bonuses for old saves 
+	void initializeConfigurableBuildings(IGameRandomizer & gameRandomizer);
+	void initializeNeutralTownGarrison(vstd::RNG & rand);
 };

@@ -1,59 +1,170 @@
-set(launcher_modmanager_SRCS
-		modManager/cdownloadmanager_moc.cpp
-		modManager/cmodlist.cpp
-		modManager/cmodlistmodel_moc.cpp
-		modManager/cmodlistview_moc.cpp
-		modManager/cmodmanager.cpp
-		modManager/imageviewer_moc.cpp
-)
-
-set(launcher_modmanager_HEADERS
-		modManager/cdownloadmanager_moc.h
-		modManager/cmodlist.h
-		modManager/cmodlistmodel_moc.h
-		modManager/cmodlistview_moc.h
-		modManager/cmodmanager.h
-		modManager/imageviewer_moc.h
-)
-
-set(launcher_settingsview_SRCS
-		settingsView/csettingsview_moc.cpp
-)
-
-set(launcher_settingsview_HEADERS
-		settingsView/csettingsview_moc.h
-)
+if(ENABLE_INNOEXTRACT)
+	# libiconv not required for our use case
+	set(WITH_CONV "builtin" CACHE STRING "" FORCE)
+	add_subdirectory("lib/innoextract")
+endif()
 
 set(launcher_SRCS
 		StdInc.cpp
-		${launcher_modmanager_SRCS}
-		${launcher_settingsview_SRCS}
+		aboutProject/aboutproject_moc.cpp
+		aboutProject/dataexporter.cpp
+		aboutProject/deviceinfo.cpp
+		modManager/cdownloadmanager_moc.cpp
+		modManager/modstateitemmodel_moc.cpp
+		modManager/cmodlistview_moc.cpp
+		modManager/modstatecontroller.cpp
+		modManager/modstatemodel.cpp
+		modManager/modstate.cpp
+		modManager/imageviewer_moc.cpp
+		modManager/chroniclesextractor.cpp
+		modManager/hdextractor.cpp
+		settingsView/csettingsview_moc.cpp
+		settingsView/configeditordialog_moc.cpp
+		startGame/StartGameTab.cpp
+		firstLaunch/firstlaunch_moc.cpp
+		firstLaunch/progressoverlay.cpp
+		demo.cpp
 		main.cpp
+		helper.cpp
+		innoextract.cpp
 		mainwindow_moc.cpp
-		launcherdirs.cpp
-		jsonutils.cpp
+		languages.cpp
+		updates/UpdateChecker.cpp
+		updates/UpdateView.cpp
+		prepare.cpp
 )
+if(IOS)
+	list(APPEND launcher_SRCS
+		ios/launchGame.m
+		ios/revealdirectoryinfiles.h
+		ios/revealdirectoryinfiles.mm
+		ios/selectdirectory.h
+		ios/selectdirectory.mm
+		prepare_ios.mm
+	)
+elseif(ANDROID)
+	list(APPEND launcher_SRCS
+		prepare_android.cpp
+	)
+endif()
 
 set(launcher_HEADERS
 		StdInc.h
-		${launcher_modmanager_HEADERS}
-		${launcher_settingsview_HEADERS}
+		aboutProject/aboutproject_moc.h
+		aboutProject/deviceinfo.h
+		modManager/cdownloadmanager_moc.h
+		modManager/modstateitemmodel_moc.h
+		modManager/cmodlistview_moc.h
+		modManager/modstatecontroller.h
+		modManager/modstatemodel.h
+		modManager/modstate.h
+		modManager/imageviewer_moc.h
+		modManager/chroniclesextractor.h
+		modManager/hdextractor.h
+		settingsView/configeditordialog_moc.h
+		settingsView/csettingsview_moc.h
+		startGame/StartGameTab.h
+		firstLaunch/firstlaunch_moc.h
+		firstLaunch/progressoverlay.h
 		mainwindow_moc.h
-		launcherdirs.h
-		jsonutils.h
+		languages.h
+		updates/UpdateChecker.h
+		updates/UpdateView.h
+		demo.h
+		main.h
+		helper.h
+		innoextract.h
+		prepare.h
+		prepare_p.h
 )
+
+# gamepad support relies on SDL, which is not linked into launcher on mobile platforms
+if(NOT ANDROID AND NOT IOS)
+	list(APPEND launcher_SRCS gamepadHandler.cpp)
+	list(APPEND launcher_HEADERS gamepadHandler.h)
+endif()
 
 set(launcher_FORMS
+		aboutProject/aboutproject_moc.ui
 		modManager/cmodlistview_moc.ui
 		modManager/imageviewer_moc.ui
+		settingsView/configeditordialog_moc.ui
 		settingsView/csettingsview_moc.ui
+		firstLaunch/firstlaunch_moc.ui
 		mainwindow_moc.ui
+		startGame/StartGameTab.ui
+		updates/UpdateView.ui
 )
 
-assign_source_group(${launcher_SRCS} ${launcher_HEADERS} VCMI_launcher.rc)
+set(launcher_RESOURCES
+	resources.qrc
+)
 
-# Tell CMake to run moc when necessary:
-set(CMAKE_AUTOMOC ON)
+set(translationsDir "translation")
+set(launcher_TS
+	"${translationsDir}/belarusian.ts"
+	"${translationsDir}/bulgarian.ts"
+	"${translationsDir}/chinese.ts"
+	"${translationsDir}/czech.ts"
+	"${translationsDir}/dutch.ts"
+	"${translationsDir}/faroese.ts"
+	"${translationsDir}/filipino.ts"
+	"${translationsDir}/finnish.ts"
+	"${translationsDir}/french.ts"
+	"${translationsDir}/german.ts"
+	"${translationsDir}/greek.ts"
+	"${translationsDir}/hungarian.ts"
+	"${translationsDir}/italian.ts"
+	"${translationsDir}/japanese.ts"
+	"${translationsDir}/korean.ts"
+	"${translationsDir}/latvian.ts"
+	"${translationsDir}/lithuanian.ts"
+	"${translationsDir}/norwegian.ts"
+	"${translationsDir}/polish.ts"
+	"${translationsDir}/portuguese.ts"
+	"${translationsDir}/romanian.ts"
+	"${translationsDir}/russian.ts"
+	"${translationsDir}/serbian.ts"
+	"${translationsDir}/spanish.ts"
+	"${translationsDir}/swedish.ts"
+	"${translationsDir}/tchinese.ts"
+	"${translationsDir}/turkish.ts"
+	"${translationsDir}/ukrainian.ts"
+	"${translationsDir}/vietnamese.ts"
+)
+if(ENABLE_TRANSLATIONS)
+	if(TARGET Qt5::Core)
+		file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${translationsDir}")
+		set_source_files_properties(${launcher_TS} PROPERTIES OUTPUT_LOCATION "${translationsDir}")
+		qt5_add_translation(launcher_QM ${launcher_TS})
+
+		set(translationsResource "${CMAKE_CURRENT_BINARY_DIR}/translations.qrc")
+		list(APPEND launcher_RESOURCES "${translationsResource}")
+
+		set(rccQmFiles "")
+		foreach(qmFile ${launcher_QM})
+			string(APPEND rccQmFiles "<file>${qmFile}</file>\n")
+		endforeach()
+		file(WRITE "${translationsResource}"
+"<!DOCTYPE RCC>
+<RCC version=\"1.0\">
+<qresource prefix=\"/\">
+${rccQmFiles}
+</qresource>
+</RCC>"
+		)
+	endif()
+endif()
+
+if(WIN32)
+	set(VCMI_FILE_DESCRIPTION "VCMI Launcher")
+	set(VCMI_ORIGINAL_FILENAME "VCMI_launcher.exe")
+	set(VCMI_ICON_RESOURCE "IDI_ICON1 ICON \"${CMAKE_CURRENT_SOURCE_DIR}/VCMI_launcher.ico\"")
+	set(launcher_ICON "${CMAKE_CURRENT_BINARY_DIR}/VCMI_launcher_versioninfo.rc")
+	configure_file("${CMAKE_SOURCE_DIR}/win/WindowsFileInfo.rc.in" "${launcher_ICON}" @ONLY)
+endif()
+
+assign_source_group(${launcher_SRCS} ${launcher_HEADERS} ${launcher_RESOURCES} ${launcher_TS} ${launcher_ICON})
 
 if(POLICY CMP0071)
 	cmake_policy(SET CMP0071 NEW)
@@ -63,19 +174,64 @@ endif()
 # to always look for includes there:
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-if("${CMAKE_VERSION}" VERSION_LESS 2.8.12)
-	# Executables fail to build with Qt 5 in the default configuration
-	# without -fPIE. We add that here.
-	set(CMAKE_CXX_FLAGS "${Qt5Widgets_EXECUTABLE_COMPILE_FLAGS} ${CMAKE_CXX_FLAGS}")
+if(ENABLE_SINGLE_APP_BUILD OR ANDROID)
+	add_library(vcmilauncher OBJECT ${launcher_QM})
+else()
+	add_executable(vcmilauncher WIN32 ${launcher_QM} ${launcher_ICON})
+	if(USING_CONAN)
+		vcmi_copy_conan_runtime_deps(vcmilauncher)
+		vcmi_deploy_qt_runtime(vcmilauncher)
+	endif()
 endif()
 
-qt5_wrap_ui(launcher_UI_HEADERS ${launcher_FORMS})
+set_target_properties(vcmilauncher PROPERTIES AUTOMOC ON)
+set_target_properties(vcmilauncher PROPERTIES AUTORCC ON)
 
-if(WIN32)
-	set(launcher_ICON VCMI_launcher.rc)
+if(ENABLE_TRANSLATIONS)
+	if(TARGET Qt6::Core)
+		qt_add_translations(vcmilauncher
+			TS_FILES ${launcher_TS}
+			RESOURCE_PREFIX "/${translationsDir}"
+			INCLUDE_DIRECTORIES
+				${CMAKE_CURRENT_BINARY_DIR})
+	endif()
 endif()
 
-add_executable(vcmilauncher WIN32 ${launcher_SRCS} ${launcher_HEADERS} ${launcher_UI_HEADERS} ${launcher_ICON})
+if(ANDROID)
+	get_target_property(rccPath Qt${QT_VERSION_MAJOR}::rcc IMPORTED_LOCATION)
+ 
+	function(generate_binary_resource resourceName resourceDir)
+		file(CREATE_LINK "${resourceDir}" "${CMAKE_CURRENT_BINARY_DIR}/${resourceName}"
+			COPY_ON_ERROR
+			SYMBOLIC
+		)
+		set(qrcFile "${CMAKE_CURRENT_BINARY_DIR}/${resourceName}.qrc")
+		execute_process(COMMAND
+			"${rccPath}" --project
+			WORKING_DIRECTORY "${resourceDir}"
+			OUTPUT_VARIABLE rccOutput
+		)
+		# add parent directory
+		string(REPLACE "<file>." "<file>${resourceName}" rccOutput "${rccOutput}")
+		file(WRITE "${qrcFile}" "${rccOutput}")
+	endfunction()
+ 
+	generate_binary_resource("config" "${CMAKE_SOURCE_DIR}/config")
+	list(APPEND launcher_RESOURCES "${CMAKE_CURRENT_BINARY_DIR}/config.qrc")
+	generate_binary_resource("Mods" "${CMAKE_SOURCE_DIR}/Mods")
+	list(APPEND launcher_RESOURCES "${CMAKE_CURRENT_BINARY_DIR}/Mods.qrc")
+	generate_binary_resource("scripts" "${CMAKE_SOURCE_DIR}/scripts")
+	list(APPEND launcher_RESOURCES "${CMAKE_CURRENT_BINARY_DIR}/scripts.qrc")
+endif()
+
+qt_wrap_ui(vcmilauncher launcher_FORMS ${launcher_FORMS})
+
+target_sources(vcmilauncher PRIVATE
+	${launcher_SRCS}
+	${launcher_HEADERS}
+	${launcher_RESOURCES}
+	${launcher_FORMS}
+)
 
 if(WIN32)
 	set_target_properties(vcmilauncher
@@ -90,7 +246,7 @@ if(WIN32)
 	# - cmake_policy in all possible places
 	# - used NO_POLICY_SCOPE to make sure no other parts reset policies
 	# Still nothing worked, warning kept appearing and WinMain didn't link automatically
-	target_link_libraries(vcmilauncher Qt5::WinMain)
+	target_link_libraries(vcmilauncher Qt${QT_VERSION_MAJOR}::WinMain)
 endif()
 
 if(APPLE)
@@ -98,29 +254,89 @@ if(APPLE)
 	set_property(GLOBAL PROPERTY AUTOGEN_TARGETS_FOLDER vcmilauncher)
 endif()
 
-target_link_libraries(vcmilauncher vcmi Qt5::Widgets Qt5::Network)
+if(ANDROID)
+	target_link_libraries(vcmilauncher Qt${QT_VERSION_MAJOR}::AndroidExtras)
+endif()
+
+# the launcher queries SDL for displays and rendering drivers. the lookup is repeated
+# here because imported targets are scoped to the directory that creates them.
+# on mobile the launcher shares its process with the client, so it needs the headers too.
+if(ENABLE_SDL3)
+	find_package(SDL3 REQUIRED)
+	target_link_libraries(vcmilauncher ${SDL3_CORE_TARGET})
+	target_compile_definitions(vcmilauncher PRIVATE VCMI_SDL3)
+elseif(NOT ANDROID AND NOT IOS)
+	find_package(SDL2 REQUIRED)
+	target_link_libraries(vcmilauncher SDL2::SDL2)
+endif()
+
+if(ENABLE_STATIC_LIBS OR NOT (ENABLE_EDITOR AND ENABLE_LAUNCHER))
+	target_compile_definitions(vcmilauncher PRIVATE VCMIQT_STATIC)
+endif()
+
+target_link_libraries(vcmilauncher vcmi vcmiqt Qt${QT_VERSION_MAJOR}::Widgets)
 target_include_directories(vcmilauncher
 	PUBLIC	${CMAKE_CURRENT_SOURCE_DIR}
-	PRIVATE	${Qt5Widgets_INCLUDE_DIRS}
-	PRIVATE	${Qt5Network_INCLUDE_DIRS}
 )
+target_compile_definitions(vcmilauncher PRIVATE VCMI_UPDATE_CHANNEL="${VCMI_UPDATE_CHANNEL}")
+if(VCMI_FLATPAK)
+	target_compile_definitions(vcmilauncher PRIVATE VCMI_FLATPAK)
+endif()
 vcmi_set_output_dir(vcmilauncher "")
+enable_pch(vcmilauncher)
 
-# temporary(?) disabled - generation of PCH takes too much time since cotire is trying to collect all Qt headers
-#set_target_properties(vcmilauncher PROPERTIES ${PCH_PROPERTIES})
-#cotire(vcmilauncher)
+if(ENABLE_INNOEXTRACT)
+	target_compile_definitions(vcmilauncher PRIVATE ENABLE_INNOEXTRACT)
+	target_link_libraries(vcmilauncher innoextract)
+endif()
 
-# Copy to build directory for easier debugging
-add_custom_command(TARGET vcmilauncher POST_BUILD
-	COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/launcher/icons
-	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/launcher/icons ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/launcher/icons
-)
+if(ENABLE_DISCORD)
+	target_compile_definitions(vcmilauncher PRIVATE ENABLE_DISCORD)
+endif()
 
-install(TARGETS vcmilauncher DESTINATION ${BIN_DIR})
-# copy whole directory
-install(DIRECTORY icons DESTINATION ${DATA_DIR}/launcher)
-# Install icons and desktop file on Linux
-if(NOT WIN32 AND NOT APPLE)
-	install(FILES "vcmilauncher.desktop" DESTINATION share/applications)
-	install(FILES "eu.vcmi.VCMI.metainfo.xml" DESTINATION share/metainfo)
+if(IOS)
+	target_link_libraries(vcmilauncher
+		iOS_utils
+		"-framework UniformTypeIdentifiers"
+	)
+
+	# workaround https://github.com/conan-io/conan-center-index/issues/13332
+	if(USING_CONAN)
+		file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/QIOSIntegrationPlugin.h
+			"#include <QtPlugin>\nQ_IMPORT_PLUGIN(QIOSIntegrationPlugin)"
+		)
+		target_link_libraries(vcmilauncher
+			Qt${QT_VERSION_MAJOR}::QIOSIntegrationPlugin
+			qt::QIOSIntegrationPlugin
+		)
+	endif()
+elseif(NOT ANDROID)
+	install(TARGETS vcmilauncher DESTINATION ${BIN_DIR})
+
+	# Install icons and desktop file on Linux
+	if(NOT WIN32 AND NOT APPLE AND ENABLE_TRANSLATIONS)
+
+		add_custom_command(
+			TARGET vcmilauncher POST_BUILD
+			COMMAND msgfmt --xml
+			    -d ${CMAKE_CURRENT_SOURCE_DIR}/po/
+				-o ${CMAKE_CURRENT_BINARY_DIR}/eu.vcmi.VCMI.metainfo.xml
+				--template=${CMAKE_CURRENT_SOURCE_DIR}/eu.vcmi.VCMI.metainfo.xml
+				WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+			COMMENT "Translating eu.vcmi.VCMI.metainfo.xml"
+		)
+
+	    add_custom_command(
+			TARGET vcmilauncher POST_BUILD
+			COMMAND msgfmt --desktop
+			    -d ${CMAKE_CURRENT_SOURCE_DIR}/po/
+				-o ${CMAKE_CURRENT_BINARY_DIR}/vcmilauncher.desktop
+				--template=${CMAKE_CURRENT_SOURCE_DIR}/vcmilauncher.desktop
+			WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+			COMMENT "Translating vcmilauncher.desktop"
+		)
+
+	    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/vcmilauncher.desktop" DESTINATION share/applications)
+		install(FILES "${CMAKE_CURRENT_BINARY_DIR}/eu.vcmi.VCMI.metainfo.xml" DESTINATION share/metainfo)
+	endif()
 endif()

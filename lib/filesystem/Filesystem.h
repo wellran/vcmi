@@ -11,41 +11,46 @@
 
 #include "CInputStream.h"
 #include "ISimpleResourceLoader.h"
-#include "ResourceID.h"
+#include "ResourcePath.h"
 
 class CFilesystemList;
 class JsonNode;
 
 /// Helper class that allows generation of a ISimpleResourceLoader entry out of Json config(s)
-class DLL_LINKAGE CFilesystemGenerator
+class CFilesystemGenerator : boost::noncopyable
 {
-	typedef std::function<void(const std::string &, const JsonNode &)> TLoadFunctor;
-	typedef std::map<std::string, TLoadFunctor> TLoadFunctorMap;
+	using TLoadFunctor = std::function<void(const std::string &, const JsonNode &)>;
+	using TLoadFunctorMap = std::map<std::string, TLoadFunctor>;
 
-	CFilesystemList * filesystem;
+	std::vector<std::unique_ptr<ISimpleResourceLoader>> loaders;
 	std::string prefix;
 
-	template<EResType::Type archiveType>
+	template<EResType archiveType>
 	void loadArchive(const std::string & mountPoint, const JsonNode & config);
 	void loadDirectory(const std::string & mountPoint, const JsonNode & config);
 	void loadZipArchive(const std::string & mountPoint, const JsonNode & config);
-	void loadJsonMap(const std::string & mountPoint, const JsonNode & config);
 
 	TLoadFunctorMap genFunctorMap();
 public:
 	/// prefix = prefix that will be given to file entries in all nodes of this filesystem
-	CFilesystemGenerator(std::string prefix);
+	/// extractArchives = Specifies if Original H3 archives should be extracted to a separate folder
+	CFilesystemGenerator(std::string prefix, bool extractArchives = false);
+	~CFilesystemGenerator();
 
 	/// loads configuration from json
 	/// config - configuration to load, using format of "filesystem" entry in config/filesystem.json
 	void loadConfig(const JsonNode & config);
 
-	/// returns generated filesystem
-	CFilesystemList * getFilesystem();
+	/// returns generated filesystem: nullptr if none of data sources exist, data source itself if only one exists, or list of all data sources
+	std::unique_ptr<ISimpleResourceLoader> acquireFilesystem();
+
+	/** Specifies if Original H3 archives should be extracted to a separate folder **/
+	bool extractArchives;
 };
 
 /**
- * This class has static methods for a global resource loader access.
+ * Virtual filesystem: base filesystem of the process, or filesystem of a game library that adds mods on top of it.
+ * Static methods access the current filesystem.
  *
  * Class is not thread-safe.
  */
@@ -55,18 +60,15 @@ class DLL_LINKAGE CResourceHandler
 	 * @brief createInitial - creates instance of initial loader
 	 * that contains data necessary to load main FS
 	 */
-	static ISimpleResourceLoader * createInitial();
+	static std::unique_ptr<ISimpleResourceLoader> createInitial(const std::shared_ptr<ISimpleResourceLoader> & bundledLoader);
+
+	/// Creates loader with game data and game configs shipped with the game, without user data directory
+	static std::shared_ptr<ISimpleResourceLoader> createBundled();
 
 public:
-	/**
-	 * Gets an instance of resource loader.
-	 *
-	 * Make sure that you've set an instance before using it. It'll throw an exception if no instance was set.
-	 *
-	 * @return Returns an instance of resource loader.
-	 */
+	/// Gets root loader of the current filesystem, or of base filesystem if no game library is active
 	static ISimpleResourceLoader * get();
-	static ISimpleResourceLoader * get(std::string identifier);
+	static ISimpleResourceLoader * get(const std::string & identifier);
 
 	/**
 	 * Creates instance of initial resource loader.
@@ -76,32 +78,63 @@ public:
 	static void initialize();
 
 	/**
+	 * Destroys all existing data in base filesystem, bringing it into uninitialized state
+	 *
+	 */
+	static void destroy();
+
+	/**
 	 * Will load all filesystem data from Json data at this path (normally - config/filesystem.json)
 	 * @param fsConfigURI - URI from which data will be loaded
 	 */
-	static void load(const std::string & fsConfigURI);
+	static void load(const std::string & fsConfigURI, bool extractArchives = false);
 
 	/**
-	 * @brief addFilesystem adds filesystem into global resource loader
+	 * @brief addFilesystem adds filesystem into base filesystem
 	 * @param identifier name of this loader by which it can be retrieved later
-	 * @param loader resource loader to add
+	 * @param loader resource loader to add. If null, identifier will be accessible as empty filesystem
 	 */
-	static void addFilesystem(const std::string & parent, const std::string & identifier, ISimpleResourceLoader * loader);
+	static void addFilesystem(const std::string & parent, const std::string & identifier, std::unique_ptr<ISimpleResourceLoader> loader);
+	
+	/**
+	 * @brief removeFilesystem removes previously added filesystem from base filesystem
+	 * @param parent parent loader containing filesystem
+	 * @param identifier name of this loader
+	 * @return if filesystem was successfully removed
+	 */
+	static bool removeFilesystem(const std::string & parent, const std::string & identifier);
 
 	/**
 	 * @brief createModFileSystem - creates filesystem out of config file
 	 * @param prefix - prefix for all paths in filesystem config
 	 * @param fsConfig - configuration to load
-	 * @return generated filesystem that contains all config entries
+	 * @return generated filesystem that contains all config entries, or nullptr if none of entries exist
 	 */
-	static ISimpleResourceLoader * createFileSystem(const std::string &prefix, const JsonNode & fsConfig);
+	static std::unique_ptr<ISimpleResourceLoader> createFileSystem(const std::string &prefix, const JsonNode & fsConfig, bool extractArchives = false);
+
+	/// Creates filesystem of a game library: base filesystem with filesystems of mods added after core, in provided order. Null filesystem of a mod is accessible as empty filesystem
+	static std::unique_ptr<CResourceHandler> createLibraryFilesystem(const std::vector<std::pair<std::string, std::shared_ptr<ISimpleResourceLoader>>> & modFilesystems);
+
+	/// Sets filesystem accessed by get(). Null selects base filesystem
+	static void setCurrent(const CResourceHandler * filesystem);
+
+	/// Returns filesystem accessed by get()
+	static const CResourceHandler & getCurrent();
+
+	/// Returns loader with provided name from this filesystem, or from base filesystem if this filesystem does not have it
+	ISimpleResourceLoader * getLoader(const std::string & identifier) const;
+
+	/// Returns true if loader with provided name exists in this filesystem or in base filesystem
+	bool hasLoader(const std::string & identifier) const;
 
 	~CResourceHandler() = default;
 private:
-	/** Instance of resource loader */
-	static std::map<std::string, ISimpleResourceLoader*> knownLoaders;
-	static CResourceHandler globalResourceHandler;
+	static CResourceHandler baseFilesystem;
+	static const CResourceHandler * currentFilesystem;
 
-	CResourceHandler() {};
-	std::unique_ptr<ISimpleResourceLoader> rootLoader;
+	CResourceHandler() = default;
+
+	std::map<std::string, std::shared_ptr<ISimpleResourceLoader>> knownLoaders;
+	/// shared by all filesystems that have no data sources, not attached to any parent
+	std::shared_ptr<ISimpleResourceLoader> emptyLoader;
 };

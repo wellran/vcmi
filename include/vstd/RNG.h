@@ -13,18 +13,36 @@
 namespace vstd
 {
 
-typedef std::function<int64_t()> TRandI64;
-typedef std::function<double()> TRand;
-
 class DLL_LINKAGE RNG
 {
 public:
-
 	virtual ~RNG() = default;
 
-	virtual TRandI64 getInt64Range(int64_t lower, int64_t upper) = 0;
+	/// Returns random number in range [lower, upper]
+	virtual int nextInt(int lower, int upper) = 0;
 
-	virtual TRand getDoubleRange(double lower, double upper) = 0;
+	/// Returns random number in range [lower, upper]
+	virtual int64_t nextInt64(int64_t lower, int64_t upper) = 0;
+
+	/// Returns random number in range [lower, upper]
+	virtual double nextDouble(double lower, double upper) = 0;
+
+	/// Returns random number in range [0, upper]
+	virtual int nextInt(int upper) = 0;
+
+	/// Returns random number in range [0, upper]
+	virtual int64_t nextInt64(int64_t upper) = 0;
+
+	/// Returns random number in range [0, upper]
+	virtual double nextDouble(double upper) = 0;
+
+	/// Generates an integer between 0 and the maximum value it can hold.
+	/// Should be only used for seeding other generators
+	virtual int nextInt() = 0;
+
+	/// Returns integer using binomial distribution
+	/// returned value is number of successfull coin flips with chance 'coinChance' out of 'coinsCount' attempts
+	virtual int nextBinomialInt(int coinsCount, double coinChance) = 0;
 };
 
 }
@@ -34,25 +52,52 @@ namespace RandomGeneratorUtil
 	template<typename Container>
 	auto nextItem(const Container & container, vstd::RNG & rand) -> decltype(std::begin(container))
 	{
-		assert(!container.empty());
-		return std::next(container.begin(), rand.getInt64Range(0, container.size() - 1)());
+		if(container.empty())
+			throw std::runtime_error("Unable to select random item from empty container!");
+
+		return std::next(container.begin(), rand.nextInt64(0, container.size() - 1));
 	}
 
 	template<typename Container>
 	auto nextItem(Container & container, vstd::RNG & rand) -> decltype(std::begin(container))
 	{
-		assert(!container.empty());
-		return std::next(container.begin(), rand.getInt64Range(0, container.size() - 1)());
+		if(container.empty())
+			throw std::runtime_error("Unable to select random item from empty container!");
+
+		return std::next(container.begin(), rand.nextInt64(0, container.size() - 1));
 	}
 
-	template<typename T>
-	void randomShuffle(std::vector<T> & container, vstd::RNG & rand)
+	template<typename Container>
+	int64_t nextItemWeighted(Container & container, vstd::RNG & rand)
 	{
-		int64_t n = (container.end() - container.begin());
+		assert(!container.empty());
 
-		for(int64_t i = n-1; i>0; --i)
+		int64_t totalWeight = std::accumulate(container.begin(), container.end(), 0);
+		if(totalWeight == 0)
+			return -1;
+
+		int64_t roll = rand.nextInt64(0, totalWeight - 1);
+
+		for (int64_t i = 0; i < container.size(); ++i)
 		{
-			std::swap(container.begin()[i],container.begin()[rand.getInt64Range(0, i)()]);
+			int chance = container[i];
+			if(roll < chance)
+				return i;
+
+			roll -= chance;
+		}
+		return container.size() - 1;
+	}
+
+	template<typename Container>
+	void randomShuffle(Container & container, vstd::RNG & rand)
+	{
+		int64_t n = std::distance(container.begin(), container.end());
+
+		for(int64_t i = n - 1; i > 0; --i)
+		{
+			auto randIndex = rand.nextInt64(0, i);
+			std::swap(*(container.begin() + i), *(container.begin() + randIndex));
 		}
 	}
 }

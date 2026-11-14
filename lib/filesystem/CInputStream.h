@@ -18,11 +18,6 @@ class DLL_LINKAGE CInputStream : public virtual CStream
 {
 public:
 	/**
-	 * D-tor.
-	 */
-	virtual ~CInputStream() {}
-
-	/**
 	 * Reads n bytes from the stream into the data buffer.
 	 *
 	 * @param data A pointer to the destination data array.
@@ -36,32 +31,11 @@ public:
 	 *
 	 * @return pair, first = raw data, second = size of data
 	 */
-	std::pair<std::unique_ptr<ui8[]>, si64> readAll()
-	{
-		std::unique_ptr<ui8[]> data(new ui8[getSize()]);
-
-		seek(0);
-		auto readSize = read(data.get(), getSize());
-		assert(readSize == getSize());
-		UNUSED(readSize);
-
-		return std::make_pair(std::move(data), getSize());
-	}
+	virtual std::pair<std::unique_ptr<ui8[]>, si64> readAll();
 
 	/**
 	 * @brief calculateCRC32 calculates CRC32 checksum for the whole file
 	 * @return calculated checksum
 	 */
-	virtual ui32 calculateCRC32()
-	{
-		si64 originalPos = tell();
-
-		boost::crc_32_type checksum;
-		auto data = readAll();
-		checksum.process_bytes(reinterpret_cast<const void *>(data.first.get()), data.second);
-
-		seek(originalPos);
-
-		return checksum.checksum();
-	}
+	virtual ui32 calculateCRC32();
 };

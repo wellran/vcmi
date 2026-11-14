@@ -3,23 +3,25 @@
 	"goldGolem" :
 	{
 		"index": 116,
-		"level": 4,
+		"level": 5,
 		"faction": "neutral",
 		"abilities":
 		{
-			"magicResistance" :
-			{
-				"type" : "SPELL_DAMAGE_REDUCTION",
-				"subtype" : -1,
-				"val" : 85
-			},
 			"nonliving" :
 			{
 				"type" : "NON_LIVING"
+			},
+			"magicResistance" :
+			{
+				"type" : "SPELL_DAMAGE_REDUCTION",
+				"subtype" : "any",
+				"val" : 85
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:232",
+			"mapAttackFromLeft": "AvWattak.def:0:233",
 			"animation": "CGGOLE.DEF"
 		},
 		"sound" :
@@ -34,23 +36,25 @@
 	"diamondGolem" :
 	{
 		"index": 117,
-		"level": 5,
+		"level": 6,
 		"faction": "neutral",
 		"abilities":
 		{
-			"magicResistance" :
-			{
-				"type" : "SPELL_DAMAGE_REDUCTION",
-				"subtype" : -1,
-				"val" : 95
-			},
 			"nonliving" :
 			{
 				"type" : "NON_LIVING"
+			},
+			"magicResistance" :
+			{
+				"type" : "SPELL_DAMAGE_REDUCTION",
+				"subtype" : "any",
+				"val" : 95
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:234",
+			"mapAttackFromLeft": "AvWattak.def:0:235",
 			"animation": "CDGOLE.DEF"
 		},
 		"sound" :
@@ -67,32 +71,65 @@
 		"index": 132,
 		"level": 10,
 		"faction": "neutral",
+		"excludeFromRandomization" : true,
+		"doubleWide" : true,
 		"abilities":
 		{
-			"dragon" : 
+			"dragon" :
 			{
 				"type" : "DRAGON_NATURE"
 			},
-			"fireBreath" :
+			"dragonSkeleton" :
+			{
+				"type" : "SKELETON_TRANSFORMER_TARGET",
+				"subtype" : "boneDragon"
+			},
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
+			"twoHexAttackBreath" :
 			{
 				"type" : "TWO_HEX_ATTACK_BREATH"
+			},
+			"fearful" :
+			{
+				"type" : "FEARFUL",
+				"val" : 10,
+				"propagator": "BATTLE_WIDE",
+				"propagationUpdater" : "BONUS_OWNER_UPDATER",
+				"description" : "PLACEHOLDER",
+				"limiters" : [
+					"OPPOSITE_SIDE",
+					{
+						"type" : "HAS_ANOTHER_BONUS_LIMITER",
+						"bonusType" : "LIVING"
+					}
+				]
+			},
+			"fearless" :
+			{
+				"type" : "FEARFUL",
+				"valueType" : "AT_MOST",
+				"description" : "PLACEHOLDER",
+				"val" : 0
+
 			},
 			"spellImmunity" :
 			{
 				"type" : "LEVEL_SPELL_IMMUNITY",
 				"val" : 3
 			},
-			"fearless" :
+			"KING_1" : // Will be affected by Slayer with no expertise
 			{
-				"type" : "FEARLESS"
-			},
-			"fear" :
-			{
-				"type" : "FEAR"
+				"type" : "KING",
+				"val" : 0
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:264",
+			"mapAttackFromLeft": "AvWattak.def:0:265",
 			"animation": "CADRGN.DEF"
 		},
 		"sound" :
@@ -109,25 +146,38 @@
 		"index": 133,
 		"level": 10,
 		"faction": "neutral",
+		"excludeFromRandomization" : true,
+		"doubleWide" : true,
 		"abilities":
 		{
 			"dragon" :
 			{
 				"type" : "DRAGON_NATURE"
 			},
-			"magicResistance" :
+			"dragonSkeleton" :
 			{
-				"type" : "MAGIC_RESISTANCE",
-				"val" : 20
+				"type" : "SKELETON_TRANSFORMER_TARGET",
+				"subtype" : "boneDragon"
 			},
 			"crystals" :
 			{
 				"type" : "SPECIAL_CRYSTAL_GENERATION"
 			},
-			"FLYING_ARMY" : null
+			"magicResistance" :
+			{
+				"type" : "MAGIC_RESISTANCE",
+				"val" : 20
+			},
+			"KING_1" : // Will be affected by Slayer with no expertise
+			{
+				"type" : "KING",
+				"val" : 0
+			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:266",
+			"mapAttackFromLeft": "AvWattak.def:0:267",
 			"animation": "CCDRGN.DEF"
 		},
 		"sound" :
@@ -144,11 +194,22 @@
 		"index": 134,
 		"level": 8,
 		"faction": "neutral",
+		"excludeFromRandomization" : true,
+		"doubleWide" : true,
 		"abilities":
 		{
 			"dragon" :
 			{
 				"type" : "DRAGON_NATURE"
+			},
+			"dragonSkeleton" :
+			{
+				"type" : "SKELETON_TRANSFORMER_TARGET",
+				"subtype" : "boneDragon"
+			},
+			"canFly" :
+			{
+				"type" : "FLYING"
 			},
 			"mirror" :
 			{
@@ -168,62 +229,69 @@
 			"castsMagicArrow" :
 			{
 				"type" : "SPELLCASTER",
-				"subtype" : "spell.magicArrow",
-				"addInfo" : 22,
+				"subtype" : "magicArrow",
+				"addInfo" : 10,
 				"val" : 2
 			},
 			"castsIceBolt" :
 			{
 				"type" : "SPELLCASTER",
-				"subtype" : "spell.iceBolt",
+				"subtype" : "iceBolt",
 				"addInfo" : 22,
 				"val" : 2
 			},
 			"castsLightningBolt" :
 			{
 				"type" : "SPELLCASTER",
-				"subtype" : "spell.lightningBolt",
+				"subtype" : "lightningBolt",
 				"addInfo" : 22,
 				"val" : 2
 			},
 			"castsChainLightning" :
 			{
 				"type" : "SPELLCASTER",
-				"subtype" : "spell.chainLightning",
+				"subtype" : "chainLightning",
 				"addInfo" : 5,
 				"val" : 2
 			},
 			"castsFrostRing" :
 			{
 				"type" : "SPELLCASTER",
-				"subtype" : "spell.frostRing",
+				"subtype" : "frostRing",
 				"addInfo" : 10,
 				"val" : 2
 			},
 			"castsFireball" :
 			{
 				"type" : "SPELLCASTER",
-				"subtype" : "spell.fireball",
+				"subtype" : "fireball",
 				"addInfo" : 21,
 				"val" : 2
 			},
 			"castsInferno" :
 			{
 				"type" : "SPELLCASTER",
-				"subtype" : "spell.inferno",
+				"subtype" : "inferno",
 				"addInfo" : 5,
 				"val" : 2
 			},
 			"castsMeteorShower" :
 			{
 				"type" : "SPELLCASTER",
-				"subtype" : "spell.meteorShower",
+				"subtype" : "meteorShower",
 				"addInfo" : 5,
 				"val" : 2
+			},
+			"KING_1" : // Will be affected by Slayer with no expertise
+			{
+				"type" : "KING",
+				"val" : 0
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:268",
+			"mapAttackFromLeft": "AvWattak.def:0:269",
 			"animation": "CFDRGN.DEF"
 		},
 		"sound" :
@@ -241,31 +309,56 @@
 		"index": 135,
 		"level": 10,
 		"faction": "neutral",
+		"excludeFromRandomization" : true,
+		"doubleWide" : true,
 		"abilities":
 		{
-			"dragon" : 
+			"dragon" :
 			{
 				"type" : "DRAGON_NATURE"
 			},
-			"acidBreath" :
+			"dragonSkeleton" :
 			{
-				"type" : "ACID_BREATH",
-				"val" : 25,
-				"addInfo" : 30
+				"type" : "SKELETON_TRANSFORMER_TARGET",
+				"subtype" : "boneDragon"
 			},
-			"fireBreath" :
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
+			"twoHexAttackBreath" :
 			{
 				"type" : "TWO_HEX_ATTACK_BREATH"
+			},
+			"acidBreath" :
+			{
+				"type" : "SPELL_AFTER_ATTACK",
+				"subtype" : "acidBreathDamage",
+				"val" : 20
+			},
+			// damage of the cast above, multiplied by the number of dragons in the stack
+			"acidBreathDamage" :
+			{
+				"type" : "SPECIFIC_SPELL_POWER",
+				"subtype" : "acidBreathDamage",
+				"val" : 25
 			},
 			"reduceDefence" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.acidBreath",
+				"subtype" : "acidBreath",
 				"val" : 100
+			},
+			"KING_1" : // Will be affected by Slayer with no expertise
+			{
+				"type" : "KING",
+				"val" : 0
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:270",
+			"mapAttackFromLeft": "AvWattak.def:0:271",
 			"animation": "CRSDGN.DEF"
 		},
 		"sound" :
@@ -281,11 +374,21 @@
 	{
 		"index": 136,
 		"level": 6,
-		"extraNames": [ "enchanters" ],
+		"compatibilityIdentifiers": [ "enchanters" ],
 		"faction": "neutral",
+		"excludeFromRandomization" : true,
+		"shots" : 32,
 		"abilities":
 		{
-			"noPenalty" : 
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			},
+			"noMeleePenalty" :
+			{
+				"type" : "NO_MELEE_PENALTY"
+			},
+			"noWallPenalty" :
 			{
 				"type" : "NO_WALL_PENALTY"
 			},
@@ -294,52 +397,67 @@
 				"type" : "CASTS",
 				"val" : 5
 			},
-			"castsAirShield" :
+			"castsHaste" :
 			{
 				"type" : "ENCHANTER",
-				"subtype" : "spell.airShield",
+				"subtype" : "haste",
 				"val" : 3,
-				"addInfo" : 3
-			},
-			"castsBless" :
-			{
-				"type" : "ENCHANTER",
-				"subtype" : "spell.bless",
-				"val" : 3,
-				"addInfo" : 3
-			},
-			"castsWeakness" :
-			{
-				"type" : "ENCHANTER",
-				"subtype" : "spell.weakness",
-				"val" : 3,
-				"addInfo" : 3
-			},
-			"castsStoneSkin" :
-			{
-				"type" : "ENCHANTER",
-				"subtype" : "spell.stoneSkin",
-				"val" : 3,
-				"addInfo" : 3
+				"addInfo" : { "cooldown" : 3, "weight" : 15 }
 			},
 			"castsSlow" :
 			{
 				"type" : "ENCHANTER",
-				"subtype" : "spell.slow",
+				"subtype" : "slow",
 				"val" : 3,
-				"addInfo" : 3
+				"addInfo" : { "cooldown" : 3, "weight" : 10 }
 			},
-			"castsHaste" :
+			"castsStoneSkin" :
 			{
 				"type" : "ENCHANTER",
-				"subtype" : "spell.haste",
+				"subtype" : "stoneSkin",
 				"val" : 3,
-				"addInfo" : 3
+				"addInfo" : { "cooldown" : 3, "weight" : 15 }
+			},
+			"castsBless" :
+			{
+				"type" : "ENCHANTER",
+				"subtype" : "bless",
+				"val" : 3,
+				"addInfo" : { "cooldown" : 3, "weight" : 15 }
+			},
+			"castsWeakness" :
+			{
+				"type" : "ENCHANTER",
+				"subtype" : "weakness",
+				"val" : 3,
+				"addInfo" : { "cooldown" : 3, "weight" : 4 }
+			},
+			"castsAirShield" :
+			{
+				"type" : "ENCHANTER",
+				"subtype" : "airShield",
+				"val" : 3,
+				"addInfo" : { "cooldown" : 3, "weight" : 10 }
+			},
+			"castsBloodlust" :
+			{
+				"type" : "ENCHANTER",
+				"subtype" : "bloodlust",
+				"val" : 3,
+				"addInfo" : { "cooldown" : 3, "weight" : 5 }
+			},
+			"castsCure" :
+			{
+				"type" : "ENCHANTER",
+				"subtype" : "cure",
+				"val" : 3,
+				"addInfo" : { "cooldown" : 3, "weight" : 10 }
 			}
-			
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:272",
+			"mapAttackFromLeft": "AvWattak.def:0:273",
 			"animation": "Cench.DEF",
 			"missile" :
 			{
@@ -360,21 +478,29 @@
 	{
 		"index": 137,
 		"level": 4,
-		"extraNames": [ "sharpshooters" ],
+		"compatibilityIdentifiers": [ "sharpshooters" ],
 		"faction": "neutral",
+		"excludeFromRandomization" : true,
+		"shots" : 32,
 		"abilities":
 		{
-			"noPenalty" : 
+			"shooter" :
 			{
-				"type" : "NO_WALL_PENALTY"
+				"type" : "SHOOTER"
 			},
 			"noDistancePenalty" :
 			{
 				"type" : "NO_DISTANCE_PENALTY"
+			},
+			"noWallPenalty" :
+			{
+				"type" : "NO_WALL_PENALTY"
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:274",
+			"mapAttackFromLeft": "AvWattak.def:0:275",
 			"animation": "CSHARP.DEF",
 			"missile" :
 			{
@@ -396,15 +522,25 @@
 		"index": 138,
 		"level": 1,
 		"faction": "neutral",
-		"abilities": 
+		"shots" : 24,
+		"abilities":
 		{
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			},
 			"lucky" :
 			{
-				"type" : "SELF_LUCK"
+				"type" : "LUCK",
+				"val" : 1,
+				"valueType" : "AT_LEAST",
+				"description" : "PLACEHOLDER"
 			}
 		 },
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:276",
+			"mapAttackFromLeft": "AvWattak.def:0:277",
 			"animation": "CHALF.DEF",
 			"missile" :
 			{
@@ -428,6 +564,8 @@
 		"faction": "neutral",
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:278",
+			"mapAttackFromLeft": "AvWattak.def:0:279",
 			"animation": "CPEAS.DEF"
 		},
 		"sound" :
@@ -447,6 +585,8 @@
 		"doubleWide" : true,
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:280",
+			"mapAttackFromLeft": "AvWattak.def:0:281",
 			"animation": "CBOAR.DEF"
 		},
 		"sound" :
@@ -472,12 +612,14 @@
 			"castCurse" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.curse",
-				"val" : 50
-			}			
+				"subtype" : "curse",
+				"val" : 25
+			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:282",
+			"mapAttackFromLeft": "AvWattak.def:0:283",
 			"animation": "CMUMMY.DEF"
 		},
 		"sound" :
@@ -494,18 +636,21 @@
 		"index": 142,
 		"level": 3,
 		"faction": "neutral",
+		"doubleWide" : true,
 		"abilities":
 		{
 			"sandWalker" :
 			{
 				"type" : "NO_TERRAIN_PENALTY",
-				"subtype" : "terrain.sand",
-				"propagator" : "HERO"
+				"subtype" : "sand",
+				"propagator" : "HERO",
+				"description" : "PLACEHOLDER"
 			}
 		},
-		"doubleWide" : true,
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:284",
+			"mapAttackFromLeft": "AvWattak.def:0:285",
 			"animation": "CNOMAD.DEF"
 		},
 		"sound" :
@@ -527,30 +672,35 @@
 			"visionsMonsters" :
 			{
 				"type" : "VISIONS",
-				"subtype" : 0,
+				"subtype" : "visionsMonsters",
 				"val" : 3,
-				"valueType" : "INDEPENDENT_MAX",
-				"propagator" : "HERO"
+				"valueType" : "AT_LEAST",
+				"propagator" : "HERO",
+				"description" : "PLACEHOLDER"
 			},
 			"visionsHeroes" :
 			{
 				"type" : "VISIONS",
-				"subtype" : 1,
+				"subtype" : "visionsHeroes",
 				"val" : 3,
-				"valueType" : "INDEPENDENT_MAX",
-				"propagator" : "HERO"				
+				"valueType" : "AT_LEAST",
+				"propagator" : "HERO",
+				"description" : "PLACEHOLDER"
 			},
 			"visionsTowns" :
 			{
 				"type" : "VISIONS",
-				"subtype" : 2,
+				"subtype" : "visionsTowns",
 				"val" : 3,
-				"valueType" : "INDEPENDENT_MAX",
-				"propagator" : "HERO"				
+				"valueType" : "AT_LEAST",
+				"propagator" : "HERO",
+				"description" : "PLACEHOLDER"
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:286",
+			"mapAttackFromLeft": "AvWattak.def:0:287",
 			"animation": "CROGUE.DEF"
 		},
 		"sound" :
@@ -571,11 +721,14 @@
 		{
 			"regenerates" :
 			{
-				"type" : "FULL_HP_REGENERATION"
+				"type" : "HP_REGENERATION",
+				"val" : 50
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:288",
+			"mapAttackFromLeft": "AvWattak.def:0:289",
 			"animation": "CTROLL.DEF"
 		},
 		"sound" :

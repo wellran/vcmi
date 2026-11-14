@@ -10,15 +10,37 @@
 
 #include "StdInc.h"
 #include "IHandlerBase.h"
-#include "CModHandler.h"
+#include "json/JsonNode.h"
+#include "modding/IdentifierStorage.h"
+#include "modding/ModScope.h"
+#include "modding/CModHandler.h"
+#include "modding/LibraryLoadContext.h"
+#include "GameLibrary.h"
 
-
-void IHandlerBase::registerObject(std::string scope, std::string type_name, std::string name, si32 index)
+std::string IHandlerBase::getScopeBuiltin()
 {
-	return VLC->modh->identifiers.registerObject(scope, type_name, name, index);
+	return ModScope::scopeBuiltin();
 }
 
-std::string IHandlerBase::normalizeIdentifier(const std::string& scope, const std::string& remoteScope, const std::string& identifier) const
+void IHandlerBase::registerObject(LibraryLoadContext & context, const std::string & scope, const std::vector<std::string> & typeNames, const std::string & name, const JsonNode & data, si32 index)
 {
-	return VLC->modh->normalizeIdentifier(scope, remoteScope, identifier);
+	for(const auto & typeName : typeNames)
+		registerObject(context, scope, typeName, name, data, index);
+}
+
+void IHandlerBase::registerObject(LibraryLoadContext & context, const std::string & scope, const std::string & typeName, const std::string & name, const JsonNode & data, si32 index)
+{
+	context.lib.identifiersHandler->registerObject(scope, typeName, name, index);
+	for(const auto & compatID : data["compatibilityIdentifiers"].Vector())
+	{
+		if (name != compatID.String())
+			context.lib.identifiersHandler->registerObject(scope, typeName, compatID.String(), index);
+		else
+			logMod->warn("Mod '%s' %s '%s': compatibility identifier has same name as object itself!", scope, typeName, name);
+	}
+}
+
+std::optional<int32_t> IHandlerBase::resolveIdentifier(const std::string & scope, const std::string & typeName, const std::string & name) const
+{
+	return LIBRARY->identifiersHandler->getIdentifier(scope, typeName, name);
 }

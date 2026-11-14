@@ -9,66 +9,85 @@
  */
 #include "StdInc.h"
 #include "CConsoleHandler.h"
+#include "CConfigHandler.h"
 
 #include "CThreadHelper.h"
+#include "VCMIDirs.h"
+#include "texts/TextOperations.h"
+#include <boost/stacktrace.hpp>
 
-boost::mutex CConsoleHandler::smx;
+#if defined(NDEBUG) && !defined(VCMI_ANDROID)
+#define USE_ON_TERMINATE
+#endif
 
-DLL_LINKAGE CConsoleHandler * console = nullptr;
+#if defined(NDEBUG) && defined(VCMI_WINDOWS)
+#define USE_UNHANDLED_EXCEPTION_FILTER
+#define CREATE_MEMORY_DUMP
+#endif
 
 #ifndef VCMI_WINDOWS
-	typedef std::string TColor;
-	#define CONSOLE_GREEN "\x1b[1;32m"
-	#define CONSOLE_RED "\x1b[1;31m"
-	#define CONSOLE_MAGENTA "\x1b[1;35m"
-	#define CONSOLE_YELLOW "\x1b[1;33m"
-	#define CONSOLE_WHITE "\x1b[1;37m"
-	#define CONSOLE_GRAY "\x1b[1;30m"
-	#define CONSOLE_TEAL "\x1b[1;36m"
+constexpr const char * CONSOLE_GREEN = "\x1b[1;32m";
+constexpr const char * CONSOLE_RED = "\x1b[1;31m";
+constexpr const char * CONSOLE_MAGENTA = "\x1b[1;35m";
+constexpr const char * CONSOLE_YELLOW = "\x1b[1;33m";
+constexpr const char * CONSOLE_WHITE = "\x1b[1;37m";
+constexpr const char * CONSOLE_GRAY = "\x1b[1;30m";
+constexpr const char * CONSOLE_TEAL = "\x1b[1;36m";
 #else
-	#include <windows.h>
-	#include <dbghelp.h>
+#include <windows.h>
+#include <dbghelp.h>
 #ifndef __MINGW32__
 	#pragma comment(lib, "dbghelp.lib")
 #endif
-	typedef WORD TColor;
-	HANDLE handleIn;
-	HANDLE handleOut;
-	HANDLE handleErr;
-	#define CONSOLE_GREEN FOREGROUND_GREEN | FOREGROUND_INTENSITY
-	#define CONSOLE_RED FOREGROUND_RED | FOREGROUND_INTENSITY
-	#define CONSOLE_MAGENTA FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY
-	#define CONSOLE_YELLOW FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY
-	#define CONSOLE_WHITE FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY
-	#define CONSOLE_GRAY FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE
-	#define CONSOLE_TEAL FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY
-
-	static TColor defErrColor;
+HANDLE handleIn;
+HANDLE handleOut;
+HANDLE handleErr;
+constexpr int32_t CONSOLE_GREEN = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+constexpr int32_t CONSOLE_RED = FOREGROUND_RED | FOREGROUND_INTENSITY;
+constexpr int32_t CONSOLE_MAGENTA = FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+constexpr int32_t CONSOLE_YELLOW = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+constexpr int32_t CONSOLE_WHITE = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+constexpr int32_t CONSOLE_GRAY = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
+constexpr int32_t CONSOLE_TEAL = FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
 #endif
 
-static TColor defColor;
+#ifdef CREATE_MEMORY_DUMP
 
-#ifdef VCMI_WINDOWS
-
-void printWinError()
+static void createMemoryDump(MINIDUMP_EXCEPTION_INFORMATION * meinfo)
 {
-	//Get error code
-	int error = GetLastError();
-	if(!error)
+	//create file where dump will be placed
+	std::array<wchar_t, MAX_PATH + 1> executablePath{};
+	GetModuleFileNameW(nullptr, executablePath.data(), MAX_PATH);
+	const auto dumpName = boost::filesystem::path(executablePath.data()).filename().wstring() + L"_crashinfo.dmp";
+	const auto dumpPath = VCMIDirs::get().userLogsPath() / dumpName;
+	HANDLE dfile = CreateFileW(dumpPath.c_str(), GENERIC_READ|GENERIC_WRITE, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, CREATE_ALWAYS, 0, 0);
+	if(dfile == INVALID_HANDLE_VALUE)
 	{
-		logGlobal->error("No Win error information set.");
+		logGlobal->error("Failed to create crash dump file %s", TextOperations::filesystemPathToUtf8(dumpPath));
 		return;
 	}
-	logGlobal->error("Error %d encountered:", error);
+	logGlobal->error("Crash info will be put in %s", TextOperations::filesystemPathToUtf8(dumpPath));
+	
+	auto dumpType = MiniDumpWithDataSegs;
 
-	//Get error description
-	char* pTemp = nullptr;
-	FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_IGNORE_INSERTS | FORMAT_MESSAGE_FROM_SYSTEM,
-		nullptr, error,  MAKELANGID( LANG_NEUTRAL, SUBLANG_DEFAULT ), (LPSTR)&pTemp, 1, nullptr);
-	logGlobal->error(pTemp);
-	LocalFree( pTemp );
+	if(settings["general"]["extraDump"].Bool())
+	{
+		dumpType = (MINIDUMP_TYPE)(
+			MiniDumpWithFullMemory
+			| MiniDumpWithFullMemoryInfo
+			| MiniDumpWithHandleData
+			| MiniDumpWithUnloadedModules
+			| MiniDumpWithThreadInfo);
+	}
+
+	MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), dfile, dumpType, meinfo, nullptr, nullptr);
+	CloseHandle(dfile);
+	MessageBoxA(0, "VCMI has crashed. We are sorry. File with information about encountered problem has been created.", "VCMI Crashhandler", MB_OK | MB_ICONERROR);
 }
 
+#endif
+
+#ifdef USE_UNHANDLED_EXCEPTION_FILTER
 const char* exceptionName(DWORD exc)
 {
 #define EXC_CASE(EXC)	case EXCEPTION_##EXC : return "EXCEPTION_" #EXC
@@ -102,14 +121,11 @@ const char* exceptionName(DWORD exc)
 #undef EXC_CASE
 }
 
-
-
 LONG WINAPI onUnhandledException(EXCEPTION_POINTERS* exception)
 {
 	logGlobal->error("Disaster happened.");
 
 	PEXCEPTION_RECORD einfo = exception->ExceptionRecord;
-	logGlobal->error("Reason: 0x%x - %s at %04x:%x", einfo->ExceptionCode, exceptionName(einfo->ExceptionCode), exception->ContextRecord->SegCs, (void*)einfo->ExceptionAddress);
 
 	if (einfo->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
 	{
@@ -121,28 +137,55 @@ LONG WINAPI onUnhandledException(EXCEPTION_POINTERS* exception)
 	//exception info to be placed in the dump
 	MINIDUMP_EXCEPTION_INFORMATION meinfo = {threadId, exception, TRUE};
 
-	//create file where dump will be placed
-	char *mname = nullptr;
-	char buffer[MAX_PATH + 1];
-	HMODULE hModule = nullptr;
-	GetModuleFileNameA(hModule, buffer, MAX_PATH);
-	mname = strrchr(buffer, '\\');
-	if (mname != 0)
-		mname++;
-	else
-		mname = buffer;
+#ifdef CREATE_MEMORY_DUMP
+	createMemoryDump(&meinfo);
+#endif
 
-	strcat(mname, "_crashinfo.dmp");
-	HANDLE dfile = CreateFileA(mname, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, CREATE_ALWAYS, 0, 0);
-	logGlobal->error("Crash info will be put in %s", mname);
-	MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), dfile, MiniDumpWithDataSegs, &meinfo, 0, 0);
-	MessageBoxA(0, "VCMI has crashed. We are sorry. File with information about encountered problem has been created.", "VCMI Crashhandler", MB_OK | MB_ICONERROR);
 	return EXCEPTION_EXECUTE_HANDLER;
 }
 #endif
 
+#ifdef USE_ON_TERMINATE
+[[noreturn]] static void onTerminate()
+{
+	logGlobal->error("Disaster happened.");
+	try
+	{
+		std::exception_ptr eptr{std::current_exception()};
+		if (eptr)
+		{
+			std::rethrow_exception(eptr);
+		}
+		else
+		{
+			logGlobal->error("...but no current exception found!");
+		}
+	}
+	catch (const std::exception& exc)
+	{
+		logGlobal->error("Reason: %s", exc.what());
+	}
+	catch (...)
+	{
+		logGlobal->error("Reason: unknown exception!");
+	}
 
-void CConsoleHandler::setColor(EConsoleTextColor::EConsoleTextColor color)
+	logGlobal->error("Call stack information:");
+	std::stringstream stream;
+	stream << boost::stacktrace::stacktrace();
+	logGlobal->error("%s", stream.str());
+
+#ifdef CREATE_MEMORY_DUMP
+	const DWORD threadId = ::GetCurrentThreadId();
+	logGlobal->error("Thread ID: %d", threadId);
+
+	createMemoryDump(nullptr);
+#endif
+	std::abort();
+}
+#endif
+
+void CConsoleHandler::setColor(EConsoleTextColor color)
 {
 	TColor colorCode;
 	switch(color)
@@ -176,53 +219,64 @@ void CConsoleHandler::setColor(EConsoleTextColor::EConsoleTextColor color)
 		break;
 	}
 #ifdef VCMI_WINDOWS
-    SetConsoleTextAttribute(handleOut, colorCode);
+	SetConsoleTextAttribute(handleOut, colorCode);
 	if (color == EConsoleTextColor::DEFAULT)
 		colorCode = defErrColor;
 	SetConsoleTextAttribute(handleErr, colorCode);
 #else
-    std::cout << colorCode;
+	std::cout << colorCode;
 #endif
 }
 
 int CConsoleHandler::run()
 {
-	setThreadName("CConsoleHandler::run");
+	setThreadName("consoleHandler");
 	//disabling sync to make in_avail() work (othervice always returns 0)
 	{
-		TLockGuard _(smx);
+		std::lock_guard guard(smx);
 		std::ios::sync_with_stdio(false);
 	}
 	std::string buffer;
 
 	while ( std::cin.good() )
 	{
-#ifndef VCMI_WINDOWS
+#ifndef _MSC_VER
 		//check if we have some unreaded symbols
 		if (std::cin.rdbuf()->in_avail())
 		{
 			if ( getline(std::cin, buffer).good() )
-				if ( cb && *cb )
-					(*cb)(buffer);
+				if ( cb )
+					cb(buffer, false);
 		}
-		else
-			boost::this_thread::sleep(boost::posix_time::millisec(100));
 
-		boost::this_thread::interruption_point();
+		std::unique_lock guard(shutdownMutex);
+		shutdownVariable.wait_for(guard, std::chrono::seconds(1));
+
+		if (shutdownPending)
+			return -1;
 #else
 		std::getline(std::cin, buffer);
-		if ( cb && *cb )
-			(*cb)(buffer);
+		if ( cb )
+			cb(buffer, false);
 #endif
 	}
 	return -1;
 }
-CConsoleHandler::CConsoleHandler() : thread(nullptr)
+
+CConsoleHandler::CConsoleHandler()
+	:CConsoleHandler(std::function<void(const std::string &, bool)>{})
+{}
+
+CConsoleHandler::CConsoleHandler(const std::function<void(const std::string &, bool)> & callback)
+	:cb(callback)
 {
 #ifdef VCMI_WINDOWS
 	handleIn = GetStdHandle(STD_INPUT_HANDLE);
 	handleOut = GetStdHandle(STD_OUTPUT_HANDLE);
 	handleErr = GetStdHandle(STD_ERROR_HANDLE);
+
+	// all strings in vcmi are in UTF-8, while console uses system codepage by default
+	SetConsoleOutputCP(CP_UTF8);
 
 	CONSOLE_SCREEN_BUFFER_INFO csbi;
 	GetConsoleScreenBufferInfo(handleOut,&csbi);
@@ -230,37 +284,40 @@ CConsoleHandler::CConsoleHandler() : thread(nullptr)
 
 	GetConsoleScreenBufferInfo(handleErr, &csbi);
 	defErrColor = csbi.wAttributes;
-#ifndef _DEBUG
-	SetUnhandledExceptionFilter(onUnhandledException);
-#endif
 #else
 	defColor = "\x1b[0m";
 #endif
-	cb = new std::function<void(const std::string &)>;
+
+#ifdef USE_UNHANDLED_EXCEPTION_FILTER
+	SetUnhandledExceptionFilter(onUnhandledException);
+#endif
+
+#ifdef USE_ON_TERMINATE
+	std::set_terminate(onTerminate);
+#endif
 }
+
 CConsoleHandler::~CConsoleHandler()
 {
 	logGlobal->info("Killing console...");
 	end();
-	delete cb;
 	logGlobal->info("Killing console... done!");
 }
 void CConsoleHandler::end()
 {
-	if (thread)
+	if (thread.joinable())
 	{
-#ifndef VCMI_WINDOWS
-		thread->interrupt();
+#ifndef _MSC_VER
+		shutdownPending = true;
+		shutdownVariable.notify_all();
 #else
-		TerminateThread(thread->native_handle(),0);
+		TerminateThread(thread.native_handle(),0);
 #endif
-		thread->join();
-		delete thread;
-		thread = nullptr;
+		thread.join();
 	}
 }
 
 void CConsoleHandler::start()
 {
-	thread = new boost::thread(std::bind(&CConsoleHandler::run,console));
+	thread = std::thread(std::bind(&CConsoleHandler::run, this));
 }

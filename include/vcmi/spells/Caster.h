@@ -10,13 +10,18 @@
 
 #pragma once
 
+#include "../../../lib/battle/BattleHex.h"
+
 class PlayerColor;
-struct MetaString;
+class MetaString;
 class ServerCallback;
+class CGHeroInstance;
+class SpellSchool;
 
 namespace battle
 {
 	class Unit;
+	using Units = boost::container::small_vector<const Unit *, 4>;
 }
 
 namespace spells
@@ -34,7 +39,7 @@ public:
 	/// returns level on which given spell would be cast by this(0 - none, 1 - basic etc);
 	/// caster may not know this spell at all
 	/// optionally returns number of selected school by arg - 0 - air magic, 1 - fire magic, 2 - water magic, 3 - earth magic
-	virtual int32_t getSpellSchoolLevel(const Spell * spell, int32_t * outSelectedSchool = nullptr) const = 0;
+	virtual int32_t getSpellSchoolLevel(const Spell * spell, SpellSchool * outSelectedSchool = nullptr) const = 0;
 
 	///default spell school level for effect calculation
 	virtual int32_t getEffectLevel(const Spell * spell) const = 0;
@@ -54,15 +59,23 @@ public:
 	///damage/heal override(ignores spell configuration, effect level and effect power)
 	virtual int64_t getEffectValue(const Spell * spell) const = 0;
 
+	///maximal range of effect
+	virtual int64_t getEffectRange(const Spell * spell) const = 0;
+
 	virtual PlayerColor getCasterOwner() const = 0;
 
-	///only name substitution
-	virtual void getCasterName(MetaString & text) const = 0;
+	///returns text ID for caster's name
+	virtual std::string getCasterNameTextID() const = 0;
 
 	///full default text
-	virtual void getCastDescription(const Spell * spell, const std::vector<const battle::Unit *> & attacked, MetaString & text) const = 0;
+	virtual void getCastDescription(const Spell * spell, const battle::Units & attacked, MetaString & text) const = 0;
 
 	virtual void spendMana(ServerCallback * server, const int32_t spellCost) const = 0;
+
+	virtual int32_t manaLimit() const = 0;
+	
+	///used to identify actual hero caster
+	virtual const CGHeroInstance * getHeroCaster() const = 0;
 };
 
 }

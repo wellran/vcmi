@@ -12,45 +12,53 @@
 
 #ifdef VCMI_WINDOWS
 	#include <windows.h>
-#elif !defined(VCMI_APPLE) && !defined(VCMI_FREEBSD) && !defined(VCMI_HURD)
+#elif defined(VCMI_HAIKU)
+	#include <OS.h>
+#elif !defined(VCMI_APPLE) && !defined(VCMI_FREEBSD) && \
+	!defined(VCMI_HURD) && !defined(VCMI_OPENBSD)
 	#include <sys/prctl.h>
 #endif
 
-CThreadHelper::CThreadHelper(std::vector<std::function<void()> > *Tasks, int Threads)
-{
-	currentTask = 0; amount = (int)Tasks->size();
-	tasks = Tasks;
-	threads = Threads;
-}
-void CThreadHelper::run()
-{
-	boost::thread_group grupa;
-	for(int i=0;i<threads;i++)
-		grupa.create_thread(std::bind(&CThreadHelper::processTasks,this));
-	grupa.join_all();
+#ifndef ENABLE_MINIMAL_LIB
+	#include <tbb/task_arena.h>
+#endif
+#include <sstream>
 
-	//thread group deletes threads, do not free manually
-}
-void CThreadHelper::processTasks()
+static thread_local std::string threadNameForLogging;
+
+static std::string threadIdToString(std::thread::id id)
 {
-	while(true)
-	{
-		int pom;
-		{
-			boost::unique_lock<boost::mutex> lock(rtinm);
-			if((pom = currentTask) >= amount)
-				break;
-			else
-				++currentTask;
-		}
-		(*tasks)[pom]();
-	}
+	std::ostringstream stream;
+	stream << id;
+	return stream.str();
 }
 
-// set name for this thread.
-// NOTE: on *nix string will be trimmed to 16 symbols
+std::string getThreadName()
+{
+	if (!threadNameForLogging.empty())
+		return threadNameForLogging;
+
+#ifndef ENABLE_MINIMAL_LIB
+	int tbbIndex = tbb::this_task_arena::current_thread_index();
+
+	if (tbbIndex < 0)
+		return threadIdToString(std::this_thread::get_id());
+	else
+		return "TBB worker " + std::to_string(tbbIndex);
+#else
+	return threadIdToString(std::this_thread::get_id());
+#endif
+}
+
+void setThreadNameLoggingOnly(const std::string &name)
+{
+	threadNameForLogging = name;
+}
+
 void setThreadName(const std::string &name)
 {
+	threadNameForLogging = name;
+
 #ifdef VCMI_WINDOWS
 #ifndef __GNUC__
 	//follows http://msdn.microsoft.com/en-us/library/xcb2z8hs.aspx
@@ -82,7 +90,15 @@ void setThreadName(const std::string &name)
 //not supported
 #endif
 
-#elif defined(__linux__)
+#elif defined(VCMI_APPLE)
+	pthread_setname_np(name.c_str());
+#elif defined(VCMI_FREEBSD)
+	pthread_setname_np(pthread_self(), name.c_str());
+#elif defined(VCMI_HAIKU)
+	rename_thread(find_thread(NULL), name.c_str());
+#elif defined(VCMI_UNIX)
 	prctl(PR_SET_NAME, name.c_str(), 0, 0, 0);
+#else
+	#error "Failed to find method to set thread name on this system. Please provide one (or disable this line if you just want code to compile)"
 #endif
 }

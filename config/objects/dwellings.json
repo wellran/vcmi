@@ -2,6 +2,7 @@
 	"creatureGeneratorCommon" : {
 		"index" :17,
 		"handler": "dwelling",
+		"lastReservedIndex" : 79,
 		"base" : {
 			"base" : {
 				"visitableFrom" : [ "---", "+++", "+++" ],
@@ -64,6 +65,7 @@
 			},
 			"airConflux": {
 				"index": 7,
+				"bannedForRandomDwelling" : true,
 				"creatures": [["airElemental"]],
 				"sounds": {
 					"ambient": ["LOOPAIR"]
@@ -106,6 +108,7 @@
 			},
 			"earthConflux": {
 				"index": 13,
+				"bannedForRandomDwelling" : true,
 				"creatures": [["earthElemental"]],
 				"sounds": {
 					"ambient": ["LOOPEART"]
@@ -127,6 +130,7 @@
 			},
 			"fireConflux": {
 				"index": 16,
+				"bannedForRandomDwelling" : true,
 				"creatures": [["fireElemental"]],
 				"sounds": {
 					"ambient": ["LOOPFIRE"]
@@ -344,6 +348,7 @@
 			},
 			"waterConflux": {
 				"index": 47,
+				"bannedForRandomDwelling" : true,
 				"creatures": [["waterElemental"]],
 				"sounds": {
 					"ambient": ["LOOPFOUN"]
@@ -372,6 +377,7 @@
 			},
 			"unicornGladeBig": {
 				"index": 51,
+				"bannedForRandomDwelling" : true,
 				"creatures": [["unicorn"]],
 				"sounds": {
 					"ambient": ["LOOPUNIC"]
@@ -528,9 +534,16 @@
 	"creatureGeneratorSpecial" : {
 		"index" :20,
 		"handler": "dwelling",
+		"lastReservedIndex" : 1,
+		"base" : {
+			"base" : {
+				"visitableFrom" : [ "---", "+++", "+++" ]
+			}
+		},
 		"types" : {
 			"elementalConflux" : {
 				"index" : 0,
+				"bannedForRandomDwelling" : true,
 				"creatures" : [ // 4 separate "levels" to give them separate growth
 					[ "airElemental" ],
 					[ "waterElemental" ],

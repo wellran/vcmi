@@ -10,26 +10,43 @@
 #include "StdInc.h"
 #include "CPlayerBattleCallback.h"
 #include "../CStack.h"
-#include "../CGameState.h"
+#include "../gameState/InfoAboutArmy.h"
+#include "../callback/CallbackDefines.h"
+
+
+CPlayerBattleCallback::CPlayerBattleCallback(const IBattleInfo * battle, PlayerColor player):
+	battle(battle),
+	player(player)
+{
+
+}
+
+const IBattleInfo * CPlayerBattleCallback::getBattle() const
+{
+	return battle;
+}
+
+std::optional<PlayerColor> CPlayerBattleCallback::getPlayerID() const
+{
+	return player;
+}
 
 bool CPlayerBattleCallback::battleCanFlee() const
 {
-	RETURN_IF_NOT_BATTLE(false);
-	ASSERT_IF_CALLED_WITH_PLAYER
-			return CBattleInfoEssentials::battleCanFlee(*player);
+	THROW_IF_NOT_BATTLE();
+	THROW_IF_CALLED_WITH_PLAYER();
+	return CBattleInfoEssentials::battleCanFlee(getPlayerID().value());
 }
 
 TStacks CPlayerBattleCallback::battleGetStacks(EStackOwnership whose, bool onlyAlive) const
 {
 	if(whose != MINE_AND_ENEMY)
-	{
-		ASSERT_IF_CALLED_WITH_PLAYER
-	}
+		THROW_IF_CALLED_WITH_PLAYER();
 
-	return battleGetStacksIf([=](const CStack * s){
+	return battleGetStacksIf([&](const CStack * s){
 		const bool ownerMatches = (whose == MINE_AND_ENEMY)
-								|| (whose == ONLY_MINE && s->owner == player)
-								|| (whose == ONLY_ENEMY && s->owner != player);
+								|| (whose == ONLY_MINE && s->unitOwner() == getPlayerID())
+								|| (whose == ONLY_ENEMY && s->unitOwner() != getPlayerID());
 
 		return ownerMatches && s->isValidTarget(!onlyAlive);
 	});
@@ -37,9 +54,9 @@ TStacks CPlayerBattleCallback::battleGetStacks(EStackOwnership whose, bool onlyA
 
 int CPlayerBattleCallback::battleGetSurrenderCost() const
 {
-	RETURN_IF_NOT_BATTLE(-3)
-			ASSERT_IF_CALLED_WITH_PLAYER
-			return CBattleInfoCallback::battleGetSurrenderCost(*player);
+	THROW_IF_NOT_BATTLE();
+	THROW_IF_CALLED_WITH_PLAYER();
+	return CBattleInfoCallback::battleGetSurrenderCost(getPlayerID().value());
 }
 
 const CGHeroInstance * CPlayerBattleCallback::battleGetMyHero() const
@@ -49,6 +66,6 @@ const CGHeroInstance * CPlayerBattleCallback::battleGetMyHero() const
 
 InfoAboutHero CPlayerBattleCallback::battleGetEnemyHero() const
 {
-	return battleGetHeroInfo(!battleGetMySide());
+	return battleGetHeroInfo(otherSide(battleGetMySide()));
 }
 

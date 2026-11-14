@@ -13,47 +13,109 @@
 
 #include "../../lib/FunctionList.h"
 #include "../../lib/GameConstants.h"
+#include "../../lib/rmg/CRmgTemplate.h"
+#include "../gui/InterfaceObjectConfigurable.h"
+
+#include <optional>
 
 class CMapGenOptions;
+
 class CToggleButton;
 class CLabel;
 class CLabelGroup;
+class CSlider;
+class CPicture;
+class CTextInput;
+class TransparentFilledRectangle;
 
-class RandomMapTab : public CIntObject
+class RandomMapTab : public InterfaceObjectConfigurable
 {
 public:
 	RandomMapTab();
 
 	void updateMapInfoByHost();
 	void setMapGenOptions(std::shared_ptr<CMapGenOptions> opts);
+	void setTemplate(const CRmgTemplate *);
 
-	CFunctionList<void(std::shared_ptr<CMapInfo>, std::shared_ptr<CMapGenOptions>)> mapInfoChanged;
+	void saveOptions(const CMapGenOptions & options);
+	void loadOptions();
+	CMapGenOptions & obtainMapGenOptions() {return *mapGenOptions;}
+	bool isCustomMapSizeMode() const { return customMapSizeMode; }
+	size_t getCustomMapSizeIconFrame() const;
+
+	CFunctionList<void(std::shared_ptr<CMapGenOptions>)> mapGenOptionsChanged;
 
 private:
-	void addButtonsWithRandToGroup(CToggleGroup * group, const std::vector<std::string> & defs, int startIndex, int endIndex, int btnWidth, int helpStartIndex, int helpRandIndex, int randIndex = -1, bool animIdfromBtnId = true) const;
-	void addButtonsToGroup(CToggleGroup * group, const std::vector<std::string> & defs, int startIndex, int endIndex, int btnWidth, int helpStartIndex, bool animIdfromBtnId = true) const;
-	void deactivateButtonsFrom(CToggleGroup * group, int startId);
-	void validatePlayersCnt(int playersCnt);
-	void validateCompOnlyPlayersCnt(int compOnlyPlayersCnt);
-	std::vector<int> getPossibleMapSizes();
+	void deactivateButtonsFrom(CToggleGroup & group, const std::set<int> & allowed);
+	std::vector<int> getStandardMapSizes() const;
+	std::optional<int> getMapSizeForButtonId(int btnId) const;
+	bool isCustomSizeButtonId(int btnId) const;
+	void onToggleMapSize(int btnId);
+	void extendRoadButtonHitAreas();
 
-
-	std::shared_ptr<CPicture> background;
-	std::shared_ptr<CLabel> labelHeadlineBig;
-	std::shared_ptr<CLabel> labelHeadlineSmall;
-
-	std::shared_ptr<CLabel> labelMapSize;
-	std::shared_ptr<CToggleGroup> groupMapSize;
-	std::shared_ptr<CToggleButton> buttonTwoLevels;
-
-	std::shared_ptr<CLabelGroup> labelGroupForOptions;
-	std::shared_ptr<CToggleGroup> groupMaxPlayers;
-	std::shared_ptr<CToggleGroup> groupMaxTeams;
-	std::shared_ptr<CToggleGroup> groupCompOnlyPlayers;
-	std::shared_ptr<CToggleGroup> groupCompOnlyTeams;
-	std::shared_ptr<CToggleGroup> groupWaterContent;
-	std::shared_ptr<CToggleGroup> groupMonsterStrength;
-	std::shared_ptr<CButton> buttonShowRandomMaps;
 	std::shared_ptr<CMapGenOptions> mapGenOptions;
-	std::shared_ptr<CMapInfo> mapInfo;
+	
+	//options allowed - need to store as impact each other
+	std::set<int> playerCountAllowed;
+	std::set<int> playerTeamsAllowed;
+	std::set<int> compCountAllowed;
+	std::set<int> compTeamsAllowed;
+	bool customMapSizeMode = false;
+
+	int templateIndex;
+};
+
+class TeamAlignmentsWidget: public InterfaceObjectConfigurable
+{
+public:
+	TeamAlignmentsWidget(RandomMapTab & randomMapTab);
+	
+private:
+	void checkTeamCount();
+
+	std::shared_ptr<CFilledTexture> background;
+	std::shared_ptr<CLabelGroup> labels;
+	std::shared_ptr<CButton> buttonOk;
+	std::shared_ptr<CButton> buttonCancel;
+	std::vector<std::shared_ptr<CToggleGroup>> players;
+	std::vector<std::shared_ptr<CIntObject>> placeholders;
+};
+
+class TeamAlignments: public CWindowObject
+{
+	std::shared_ptr<TeamAlignmentsWidget> widget;
+public:
+	TeamAlignments(RandomMapTab & randomMapTab);
+};
+
+class RandomMapTab;
+
+class SetSizeWindow: public CWindowObject
+{
+	std::shared_ptr<FilledTexturePlayerColored> backgroundTexture;
+	std::vector<std::shared_ptr<CLabel>> titles;
+	std::shared_ptr<CButton> buttonOk;
+	std::shared_ptr<CButton> buttonCancel;
+	std::shared_ptr<CButton> buttonMapLayers;
+	std::vector<std::shared_ptr<CLabel>> sizeLabels;
+
+	std::vector<std::shared_ptr<CTextInput>> numInputs;
+	std::vector<std::shared_ptr<TransparentFilledRectangle>> rectangles;
+public:
+	SetSizeWindow(RandomMapTab & randomMapTab, int3 initSize, const CRmgTemplate * mapTemplate, std::function<void(int3)> cb);
+};
+
+class MapLayerSelection : public CWindowObject
+{
+	std::shared_ptr<CButton> buttonOk;
+	std::shared_ptr<CButton> buttonCancel;
+	std::shared_ptr<FilledTexturePlayerColored> backgroundTexture;
+	std::vector<std::shared_ptr<CLabel>> titles;
+	std::vector<std::shared_ptr<CLabel>> levelLabels;
+	std::vector<std::shared_ptr<CLabel>> layerLabels;
+	std::vector<std::shared_ptr<CButton>> prevButtons;
+	std::vector<std::shared_ptr<CButton>> nextButtons;
+	std::vector<MapLayerId> selectedLayers;
+public:
+	MapLayerSelection(RandomMapTab & randomMapTab, int initialLevels);
 };

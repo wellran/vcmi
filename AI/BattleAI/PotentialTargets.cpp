@@ -10,58 +10,55 @@
 #include "StdInc.h"
 #include "PotentialTargets.h"
 #include "../../lib/CStack.h"//todo: remove
+#include "../../lib/mapObjects/CGTownInstance.h"
 
-PotentialTargets::PotentialTargets(const battle::Unit * attacker, const HypotheticBattle * state)
+PotentialTargets::PotentialTargets(
+	const battle::Unit * attacker,
+	DamageCache & damageCache,
+	std::shared_ptr<HypotheticBattle> state)
 {
-	auto attIter = state->stackStates.find(attacker->unitId());
-	const battle::Unit * attackerInfo = (attIter == state->stackStates.end()) ? attacker : attIter->second.get();
-
+	auto attackerInfo = state->battleGetUnitByID(attacker->unitId());
 	auto reachability = state->getReachability(attackerInfo);
-	auto avHexes = state->battleGetAvailableHexes(reachability, attackerInfo);
+	auto avHexes = state->battleGetAvailableHexes(reachability, attackerInfo, false);
 
 	//FIXME: this should part of battleGetAvailableHexes
-	bool forceTarget = false;
-	const battle::Unit * forcedTarget = nullptr;
-	BattleHex forcedHex;
+	bool isBerserk = attackerInfo->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE);
+	ForcedAction forcedAction = {};
 
-	if(attackerInfo->hasBonusOfType(Bonus::ATTACKS_NEAREST_CREATURE))
-	{
-		forceTarget = true;
-		auto nearest = state->getNearestStack(attackerInfo);
-
-		if(nearest.first != nullptr)
-		{
-			forcedTarget = nearest.first;
-			forcedHex = nearest.second;
-		}
-	}
+	if(isBerserk)
+		forcedAction = state->getBerserkForcedAction(attackerInfo);
 
 	auto aliveUnits = state->battleGetUnitsIf([=](const battle::Unit * unit)
 	{
-		return unit->isValidTarget() && unit->unitId() != attackerInfo->unitId();
+		return unit->isValidTarget() && !unit->isInvincible() && unit->unitId() != attackerInfo->unitId();
 	});
 
 	for(auto defender : aliveUnits)
 	{
-		if(!forceTarget && !state->battleMatchOwner(attackerInfo, defender))
+		if(!isBerserk && !state->battleMatchOwner(attackerInfo, defender))
 			continue;
 
-		auto GenerateAttackInfo = [&](bool shooting, BattleHex hex) -> AttackPossibility
+		auto GenerateAttackInfo = [&](bool shooting, const BattleHex & hex) -> AttackPossibility
 		{
-			auto bai = BattleAttackInfo(attackerInfo, defender, shooting);
+			int distance = hex.isValid() ? reachability.distances[hex.toInt()] : 0;
+			auto bai = BattleAttackInfo(attackerInfo, defender, distance, shooting);
 
-			if(hex.isValid() && !shooting)
-				bai.chargedFields = reachability.distances[hex];
-
-			return AttackPossibility::evaluate(bai, hex, state);
+			return AttackPossibility::evaluate(bai, hex, damageCache, state);
 		};
 
-		if(forceTarget)
+		if(isBerserk)
 		{
-			if(forcedTarget && defender->unitId() == forcedTarget->unitId())
-				possibleAttacks.push_back(GenerateAttackInfo(false, forcedHex));
+			bool isActionAttack = forcedAction.type == EActionType::WALK_AND_ATTACK || forcedAction.type == EActionType::SHOOT;
+			if (isActionAttack && defender->unitId() == forcedAction.target->unitId())
+			{
+				bool rangeAttack = forcedAction.type == EActionType::SHOOT;
+				BattleHex hex = forcedAction.type == EActionType::WALK_AND_ATTACK ? forcedAction.position : BattleHex::INVALID;
+				possibleAttacks.push_back(GenerateAttackInfo(rangeAttack, hex));
+			}
 			else
+			{
 				unreachableEnemies.push_back(defender);
+			}
 		}
 		else if(state->battleCanShoot(attackerInfo, defender->getPosition()))
 		{
@@ -69,9 +66,10 @@ PotentialTargets::PotentialTargets(const battle::Unit * attacker, const Hypothet
 		}
 		else
 		{
-			for(BattleHex hex : avHexes)
+			// a blocked war machine, e.g. Ballista, can neither shoot nor fight in melee
+			for(const BattleHex & hex : avHexes)
 			{
-				if(!CStack::isMeleeAttackPossible(attackerInfo, defender, hex))
+				if(!attackerInfo->isMeleeAttacker() || !state->isMeleeAttackPossible(attackerInfo, defender, hex))
 					continue;
 
 				auto bai = GenerateAttackInfo(false, hex);
@@ -84,38 +82,24 @@ PotentialTargets::PotentialTargets(const battle::Unit * attacker, const Hypothet
 		}
 	}
 
-	boost::sort(possibleAttacks, [](const AttackPossibility & lhs, const AttackPossibility & rhs) -> bool
+	std::ranges::sort(possibleAttacks, [](const AttackPossibility & lhs, const AttackPossibility & rhs) -> bool
 	{
-		if(lhs.collateralDamage > rhs.collateralDamage)
-			return false;
-		if(lhs.collateralDamage < rhs.collateralDamage)
-			return true;
-		return (lhs.damageDealt + lhs.shootersBlockedDmg - lhs.damageReceived > rhs.damageDealt + rhs.shootersBlockedDmg - rhs.damageReceived);
+		return lhs.damageDiff() > rhs.damageDiff();
 	});
-
-	if (!possibleAttacks.empty())
-	{
-		auto &bestAp = possibleAttacks[0];
-
-		logGlobal->info("Battle AI best: %s -> %s at %d from %d, affects %d units: %lld %lld %lld %lld",
-			bestAp.attack.attacker->unitType()->identifier,
-			state->battleGetUnitByPos(bestAp.dest)->unitType()->identifier,
-			(int)bestAp.dest, (int)bestAp.from, (int)bestAp.affectedUnits.size(),
-			bestAp.damageDealt, bestAp.damageReceived, bestAp.collateralDamage, bestAp.shootersBlockedDmg);
-	}
 }
 
 int64_t PotentialTargets::bestActionValue() const
 {
 	if(possibleAttacks.empty())
 		return 0;
+
 	return bestAction().attackValue();
 }
 
-AttackPossibility PotentialTargets::bestAction() const
+const AttackPossibility & PotentialTargets::bestAction() const
 {
 	if(possibleAttacks.empty())
 		throw std::runtime_error("No best action, since we don't have any actions");
-	return possibleAttacks[0];
-	//return *vstd::maxElementByFun(possibleAttacks, [](const AttackPossibility &ap) { return ap.attackValue(); } );
+
+	return possibleAttacks.front();
 }

@@ -14,7 +14,8 @@
 class float3
 {
 public:
-	float x, y;
+	float x;
+	float y;
 	si32 z;
 
 	float3() : x(0), y(0), z(0) {}
@@ -24,16 +25,16 @@ public:
 
 	// returns float3 with coordinates increased by corresponding coordinate of given float3
 	float3 operator+(const float3 & i) const { return float3(x + i.x, y + i.y, z + i.z); }
-	// returns float3 with coordinates increased by given numer
+	// returns float3 with coordinates increased by given number
 	float3 operator+(const float i) const { return float3(x + i, y + i, z + (si32)i); }
 	// returns float3 with coordinates decreased by corresponding coordinate of given float3
 	float3 operator-(const float3 & i) const { return float3(x - i.x, y - i.y, z - i.z); }
-	// returns float3 with coordinates decreased by given numer
+	// returns float3 with coordinates decreased by given number
 	float3 operator-(const float i) const { return float3(x - i, y - i, z - (si32)i); }
 
-	// returns float3 with plane coordinates decreased by given numer
+	// returns float3 with plane coordinates decreased by given number
 	float3 operator*(const float i) const {return float3(x * i, y * i, z);}
-	// returns float3 with plane coordinates decreased by given numer
+	// returns float3 with plane coordinates decreased by given number
 	float3 operator/(const float i) const {return float3(x / i, y / i, z);}
 
 	// returns opposite position
@@ -110,32 +111,11 @@ public:
 		return *this;
 	}
 
-	bool operator==(const float3 & i) const { return (x == i.x) && (y == i.y) && (z == i.z); }
-	bool operator!=(const float3 & i) const { return (x != i.x) || (y != i.y) || (z != i.z); }
-
-	bool operator<(const float3 & i) const
-	{
-		if (z<i.z)
-			return true;
-		if (z>i.z)
-			return false;
-		if (y<i.y)
-			return true;
-		if (y>i.y)
-			return false;
-		if (x<i.x)
-			return true;
-		if (x>i.x)
-			return false;
-
-		return false;
-	}
-
 	std::string toString() const
 	{
-		return	"(" + boost::lexical_cast<std::string>(x) +
-				" " + boost::lexical_cast<std::string>(y) +
-				" " + boost::lexical_cast<std::string>(z) + ")";
+		return	"(" + std::to_string(x) +
+				" " + std::to_string(y) +
+				" " + std::to_string(z) + ")";
 	}
 
 	bool valid() const

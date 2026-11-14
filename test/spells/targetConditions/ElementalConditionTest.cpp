@@ -11,6 +11,8 @@
 
 #include "TargetConditionItemFixture.h"
 
+#include "../../../lib/GameLibrary.h"
+
 namespace test
 {
 using namespace ::spells;
@@ -20,25 +22,27 @@ class ElementalConditionTest : public TargetConditionItemTest, public WithParamI
 {
 public:
 	bool isPositive;
+
 	void setDefaultExpectations()
 	{
-		EXPECT_CALL(unitMock, getAllBonuses(_, _, _, _)).Times(AtLeast(1));
+		EXPECT_CALL(unitMock, getAllBonuses(_, _)).Times(AtLeast(1));
 		EXPECT_CALL(unitMock, getTreeVersion()).Times(AtLeast(0));
 
-		std::vector<Bonus::BonusType> immunityList =
+		EXPECT_CALL(mechanicsMock, getSpell()).Times(AtLeast(0)).WillRepeatedly(Return(&spellMock));
+		EXPECT_CALL(spellMock, forEachSchool(NotNull())).Times(AtLeast(0)).WillRepeatedly([](const spells::Spell::SchoolCallback & cb)
 		{
-			Bonus::AIR_IMMUNITY,
-			Bonus::FIRE_IMMUNITY,
-		};
+			bool stop = false;
+			cb(SpellSchool::AIR, stop);
+			cb(SpellSchool::FIRE, stop);
+		});
 
-		EXPECT_CALL(mechanicsMock, getElementalImmunity()).Times(AtLeast(1)).WillRepeatedly(Return(immunityList));
 		EXPECT_CALL(mechanicsMock, isPositiveSpell()).WillRepeatedly(Return(isPositive));
 	}
 
 	void SetUp() override
 	{
 		TargetConditionItemTest::SetUp();
-		subject = TargetConditionItemFactory::getDefault()->createElemental();
+		subject = TargetConditionItemFactory::create(*LIBRARY->identifiers())->createElemental();
 
 		isPositive = GetParam();
 	}
@@ -54,15 +58,31 @@ TEST_P(ElementalConditionTest, ReceptiveIfNoBonus)
 TEST_P(ElementalConditionTest, ImmuneIfBonusMatches)
 {
 	setDefaultExpectations();
-	unitBonuses.addNewBonus(std::make_shared<Bonus>(Bonus::ONE_BATTLE, Bonus::AIR_IMMUNITY, Bonus::SPELL_EFFECT, 0, 0, 0));
+	unitBonuses.addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::SPELL_SCHOOL_IMMUNITY, BonusSource::SPELL_EFFECT, 0, BonusSourceID(), BonusSubtypeID(SpellSchool::AIR)));
 
 	EXPECT_FALSE(subject->isReceptive(&mechanicsMock, &unitMock));
 }
 
-TEST_P(ElementalConditionTest, DependsOnPositivness)
+TEST_P(ElementalConditionTest, NotImmuneIfBonusMismatches)
 {
 	setDefaultExpectations();
-	unitBonuses.addNewBonus(std::make_shared<Bonus>(Bonus::ONE_BATTLE, Bonus::AIR_IMMUNITY, Bonus::SPELL_EFFECT, 0, 0, 1));
+	unitBonuses.addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::SPELL_SCHOOL_IMMUNITY, BonusSource::SPELL_EFFECT, 0, BonusSourceID(), BonusSubtypeID(SpellSchool::WATER)));
+
+	EXPECT_TRUE(subject->isReceptive(&mechanicsMock, &unitMock));
+}
+
+TEST_P(ElementalConditionTest, DependsOnPositivnessSpecificSchool)
+{
+	setDefaultExpectations();
+	unitBonuses.addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::NEGATIVE_EFFECTS_IMMUNITY, BonusSource::SPELL_EFFECT, 0, BonusSourceID(), BonusSubtypeID(SpellSchool::AIR)));
+
+	EXPECT_EQ(isPositive, subject->isReceptive(&mechanicsMock, &unitMock));
+}
+
+TEST_P(ElementalConditionTest, DependsOnPositivnessAnySchool)
+{
+	setDefaultExpectations();
+	unitBonuses.addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::NEGATIVE_EFFECTS_IMMUNITY, BonusSource::SPELL_EFFECT, 0, BonusSourceID(), BonusSubtypeID(SpellSchool::ANY)));
 
 	EXPECT_EQ(isPositive, subject->isReceptive(&mechanicsMock, &unitMock));
 }
@@ -70,13 +90,13 @@ TEST_P(ElementalConditionTest, DependsOnPositivness)
 TEST_P(ElementalConditionTest, ImmuneIfBothBonusesPresent)
 {
 	setDefaultExpectations();
-	unitBonuses.addNewBonus(std::make_shared<Bonus>(Bonus::ONE_BATTLE, Bonus::AIR_IMMUNITY, Bonus::SPELL_EFFECT, 0, 0, 0));
-	unitBonuses.addNewBonus(std::make_shared<Bonus>(Bonus::ONE_BATTLE, Bonus::AIR_IMMUNITY, Bonus::SPELL_EFFECT, 0, 0, 1));
+	unitBonuses.addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::SPELL_SCHOOL_IMMUNITY, BonusSource::SPELL_EFFECT, 0, BonusSourceID(), BonusSubtypeID(SpellSchool::AIR)));
+	unitBonuses.addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::NEGATIVE_EFFECTS_IMMUNITY, BonusSource::SPELL_EFFECT, 0, BonusSourceID(), BonusSubtypeID(SpellSchool::AIR)));
 
 	EXPECT_FALSE(subject->isReceptive(&mechanicsMock, &unitMock));
 }
 
-INSTANTIATE_TEST_CASE_P
+INSTANTIATE_TEST_SUITE_P
 (
 	ByPositiveness,
 	ElementalConditionTest,

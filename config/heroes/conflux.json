@@ -13,16 +13,17 @@
 			"base" : {
 				"limiters" : [
 					{
-						"parameters" : [ "psychicElemental", true ],
-						"type" : "CREATURE_TYPE_LIMITER"
+						"type" : "CREATURE_TYPE_LIMITER",
+						"creature" : "psychicElemental",
+						"includeUpgrades" : true
 					}
 				],
 				"type" : "PRIMARY_SKILL",
 				"val" : 3
 			},
 			"bonuses" : {
-				"attack" : { "subtype" : "primSkill.attack" },
-				"defence" : { "subtype" : "primSkill.defence" }
+				"attack" : { "subtype" : "attack" },
+				"defence" : { "subtype" : "defence" }
 			}
 		}
 	},
@@ -40,23 +41,25 @@
 			"base" : {
 				"limiters" : [
 					{
-						"parameters" : [ "earthElemental", true ],
-						"type" : "CREATURE_TYPE_LIMITER"
+						"type" : "CREATURE_TYPE_LIMITER",
+						"creature" : "earthElemental",
+						"includeUpgrades" : true
 					}
 				]
 			},
 			"bonuses" : {
-				"health" : {
-					"type" : "STACK_HEALTH",
+				"damage" : {
+					"type" : "CREATURE_DAMAGE",
+					"subtype" : "creatureDamageBoth",
 					"val" : 5
 				},
 				"attack" : {
-					"subtype" : "primSkill.attack",
+					"subtype" : "attack",
 					"type" : "PRIMARY_SKILL",
 					"val" : 2
 				},
 				"defence" : {
-					"subtype" : "primSkill.defence",
+					"subtype" : "defence",
 					"type" : "PRIMARY_SKILL",
 					"val" : 1
 				}
@@ -77,24 +80,25 @@
 			"base" : {
 				"limiters" : [
 					{
-						"parameters" : [ "fireElemental", true ],
-						"type" : "CREATURE_TYPE_LIMITER"
+						"type" : "CREATURE_TYPE_LIMITER",
+						"creature" : "fireElemental",
+						"includeUpgrades" : true
 					}
 				]
 			},
 			"bonuses" : {
 				"damage" : {
-					"subtype" : 0,
+					"subtype" : "creatureDamageBoth",
 					"type" : "CREATURE_DAMAGE",
 					"val" : 2
 				},
 				"attack" : {
-					"subtype" : "primSkill.attack",
+					"subtype" : "attack",
 					"type" : "PRIMARY_SKILL",
 					"val" : 1
 				},
 				"defence" : {
-					"subtype" : "primSkill.defence",
+					"subtype" : "defence",
 					"type" : "PRIMARY_SKILL",
 					"val" : 2
 				}
@@ -115,11 +119,12 @@
 				"attack" : {
 					"limiters" : [
 						{
-							"parameters" : [ "waterElemental", true ],
-							"type" : "CREATURE_TYPE_LIMITER"
+							"type" : "CREATURE_TYPE_LIMITER",
+							"creature" : "waterElemental",
+							"includeUpgrades" : true
 						}
 					],
-					"subtype" : "primSkill.attack",
+					"subtype" : "attack",
 					"type" : "PRIMARY_SKILL",
 					"val" : 2
 				}
@@ -140,16 +145,17 @@
 			"base" : {
 				"limiters" : [
 					{
-						"parameters" : [ "psychicElemental", true ],
-						"type" : "CREATURE_TYPE_LIMITER"
+						"type" : "CREATURE_TYPE_LIMITER",
+						"creature" : "psychicElemental",
+						"includeUpgrades" : true
 					}
 				],
 				"type" : "PRIMARY_SKILL",
 				"val" : 3
 			},
 			"bonuses" : {
-				"attack" : { "subtype" : "primSkill.attack" },
-				"defence" : { "subtype" : "primSkill.defence" }
+				"attack" : { "subtype" : "attack" },
+				"defence" : { "subtype" : "defence" }
 			}
 		}
 	},
@@ -167,24 +173,25 @@
 			"base" : {
 				"limiters" : [
 					{
-						"parameters" : [ "earthElemental", true ],
-						"type" : "CREATURE_TYPE_LIMITER"
+						"type" : "CREATURE_TYPE_LIMITER",
+						"creature" : "earthElemental",
+						"includeUpgrades" : true
 					}
 				]
 			},
 			"bonuses" : {
-				"health" : {
+				"damage" : {
 					"type" : "CREATURE_DAMAGE",
-					"subtype" : 0,
+					"subtype" : "creatureDamageBoth",
 					"val" : 5
 				},
 				"attack" : {
-					"subtype" : "primSkill.attack",
+					"subtype" : "attack",
 					"type" : "PRIMARY_SKILL",
 					"val" : 2
 				},
 				"defence" : {
-					"subtype" : "primSkill.defence",
+					"subtype" : "defence",
 					"type" : "PRIMARY_SKILL",
 					"val" : 1
 				}
@@ -204,24 +211,25 @@
 			"base" : {
 				"limiters" : [
 					{
-						"parameters" : [ "fireElemental", true ],
-						"type" : "CREATURE_TYPE_LIMITER"
+						"type" : "CREATURE_TYPE_LIMITER",
+						"creature" : "fireElemental",
+						"includeUpgrades" : true
 					}
 				]
 			},
 			"bonuses" : {
 				"damage" : {
-					"subtype" : 0,
+					"subtype" : "creatureDamageBoth",
 					"type" : "CREATURE_DAMAGE",
 					"val" : 2
 				},
 				"attack" : {
-					"subtype" : "primSkill.attack",
+					"subtype" : "attack",
 					"type" : "PRIMARY_SKILL",
 					"val" : 1
 				},
 				"defence" : {
-					"subtype" : "primSkill.defence",
+					"subtype" : "defence",
 					"type" : "PRIMARY_SKILL",
 					"val" : 2
 				}
@@ -243,11 +251,12 @@
 				"attack" : {
 					"limiters" : [
 						{
-							"parameters" : [ "waterElemental", true ],
-							"type" : "CREATURE_TYPE_LIMITER"
+							"type" : "CREATURE_TYPE_LIMITER",
+							"creature" : "waterElemental",
+							"includeUpgrades" : true
 						}
 					],
-					"subtype" : "primSkill.attack",
+					"subtype" : "attack",
 					"type" : "PRIMARY_SKILL",
 					"val" : 2
 				}
@@ -268,7 +277,13 @@
 		"specialty" : {
 			"bonuses" : {
 				"fireWall" : {
-					"subtype" : "spell.fireWall",
+					"subtype" : "fireWallTrigger",
+					"type" : "SPECIFIC_SPELL_DAMAGE",
+					"val" : 100,
+					"valueType" : "BASE_NUMBER"
+				},
+				"fireWallTooltip" : {
+					"subtype" : "fireWall",
 					"type" : "SPECIFIC_SPELL_DAMAGE",
 					"val" : 100,
 					"valueType" : "BASE_NUMBER"
@@ -288,13 +303,7 @@
 			{ "skill" : "airMagic", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"haste" : {
-					"addInfo" : 0,
-					"subtype" : "spell.haste",
-					"type" : "SPECIAL_PECULIAR_ENCHANT"
-				}
-			}
+			"spellFixedAdditive" : "haste"
 		}
 	},
 	"ciele":
@@ -311,7 +320,7 @@
 		"specialty" : {
 			"bonuses" : {
 				"magicArrow" : {
-					"subtype" : "spell.magicArrow",
+					"subtype" : "magicArrow",
 					"type" : "SPECIFIC_SPELL_DAMAGE",
 					"val" : 50,
 					"valueType" : "BASE_NUMBER"
@@ -336,13 +345,7 @@
 			{ "skill" : "earthMagic", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"stoneSkin" : {
-					"addInfo" : 0,
-					"subtype" : "spell.stoneSkin",
-					"type" : "SPECIAL_PECULIAR_ENCHANT"
-				}
-			}
+			"spellFixedAdditive" : "stoneSkin"
 		}
 	},
 	"inteus":
@@ -357,13 +360,7 @@
 			{ "skill" : "fireMagic", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"bloodlust" : {
-					"addInfo" : 0,
-					"subtype" : "spell.bloodlust",
-					"type" : "SPECIAL_PECULIAR_ENCHANT"
-				}
-			}
+			"spellFixedAdditive" : "bloodlust"
 		}
 	},
 	"aenain":
@@ -378,13 +375,8 @@
 			{ "skill" : "airMagic", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"disruptingRay" : {
-					"addInfo" : -2,
-					"subtype" : "spell.disruptingRay",
-					"type" : "SPECIAL_ADD_VALUE_ENCHANT"
-				}
-			}
+			"spellFixedAdditive" : "disruptingRay",
+			"spellFixedValues" : [ -2 ]
 		}
 	},
 	"gelare":
@@ -401,7 +393,7 @@
 		"specialty" : {
 			"bonuses" : {
 				"gold" : {
-					"subtype" : "resource.gold",
+					"subtype" : "gold",
 					"type" : "GENERATE_RESOURCE",
 					"val" : 350
 				}
@@ -422,7 +414,7 @@
 		"specialty" : {
 			"bonuses" : {
 				"gold" : {
-					"subtype" : "resource.gold",
+					"subtype" : "gold",
 					"type" : "GENERATE_RESOURCE",
 					"val" : 350
 				}

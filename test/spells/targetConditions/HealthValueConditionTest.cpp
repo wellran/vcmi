@@ -11,6 +11,8 @@
 
 #include "TargetConditionItemFixture.h"
 
+#include "../../../lib/GameLibrary.h"
+
 namespace test
 {
 using namespace ::spells;
@@ -23,7 +25,7 @@ public:
 	const int64_t EFFECT_VALUE = 101;
 	void setDefaultExpectations()
 	{
-		EXPECT_CALL(unitMock, getAllBonuses(_, _, _, _)).Times(0);
+		EXPECT_CALL(unitMock, getAllBonuses(_, _)).Times(0);
 		EXPECT_CALL(unitMock, getTreeVersion()).Times(0);
 		EXPECT_CALL(unitMock, getAvailableHealth()).WillOnce(Return(UNIT_HP));
 		EXPECT_CALL(mechanicsMock, getEffectValue()).WillOnce(Return(EFFECT_VALUE));
@@ -33,7 +35,7 @@ public:
 	{
 		TargetConditionItemTest::SetUp();
 
-		subject = TargetConditionItemFactory::getDefault()->createConfigurable("", "healthValueSpecial", "");
+		subject = TargetConditionItemFactory::create(*LIBRARY->identifiers())->createConfigurable("", "healthValueSpecial", "");
 		GTEST_ASSERT_NE(subject, nullptr);
 	}
 };

@@ -9,7 +9,7 @@
  */
 #pragma once
 
-#include "../lib/JsonNode.h"
+#include "json/JsonNode.h"
 
 class Settings;
 class SettingsListener;
@@ -25,7 +25,7 @@ class DLL_LINKAGE SettingsStorage
 		std::vector<std::string> path;
 
 		NodeAccessor(SettingsStorage & _parent, std::vector<std::string> _path);
-		NodeAccessor<Accessor> operator [] (std::string nextNode) const;
+		NodeAccessor<Accessor> operator[](const std::string & nextNode) const;
 		NodeAccessor<Accessor> operator () (std::vector<std::string> _path) const;
 		operator Accessor() const;
 	};
@@ -33,16 +33,21 @@ class DLL_LINKAGE SettingsStorage
 	std::set<SettingsListener*> listeners;
 	JsonNode config;
 
-	JsonNode & getNode(std::vector<std::string> path);
+	std::string dataFilename;
+	JsonNode schema;
+
+	JsonNode & getNode(const std::vector<std::string> & path);
 
 	// Calls all required listeners
 	void invalidateNode(const std::vector<std::string> &changedPath);
 
-	Settings get(std::vector<std::string> path);
+	Settings get(const std::vector<std::string> & path);
+
 public:
 	// Initialize config structure
 	SettingsStorage();
-	void init();
+	~SettingsStorage();
+	void init(const std::string & dataFilename, const std::string & schemaName);
 	
 	// Get write access to config node at path
 	const NodeAccessor<Settings> write;
@@ -51,7 +56,7 @@ public:
 	const NodeAccessor<SettingsListener> listen;
 
 	//Read access, see JsonNode::operator[]
-	const JsonNode & operator [](std::string value) const;
+	const JsonNode & operator[](const std::string & value) const;
 	const JsonNode & toJsonNode() const;
 
 	friend class SettingsListener;
@@ -67,11 +72,15 @@ class DLL_LINKAGE SettingsListener
 	// Callback
 	std::function<void(const JsonNode&)> callback;
 
-	SettingsListener(SettingsStorage &_parent, const std::vector<std::string> &_path);
+	// hack for crash due to static destruction order
+	bool wasTerminated = false;
+
+	SettingsListener(SettingsStorage & _parent, std::vector<std::string> _path);
 
 	// Executes callback if changedpath begins with path
 	void nodeInvalidated(const std::vector<std::string> & changedPath);
 
+	void terminate();
 public:
 	SettingsListener(const SettingsListener &sl);
 	~SettingsListener();
@@ -103,88 +112,12 @@ public:
 	const JsonNode* operator ->() const;
 
 	//Helper, replaces JsonNode::operator[]
-	JsonNode& operator [](std::string value);
-	const JsonNode& operator [](std::string value) const;
+	JsonNode & operator[](const std::string & value);
+	const JsonNode & operator[](const std::string & value) const;
 
 	friend class SettingsStorage;
 };
 
-namespace config
-{
-	struct DLL_LINKAGE ButtonInfo
-	{
-		std::string defName;
-		std::vector<std::string> additionalDefs;
-		int x, y; //position on the screen
-		bool playerColoured; //if true button will be colored to main player's color (works properly only for appropriate 8bpp graphics)
-	};
-	/// Struct which holds data about position of several GUI elements at the adventure map screen
-	struct DLL_LINKAGE AdventureMapConfig
-	{
-		//minimap properties
-		int minimapX, minimapY, minimapW, minimapH;
-		//statusbar
-		int statusbarX, statusbarY; //pos
-		std::string statusbarG; //graphic name
-		//resdatabar
-		int resdatabarX, resdatabarY, resDist, resDateDist, resOffsetX, resOffsetY; //pos
-		std::string resdatabarG; //graphic name
-		//infobox
-		int infoboxX, infoboxY;
-		//advmap
-		int advmapX, advmapY, advmapW, advmapH;
-		bool smoothMove;
-		bool puzzleSepia;
-		bool screenFading;
-		bool objectFading;
-		//general properties
-		std::string mainGraphic;
-		std::string worldViewGraphic;
-		//buttons
-		ButtonInfo kingOverview, underground, questlog,	sleepWake, moveHero, spellbook,	advOptions,
-			sysOptions,	nextHero, endTurn;
-		//hero list
-		int hlistX, hlistY, hlistSize;
-		std::string hlistMB, hlistMN, hlistAU, hlistAD;
-		//town list
-		int tlistX, tlistY, tlistSize;
-		std::string tlistAU, tlistAD;
-		//gems
-		int gemX[4], gemY[4];
-		std::vector<std::string> gemG;
-		//in-game console
-		int inputLineLength, outputLineLength;
-		//kingdom overview
-		int overviewPics, overviewSize; //pic count in def and count of visible slots
-		std::string overviewBg; //background name
-	};
-	struct DLL_LINKAGE GUIOptions
-	{
-		AdventureMapConfig ac;
-	};
-	/// Handles adventure map screen settings
-	class DLL_LINKAGE CConfigHandler
-	{
-		GUIOptions *current; // pointer to current gui options
-
-	public:
-		typedef std::map<std::pair<int,int>, GUIOptions > GuiOptionsMap;
-		GuiOptionsMap guiOptions;
-		void init();
-		CConfigHandler();
-		~CConfigHandler();
-
-		GUIOptions *go() { return current; };
-		void SetResolution(int x, int y)
-		{
-			std::pair<int,int> index(x, y);
-			if (guiOptions.count(index) == 0)
-				current = nullptr;
-			else
-				current = &guiOptions.at(index);
-		}
-	};
-}
-
 extern DLL_LINKAGE SettingsStorage settings;
-extern DLL_LINKAGE config::CConfigHandler conf;
+extern DLL_LINKAGE SettingsStorage persistentStorage;
+extern DLL_LINKAGE SettingsStorage keyBindingsConfig;

@@ -8,34 +8,26 @@
  *
  */
 #pragma once
-#include "CCallbackBase.h"
 #include "IBattleInfoCallback.h"
+#include "BattleSide.h"
+#include "../bonuses/BonusEnum.h"
 
 class CGTownInstance;
 class CGHeroInstance;
 class CStack;
 class IBonusBearer;
 struct InfoAboutHero;
+struct TownFortifications;
 class CArmedInstance;
 
-typedef std::vector<const CStack *> TStacks;
-typedef std::function<bool(const CStack *)> TStackFilter;
+using TStacks = std::vector<const CStack *>;
+using TStackFilter = std::function<bool (const CStack *)>;
 
-namespace BattlePerspective
-{
-	enum BattlePerspective
-	{
-		INVALID = -2,
-		ALL_KNOWING = -1,
-		LEFT_SIDE,
-		RIGHT_SIDE
-	};
-}
-
-class DLL_LINKAGE CBattleInfoEssentials : public virtual CCallbackBase, public IBattleInfoCallback
+class DLL_LINKAGE CBattleInfoEssentials : public IBattleInfoCallback
 {
 protected:
-	bool battleDoWeKnowAbout(ui8 side) const;
+	bool battleDoWeKnowAbout(BattleSide side) const;
+	int battleGetRetreatPermission(BattleSide side, BonusType permission) const;
 
 public:
 	enum EStackOwnership
@@ -43,14 +35,16 @@ public:
 		ONLY_MINE, ONLY_ENEMY, MINE_AND_ENEMY
 	};
 
-	BattlePerspective::BattlePerspective battleGetMySide() const;
-	const IBonusBearer * getBattleNode() const;
+	bool duringBattle() const;
+	BattleSide battleGetMySide() const;
+	const IBonusBearer * getBonusBearer() const override;
 
-	ETerrainType battleTerrainType() const override;
-	BFieldType battleGetBattlefieldType() const override;
-	int32_t battleGetEnchanterCounter(ui8 side) const;
+	TerrainId battleTerrainType() const override;
+	BattleField battleGetBattlefieldType() const override;
+	int32_t battleGetEnchanterCounter(BattleSide side) const;
 
-	std::vector<std::shared_ptr<const CObstacleInstance> > battleGetAllObstacles(boost::optional<BattlePerspective::BattlePerspective> perspective = boost::none) const; //returns all obstacles on the battlefield
+	int32_t nextObstacleId() const override; //returns next available obstacle ID
+	std::vector<std::shared_ptr<const CObstacleInstance>> battleGetAllObstacles(std::optional<BattleSide> perspective = std::nullopt) const override;
 
 	std::shared_ptr<const CObstacleInstance> battleGetObstacleByID(uint32_t ID) const;
 
@@ -60,47 +54,53 @@ public:
 	 * @return filtered stacks
 	 *
 	 */
-	TStacks battleGetStacksIf(TStackFilter predicate) const; //deprecated
-	battle::Units battleGetUnitsIf(battle::UnitFilter predicate) const override;
+	TStacks battleGetStacksIf(const TStackFilter & predicate) const; //deprecated
+	battle::Units battleGetUnitsIf(const battle::UnitFilter & predicate) const override;
 
 	const battle::Unit * battleGetUnitByID(uint32_t ID) const override;
 	const battle::Unit * battleActiveUnit() const override;
 
 	uint32_t battleNextUnitId() const override;
 
-	bool battleHasNativeStack(ui8 side) const;
+	bool battleHasNativeStack(BattleSide side) const override;
 	const CGTownInstance * battleGetDefendedTown() const; //returns defended town if current battle is a siege, nullptr instead
+	bool hasFortifications() const override;
+	bool hasMoat() const override;
+	BattleHex getTowerShooterHex(EWallPart part) const override;
 
 	si8 battleTacticDist() const override; //returns tactic distance in current tactics phase; 0 if not in tactics phase
-	si8 battleGetTacticsSide() const override; //returns which side is in tactics phase, undefined if none (?)
+	BattleSide battleGetTacticsSide() const override; //returns which side is in tactics phase, undefined if none (?)
+	int32_t battleGetRound() const;
 
-	bool battleCanFlee(PlayerColor player) const;
-	bool battleCanSurrender(PlayerColor player) const;
+	bool battleCanFlee(const PlayerColor & player) const;
+	bool battleCanSurrender(const PlayerColor & player) const;
 
-	ui8 otherSide(ui8 side) const;
-	PlayerColor otherPlayer(PlayerColor player) const;
+	static BattleSide otherSide(BattleSide side);
+	PlayerColor otherPlayer(const PlayerColor & player) const;
 
-	BattleSideOpt playerToSide(PlayerColor player) const;
-	PlayerColor sideToPlayer(ui8 side) const;
-	bool playerHasAccessToHeroInfo(PlayerColor player, const CGHeroInstance * h) const;
-	ui8 battleGetSiegeLevel() const; //returns 0 when there is no siege, 1 if fort, 2 is citadel, 3 is castle
-	bool battleHasHero(ui8 side) const;
-	uint32_t battleCastSpells(ui8 side) const; //how many spells has given side cast
-	const CGHeroInstance * battleGetFightingHero(ui8 side) const; //deprecated for players callback, easy to get wrong
-	const CArmedInstance * battleGetArmyObject(ui8 side) const;
-	InfoAboutHero battleGetHeroInfo(ui8 side) const;
+	BattleSide playerToSide(const PlayerColor & player) const;
+	PlayerColor sideToPlayer(BattleSide side) const;
+	bool playerHasAccessToHeroInfo(const PlayerColor & player, const CGHeroInstance * h) const;
+	TownFortifications battleGetFortifications() const;
+	bool battleHasHero(BattleSide side) const;
+	int32_t battleCastSpells(BattleSide side) const; //how many spells has given side cast
+	const CGHeroInstance * battleGetFightingHero(BattleSide side) const; //deprecated for players callback, easy to get wrong
+	const CArmedInstance * battleGetArmyObject(BattleSide side) const;
+	InfoAboutHero battleGetHeroInfo(BattleSide side) const;
 
 	// for determining state of a part of the wall; format: parameter [0] - keep, [1] - bottom tower, [2] - bottom wall,
 	// [3] - below gate, [4] - over gate, [5] - upper wall, [6] - uppert tower, [7] - gate; returned value: 1 - intact, 2 - damaged, 3 - destroyed; 0 - no battle
-	si8 battleGetWallState(int partOfWall) const;
+	EWallState battleGetWallState(EWallPart partOfWall) const override;
 	EGateState battleGetGateState() const;
+	bool battleIsGatePassable() const;
 
 	//helpers
 	///returns all stacks, alive or dead or undead or mechanical :)
 	TStacks battleGetAllStacks(bool includeTurrets = false) const;
+	virtual battle::Units battleGetAllUnits(bool includeTurrets = false) const;
 
 	const CStack * battleGetStackByID(int ID, bool onlyAlive = true) const; //returns stack info by given ID
-	bool battleIsObstacleVisibleForSide(const CObstacleInstance & coi, BattlePerspective::BattlePerspective side) const;
+	bool battleIsObstacleVisibleForSide(const CObstacleInstance & coi, BattleSide side) const;
 
 	///returns player that controls given stack; mind control included
 	PlayerColor battleGetOwner(const battle::Unit * unit) const;
@@ -108,8 +108,8 @@ public:
 	///returns hero that controls given stack; nullptr if none; mind control included
 	const CGHeroInstance * battleGetOwnerHero(const battle::Unit * unit) const;
 
-	///check that stacks are controlled by same|other player(s) depending on positiveness
+	///check that stacks are controlled by the same (sameOwner) or opposing (!sameOwner) player(s)
 	///mind control included
-	bool battleMatchOwner(const battle::Unit * attacker, const battle::Unit * defender, const boost::logic::tribool positivness = false) const;
-	bool battleMatchOwner(const PlayerColor & attacker, const battle::Unit * defender, const boost::logic::tribool positivness = false) const;
+	bool battleMatchOwner(const battle::Unit * attacker, const battle::Unit * defender, bool sameOwner = false) const;
+	bool battleMatchOwner(const PlayerColor & attacker, const battle::Unit * defender, bool sameOwner = false) const;
 };

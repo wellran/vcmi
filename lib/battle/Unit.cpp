@@ -11,18 +11,27 @@
 
 #include "Unit.h"
 
-#include "../VCMI_Lib.h"
-#include "../CGeneralTextHandler.h"
-#include "../NetPacksBase.h"
-
+#include "../CCreatureHandler.h"
+#include "../GameLibrary.h"
+#include "../texts/CGeneralTextHandler.h"
+#include "../bonuses/BonusParameters.h"
 #include "../serializer/JsonDeserializer.h"
 #include "../serializer/JsonSerializer.h"
+
+#include <vcmi/Faction.h>
+#include <vcmi/FactionService.h>
+#include <vcmi/spells/Spell.h>
 
 namespace battle
 {
 
 ///Unit
 Unit::~Unit() = default;
+
+int32_t Unit::unitLevel() const
+{
+	return creatureLevel();
+}
 
 bool Unit::isDead() const
 {
@@ -34,106 +43,204 @@ bool Unit::isTurret() const
 	return creatureIndex() == CreatureID::ARROW_TOWERS;
 }
 
+bool Unit::isCatapult() const
+{
+	return unitType()->warMachine == ArtifactID::CATAPULT;
+}
+
+bool Unit::isBallista() const
+{
+	return unitType()->warMachine == ArtifactID::BALLISTA;
+}
+
+bool Unit::isFirstAidTent() const
+{
+	return unitType()->warMachine == ArtifactID::FIRST_AID_TENT;
+}
+
+bool Unit::isAmmoCart() const
+{
+	return unitType()->warMachine == ArtifactID::AMMO_CART;
+}
+
+int32_t Unit::getAbilitySpellLevel(int32_t abilityLevel, const spells::Spell * spell) const
+{
+	//Magic Plains raise level of spells cast by creatures, unlike battlefields of a specific magic school
+	if(spell->getLevel() > 0)
+		vstd::amax(abilityLevel, valOfBonuses(BonusType::MAGIC_SCHOOL_SKILL, BonusSubtypeID(SpellSchool::ANY)));
+	return abilityLevel;
+}
+
+BattleSide Unit::controllingSide() const
+{
+	if(!isHypnotized())
+		return unitSide();
+	return unitSide() == BattleSide::ATTACKER ? BattleSide::DEFENDER : BattleSide::ATTACKER;
+}
+
+bool Unit::isSummoned() const
+{
+	return unitSlot() == SlotID::SUMMONED_SLOT_PLACEHOLDER;
+}
+
+bool Unit::isCommander() const
+{
+	return unitSlot() == SlotID::COMMANDER_SLOT_PLACEHOLDER;
+}
+
+
+bool Unit::hasImmunity(SpellID spell) const
+{
+	const auto & bonuses = getBonusesOfType(BonusType::SPELL_IMMUNITY, BonusSubtypeID(spell));
+	return !bonuses->empty();
+}
+
+bool Unit::hasAbsoluteImmunity(SpellID spell) const
+{
+	const auto & bonuses = getBonusesOfType(BonusType::SPELL_IMMUNITY, BonusSubtypeID(spell));
+		for (const auto & bonus : *bonuses)
+		if (bonus->parameters && bonus->parameters->toNumber() == 1)
+			return true;
+	return false;
+}
+
+bool Unit::isMeleeAttacker() const
+{
+	//exclude war machines
+	if (hasBonusOfType(BonusType::SIEGE_WEAPON))
+		return false;
+
+	//TODO consider that a mod may introduce a melee war machine. Possibly a new bonus type NO_MELEE_ATTACK is needed.
+	return true;
+}
+
 std::string Unit::getDescription() const
 {
 	boost::format fmt("Unit %d of side %d");
-	fmt % unitId() % unitSide();
+	fmt % unitId() % static_cast<int>(unitSide());
 	return fmt.str();
 }
 
-std::vector<BattleHex> Unit::getSurroundingHexes(BattleHex assumedPosition) const
+//TODO: deduplicate these functions
+const IBonusBearer* Unit::getBonusBearer() const
 {
-	BattleHex hex = (assumedPosition != BattleHex::INVALID) ? assumedPosition : getPosition(); //use hypothetical position
+	return this;
+}
+
+const BattleHexArray & Unit::getSurroundingHexes(const BattleHex & assumedPosition) const
+{
+	BattleHex hex = (assumedPosition.toInt() != BattleHex::INVALID) ? assumedPosition : getPosition(); //use hypothetical position
 
 	return getSurroundingHexes(hex, doubleWide(), unitSide());
 }
 
-std::vector<BattleHex> Unit::getSurroundingHexes(BattleHex position, bool twoHex, ui8 side)
+const BattleHexArray & Unit::getSurroundingHexes(const BattleHex & position, bool twoHex, BattleSide side)
 {
-	std::vector<BattleHex> hexes;
-	if(twoHex)
+	if(!twoHex)
+		return position.getNeighbouringTiles();
+
+	return position.getNeighbouringTilesDoubleWide(side);
+}
+
+BattleHexArray Unit::getAttackableHexes(const Unit * attacker) const
+{
+	if (!attacker->doubleWide())
 	{
-		const BattleHex otherHex = occupiedHex(position, twoHex, side);
-
-		if(side == BattleSide::ATTACKER)
-		{
-			for(BattleHex::EDir dir = BattleHex::EDir(0); dir <= BattleHex::EDir(4); dir = BattleHex::EDir(dir+1))
-				BattleHex::checkAndPush(position.cloneInDirection(dir, false), hexes);
-
-			BattleHex::checkAndPush(otherHex.cloneInDirection(BattleHex::EDir::BOTTOM_LEFT, false), hexes);
-			BattleHex::checkAndPush(otherHex.cloneInDirection(BattleHex::EDir::LEFT, false), hexes);
-			BattleHex::checkAndPush(otherHex.cloneInDirection(BattleHex::EDir::TOP_LEFT, false), hexes);
-		}
-		else
-		{
-			BattleHex::checkAndPush(position.cloneInDirection(BattleHex::EDir::TOP_LEFT, false), hexes);
-
-			for(BattleHex::EDir dir = BattleHex::EDir(0); dir <= BattleHex::EDir(4); dir = BattleHex::EDir(dir+1))
-				BattleHex::checkAndPush(otherHex.cloneInDirection(dir, false), hexes);
-
-			BattleHex::checkAndPush(position.cloneInDirection(BattleHex::EDir::BOTTOM_LEFT, false), hexes);
-			BattleHex::checkAndPush(position.cloneInDirection(BattleHex::EDir::LEFT, false), hexes);
-		}
-		return hexes;
+		return getSurroundingHexes();
 	}
 	else
 	{
-		return position.neighbouringTiles();
+		BattleHexArray result;
+
+		for (const auto & attackOrigin : getSurroundingHexes())
+		{
+			BattleHex occupiedHex = attacker->occupiedHex(attackOrigin); 
+			if (!coversPos(occupiedHex) && occupiedHex.isAvailable())
+				result.insert(attackOrigin);
+
+			BattleHex headHex = attackOrigin.cloneInDirection(attacker->headDirection());
+			if (!coversPos(headHex) && headHex.isAvailable())
+				result.insert(headHex);
+		}
+		return result;
 	}
 }
 
-std::vector<BattleHex> Unit::getAttackableHexes(const Unit * attacker) const
-{
-	auto defenderHexes = battle::Unit::getHexes(
-		getPosition(),
-		doubleWide(),
-		unitSide());
-	
-	std::vector<BattleHex> targetableHexes;
-
-	for(auto defenderHex : defenderHexes)
-	{
-		auto hexes = battle::Unit::getHexes(
-			defenderHex,
-			attacker->doubleWide(),
-			unitSide());
-
-		if(hexes.size() == 2 && BattleHex::getDistance(hexes.front(), hexes.back()) != 1)
-			hexes.pop_back();
-
-		for(auto hex : hexes)
-			vstd::concatenate(targetableHexes, hex.neighbouringTiles());
-	}
-
-	vstd::removeDuplicates(targetableHexes);
-
-	return targetableHexes;
-}
-
-bool Unit::coversPos(BattleHex pos) const
+bool Unit::coversPos(const BattleHex & pos) const
 {
 	return getPosition() == pos || (doubleWide() && (occupiedHex() == pos));
 }
 
-std::vector<BattleHex> Unit::getHexes() const
+BattleHex::EDir Unit::headDirection() const
+{
+	if(doubleWide())
+	{
+		if(unitSide() == BattleSide::ATTACKER)
+			return BattleHex::EDir::RIGHT;
+		else
+			return BattleHex::EDir::LEFT;
+	}
+	else
+	{
+		return BattleHex::EDir::NONE;
+	}
+}
+
+const BattleHexArray & Unit::getHexes() const
 {
 	return getHexes(getPosition(), doubleWide(), unitSide());
 }
 
-std::vector<BattleHex> Unit::getHexes(BattleHex assumedPos) const
+const BattleHexArray & Unit::getHexes(const BattleHex & assumedPos) const
 {
 	return getHexes(assumedPos, doubleWide(), unitSide());
 }
 
-std::vector<BattleHex> Unit::getHexes(BattleHex assumedPos, bool twoHex, ui8 side)
+BattleHexArray::ArrayOfBattleHexArrays Unit::precomputeUnitHexes(BattleSide side, bool twoHex)
 {
-	std::vector<BattleHex> hexes;
-	hexes.push_back(assumedPos);
+	BattleHexArray::ArrayOfBattleHexArrays result;
 
-	if(twoHex)
-		hexes.push_back(occupiedHex(assumedPos, twoHex, side));
+	for (BattleHex assumedPos = 0; assumedPos < GameConstants::BFIELD_SIZE; ++assumedPos)
+	{
+		BattleHexArray hexes;
+		hexes.insert(assumedPos);
 
-	return hexes;
+		if(twoHex)
+			hexes.insert(occupiedHex(assumedPos, twoHex, side));
+
+		result[assumedPos.toInt()] = std::move(hexes);
+	}
+
+	return result;
+}
+
+const BattleHexArray & Unit::getHexes(const BattleHex & assumedPos, bool twoHex, BattleSide side)
+{
+	static const std::array<BattleHexArray::ArrayOfBattleHexArrays, 4> precomputed = {
+		precomputeUnitHexes(BattleSide::ATTACKER, false),
+		precomputeUnitHexes(BattleSide::ATTACKER, true),
+		precomputeUnitHexes(BattleSide::DEFENDER, false),
+		precomputeUnitHexes(BattleSide::DEFENDER, true),
+	};
+
+	static const std::array<BattleHexArray, 5> invalidHexes = {
+		BattleHexArray({BattleHex( 0)}),
+		BattleHexArray({BattleHex(-1)}),
+		BattleHexArray({BattleHex(-2)}),
+		BattleHexArray({BattleHex(-3)}),
+		BattleHexArray({BattleHex(-4)})
+	};
+
+	if (assumedPos.isValid())
+	{
+		int index = side == BattleSide::ATTACKER ? 0 : 2;
+		return precomputed[index + twoHex][assumedPos.toInt()];
+	}
+	else
+	{
+		// Towers and such
+		return invalidHexes.at(-assumedPos.toInt());
+	}
 }
 
 BattleHex Unit::occupiedHex() const
@@ -141,19 +248,19 @@ BattleHex Unit::occupiedHex() const
 	return occupiedHex(getPosition(), doubleWide(), unitSide());
 }
 
-BattleHex Unit::occupiedHex(BattleHex assumedPos) const
+BattleHex Unit::occupiedHex(const BattleHex & assumedPos) const
 {
 	return occupiedHex(assumedPos, doubleWide(), unitSide());
 }
 
-BattleHex Unit::occupiedHex(BattleHex assumedPos, bool twoHex, ui8 side)
+BattleHex Unit::occupiedHex(const BattleHex & assumedPos, bool twoHex, BattleSide side)
 {
 	if(twoHex)
 	{
 		if(side == BattleSide::ATTACKER)
-			return assumedPos - 1;
+			return assumedPos.toInt() - 1;
 		else
-			return assumedPos + 1;
+			return assumedPos.toInt() + 1;
 	}
 	else
 	{
@@ -161,65 +268,51 @@ BattleHex Unit::occupiedHex(BattleHex assumedPos, bool twoHex, ui8 side)
 	}
 }
 
-void Unit::addText(MetaString & text, ui8 type, int32_t serial, const boost::logic::tribool & plural) const
+void Unit::addNameReplacement(MetaString & text) const
 {
-	if(boost::logic::indeterminate(plural))
-		serial = VLC->generaltexth->pluralText(serial, getCount());
-	else if(plural)
-		serial = VLC->generaltexth->pluralText(serial, 2);
-	else
-		serial = VLC->generaltexth->pluralText(serial, 1);
-
-	text.addTxt(type, serial);
+	addNameReplacement(text, getCount());
 }
 
-void Unit::addNameReplacement(MetaString & text, const boost::logic::tribool & plural) const
+void Unit::addNameReplacement(MetaString & text, TQuantity count) const
 {
-	if(boost::logic::indeterminate(plural))
-		text.addCreReplacement(creatureId(), getCount());
-	else if(plural)
-		text.addReplacement(MetaString::CRE_PL_NAMES, creatureIndex());
-	else
-		text.addReplacement(MetaString::CRE_SING_NAMES, creatureIndex());
+	text.replaceName(creatureId(), count);
 }
 
-std::string Unit::formatGeneralMessage(const int32_t baseTextId) const
+MetaString Unit::formatGeneralMessage(const int32_t baseTextId) const
 {
-	const int32_t textId = VLC->generaltexth->pluralText(baseTextId, getCount());
+	const int32_t textId = LIBRARY->generaltexth->pluralText(baseTextId, getCount());
 
 	MetaString text;
-	text.addTxt(MetaString::GENERAL_TXT, textId);
-	text.addCreReplacement(creatureId(), getCount());
+	text.appendLocalString(EMetaText::GENERAL_TXT, textId);
+	text.replaceName(creatureId(), getCount());
 
-	return text.toString();
+	return text;
 }
 
 int Unit::getRawSurrenderCost() const
 {
-	//we pay for our stack that comes from our army slots - condition eliminates summoned cres and war machines
-	if(unitSlot().validSlot())
-		return creatureCost() * getCount();
+	//we pay for army-slot stacks and for war machines (ballista, ammo cart, first aid tent);
+	//summoned creatures and the free siege catapult are not paid for
+	//temporarily resurrected creatures (e.g. by First Aid Tent or a temporary resurrection spell) will vanish after combat and must not be paid for
+	if(unitSlot().validSlot() || (unitSlot() == SlotID::WAR_MACHINES_SLOT && !isCatapult()))
+	{
+		int32_t permanentCount = getCount() - getResurrected();
+		vstd::amax(permanentCount, 0);
+		return creatureCost() * permanentCount;
+	}
 	else
 		return 0;
 }
 
 ///UnitInfo
-UnitInfo::UnitInfo()
-	: id(0),
-	count(0),
-	type(),
-	side(0),
-	position(),
-	summoned(false)
-{
-}
-
 void UnitInfo::serializeJson(JsonSerializeFormat & handler)
 {
 	handler.serializeInt("count", count);
-	handler.serializeId("type", type, CreatureID::NONE);
+	handler.serializeId("type", type, CreatureID(CreatureID::NONE));
 	handler.serializeInt("side", side);
-	handler.serializeInt("position", position);
+	si16 positionValue = position.toInt();
+	handler.serializeInt("position", positionValue);
+	position = positionValue;
 	handler.serializeBool("summoned", summoned);
 }
 
@@ -227,14 +320,15 @@ void UnitInfo::save(JsonNode & data)
 {
 	data.clear();
 	JsonSerializer ser(nullptr, data);
-	ser.serializeStruct("newUnitInfo", *this);
+	serializeJson(ser);
 }
 
 void UnitInfo::load(uint32_t id_, const JsonNode & data)
 {
 	id = id_;
-    JsonDeserializer deser(nullptr, data);
-    deser.serializeStruct("newUnitInfo", *this);
+	InstantIdentifierResolver resolver(*LIBRARY->identifiers());
+	JsonDeserializer deser(nullptr, resolver, data);
+	serializeJson(deser);
 }
 
 }

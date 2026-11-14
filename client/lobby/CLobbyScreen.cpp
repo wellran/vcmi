@@ -8,210 +8,469 @@
  *
  */
 #include "StdInc.h"
-
 #include "CLobbyScreen.h"
+
 #include "CBonusSelection.h"
-#include "SelectionTab.h"
-#include "RandomMapTab.h"
+#include "TurnOptionsTab.h"
+#include "ExtraOptionsTab.h"
 #include "OptionsTab.h"
+#include "RandomMapTab.h"
+#include "SelectionTab.h"
+#include "BattleOnlyModeTab.h"
+
 #include "../CServerHandler.h"
-
-#include "../gui/CGuiHandler.h"
+#include "../GameEngine.h"
+#include "../GameChatHandler.h"
+#include "../GameInstance.h"
+#include "../gui/Shortcut.h"
 #include "../widgets/Buttons.h"
+#include "../widgets/GraphicalPrimitiveCanvas.h"
+#include "../widgets/Images.h"
 #include "../windows/InfoWindows.h"
+#include "render/Colors.h"
+#include "../globalLobby/GlobalLobbyClient.h"
 
-#include "../../CCallback.h"
-
-#include "../CGameInfo.h"
-#include "../../lib/NetPacksLobby.h"
-#include "../../lib/CGeneralTextHandler.h"
+#include "../../lib/CConfigHandler.h"
+#include "../../lib/texts/CGeneralTextHandler.h"
 #include "../../lib/mapping/CMapInfo.h"
-#include "../../lib/mapping/CCampaignHandler.h"
+#include "../../lib/networkPacks/PacksForLobby.h"
 #include "../../lib/rmg/CMapGenOptions.h"
+#include "../../lib/GameLibrary.h"
 
-CLobbyScreen::CLobbyScreen(ESelectionScreen screenType)
+CLobbyScreen::CLobbyScreen(ESelectionScreen screenType, bool hideScreen)
 	: CSelectionBase(screenType), bonusSel(nullptr)
 {
-	OBJ_CONSTRUCTION_CAPTURING_ALL_NO_DISPOSE;
+	OBJECT_CONSTRUCTION;
 	tabSel = std::make_shared<SelectionTab>(screenType);
 	curTab = tabSel;
 
 	auto initLobby = [&]()
 	{
-		tabSel->callOnSelect = std::bind(&IServerAPI::setMapInfo, CSH, _1, nullptr);
+		tabSel->callOnSelect = [this](const std::shared_ptr<ElementInfo> &)
+		{
+			GAME->server().selectScenario(tabSel->getSelection());
+			if(curTab != tabBattleOnlyMode)
+				updateStartButtonState();
+		};
 
-		buttonSelect = std::make_shared<CButton>(Point(411, 80), "GSPBUTT.DEF", CGI->generaltexth->zelp[45], 0, SDLK_s);
-		buttonSelect->addCallback([&]()
+		buttonSelect = std::make_shared<CButton>(Point(411, 80), AnimationPath::builtin("GSPBUTT.DEF"), LIBRARY->generaltexth->zelp[45], 0, EShortcut::LOBBY_SELECT_SCENARIO);
+		buttonSelect->addCallback([this]()
 		{
 			toggleTab(tabSel);
-			CSH->setMapInfo(tabSel->getSelectedMapInfo());
+			if (getMapInfo() && getMapInfo()->isRandomMap)
+				GAME->server().selectScenario(tabSel->getSelection());
 		});
 
-		buttonOptions = std::make_shared<CButton>(Point(411, 510), "GSPBUTT.DEF", CGI->generaltexth->zelp[46], std::bind(&CLobbyScreen::toggleTab, this, tabOpt), SDLK_a);
+		buttonOptions = std::make_shared<CButton>(Point(411, 510), AnimationPath::builtin("GSPBUTT.DEF"), LIBRARY->generaltexth->zelp[46], std::bind(&CLobbyScreen::toggleTab, this, tabOpt), EShortcut::LOBBY_ADDITIONAL_OPTIONS);
+		if(settings["general"]["enableUiEnhancements"].Bool())
+		{
+			if(screenType == ESelectionScreen::newGame && !ENGINE->isDemoData())
+				buttonBattleMode = std::make_shared<CButton>(Point(619, 80), AnimationPath::builtin("GSPButton2Arrow"), CButton::tooltip("", LIBRARY->generaltexth->translate("vcmi.lobby.battleOnlyMode.help")), [this](){
+					updateAfterStateChange(); // creates tabBattleOnlyMode -> cannot created by init of object because GAME->server().isGuest() isn't valid at that point
+					toggleTab(tabBattleOnlyMode);
+				}, EShortcut::LOBBY_BATTLE_MODE);
+			buttonExtraOptions = std::make_shared<CButton>(Point(619, 510), AnimationPath::builtin("GSPButton2Arrow"), LIBRARY->generaltexth->zelp[46], std::bind(&CLobbyScreen::toggleTab, this, tabExtraOptions), EShortcut::LOBBY_EXTRA_OPTIONS);
+		}
 	};
-
-	buttonChat = std::make_shared<CButton>(Point(619, 83), "GSPBUT2.DEF", CGI->generaltexth->zelp[48], std::bind(&CLobbyScreen::toggleChat, this), SDLK_h);
-	buttonChat->addTextOverlay(CGI->generaltexth->allTexts[532], FONT_SMALL);
+	if(screenType != ESelectionScreen::campaignList && isMultiplayerNetworkLobby() && !ENGINE->isRoeData())
+	{
+		buttonChat = std::make_shared<CButton>(Point(619, 105), AnimationPath::builtin("GSPBUT2.DEF"), LIBRARY->generaltexth->zelp[48], std::bind(&CLobbyScreen::toggleChat, this), EShortcut::LOBBY_TOGGLE_CHAT);
+		buttonChat->setTextOverlay(card->showChat ? LIBRARY->generaltexth->allTexts[531] : LIBRARY->generaltexth->allTexts[532], FONT_SMALL, Colors::WHITE);
+	}
 
 	switch(screenType)
 	{
 	case ESelectionScreen::newGame:
 	{
 		tabOpt = std::make_shared<OptionsTab>();
+		if(!ENGINE->isRoeData())
+			tabTurnOptions = std::make_shared<TurnOptionsTab>();
+		tabExtraOptions = std::make_shared<ExtraOptionsTab>();
 		tabRand = std::make_shared<RandomMapTab>();
-		tabRand->mapInfoChanged += std::bind(&IServerAPI::setMapInfo, CSH, _1, _2);
-		buttonRMG = std::make_shared<CButton>(Point(411, 105), "GSPBUTT.DEF", CGI->generaltexth->zelp[47], 0, SDLK_r);
-		buttonRMG->addCallback([&]()
+		tabRand->mapGenOptionsChanged += [](std::shared_ptr<CMapGenOptions> options)
 		{
-			toggleTab(tabRand);
-			tabRand->updateMapInfoByHost(); // TODO: This is only needed to force-update mapInfo in CSH when tab is opened
-		});
+			GAME->server().selectScenario(ScenarioSelection{ScenarioSelection::EType::RANDOM_MAP, ""}, options);
+		};
+		if(!ENGINE->isRoeData())
+		{
+			buttonRMG = std::make_shared<CButton>(Point(411, 105), AnimationPath::builtin("GSPBUTT.DEF"), LIBRARY->generaltexth->zelp[47], 0, EShortcut::LOBBY_RANDOM_MAP);
+			buttonRMG->addCallback([this]()
+			{
+				toggleTab(tabRand);
+				if (getMapInfo() && !getMapInfo()->isRandomMap)
+					tabRand->updateMapInfoByHost();
+			});
+		}
 
-		card->iconDifficulty->addCallback(std::bind(&IServerAPI::setDifficulty, CSH, _1));
+		card->iconDifficulty->addCallback(std::bind(&IServerAPI::setDifficulty, &GAME->server(), _1));
 
-		buttonStart = std::make_shared<CButton>(Point(411, 535), "SCNRBEG.DEF", CGI->generaltexth->zelp[103], std::bind(&CLobbyScreen::startScenario, this, false), SDLK_b);
+		buttonStart = std::make_shared<CButton>(Point(411, 535), AnimationPath::builtin("SCNRBEG.DEF"), LIBRARY->generaltexth->zelp[103], std::bind(&CLobbyScreen::start, this, false), EShortcut::LOBBY_BEGIN_STANDARD_GAME);
 		initLobby();
 		break;
 	}
 	case ESelectionScreen::loadGame:
 	{
 		tabOpt = std::make_shared<OptionsTab>();
-		buttonStart = std::make_shared<CButton>(Point(411, 535), "SCNRLOD.DEF", CGI->generaltexth->zelp[103], std::bind(&CLobbyScreen::startScenario, this, false), SDLK_l);
+		if(!ENGINE->isRoeData())
+			tabTurnOptions = std::make_shared<TurnOptionsTab>();
+		tabExtraOptions = std::make_shared<ExtraOptionsTab>();
+		buttonStart = std::make_shared<CButton>(Point(411, 535), AnimationPath::builtin("SCNRLOD.DEF"), LIBRARY->generaltexth->zelp[103], std::bind(&CLobbyScreen::start, this, false), EShortcut::LOBBY_LOAD_GAME);
 		initLobby();
 		break;
 	}
 	case ESelectionScreen::campaignList:
-		tabSel->callOnSelect = std::bind(&IServerAPI::setMapInfo, CSH, _1, nullptr);
-		buttonStart = std::make_shared<CButton>(Point(411, 535), "SCNRLOD.DEF", CButton::tooltip(), std::bind(&CLobbyScreen::startCampaign, this), SDLK_b);
+		tabSel->callOnSelect = [this](const std::shared_ptr<ElementInfo> &)
+		{
+			GAME->server().selectScenario(tabSel->getSelection());
+		};
+		buttonStart = std::make_shared<CButton>(Point(411, 535), AnimationPath::builtin("SCNRLOD.DEF"), CButton::tooltip(), std::bind(&CLobbyScreen::start, this, true), EShortcut::LOBBY_BEGIN_CAMPAIGN);
 		break;
 	}
 
-	buttonStart->assignedKeys.insert(SDLK_RETURN);
+	buttonStart->block(true); // to be unblocked after map list is ready
 
-	buttonBack = std::make_shared<CButton>(Point(581, 535), "SCNRBACK.DEF", CGI->generaltexth->zelp[105], [&]()
+	buttonBack = std::make_shared<CButton>(Point(581, 535), AnimationPath::builtin("SCNRBACK.DEF"), LIBRARY->generaltexth->zelp[105], [&]()
 	{
-		CSH->sendClientDisconnecting();
+		bool wasInLobbyRoom = GAME->server().inLobbyRoom();
+		GAME->server().sendClientDisconnecting();
 		close();
-	}, SDLK_ESCAPE);
+
+		if (wasInLobbyRoom)
+			GAME->server().getGlobalLobby().activateInterface();
+	}, EShortcut::GLOBAL_CANCEL);
+
+	// Make sure scenario selection is centered
+	if(settings["general"]["enableUiEnhancements"].Bool())
+	{
+		if((screenType == ESelectionScreen::newGame || screenType == ESelectionScreen::loadGame) && !ENGINE->isDemoData())
+		{
+			const Point contentOffset(19, 0);
+			for(CIntObject * child : children)
+			{
+				if(!child || child == background.get())
+					continue;
+	
+				child->moveBy(contentOffset);
+			}
+		}
+	}
+
+	if(hideScreen) // workaround to avoid confusing players by custom campaign list displaying for a few ms -> instead of this draw a black screen while "loading"
+	{
+		blackScreen = std::make_shared<GraphicalPrimitiveCanvas>(Rect(Point(0, 0), pos.dimensions()));
+		blackScreen->addBox(Point(0, 0), pos.dimensions(), Colors::BLACK);
+	}
+
+	onRemoteClientLobbyStateChanged();
 }
 
 CLobbyScreen::~CLobbyScreen()
 {
 	// TODO: For now we always destroy whole lobby when leaving bonus selection screen
-	if(CSH->state == EClientState::LOBBY_CAMPAIGN)
-		CSH->sendClientDisconnecting();
+	if(GAME->server().getState() == EClientState::LOBBY_CAMPAIGN)
+		GAME->server().sendClientDisconnecting();
+}
+
+bool CLobbyScreen::isMultiplayerNetworkLobby() const
+{
+	return GAME->server().loadMode == ELoadMode::MULTI && !GAME->server().hotseatMode;
+}
+
+bool CLobbyScreen::isMultiplayerHost() const
+{
+	return isMultiplayerNetworkLobby() && GAME->server().isHost();
+}
+
+bool CLobbyScreen::canStartLobbyGame() const
+{
+	if(GAME->server().isGuest() || GAME->server().mi == nullptr)
+		return false;
+
+	if(isMultiplayerHost() && !GAME->server().hasRemoteClientInLobby())
+		return false;
+
+	return true;
+}
+
+bool CLobbyScreen::isLanOrOnlineMultiplayerHost() const
+{
+	return buttonChat && isMultiplayerHost() && (GAME->server().serverMode == EServerMode::LOCAL || GAME->server().serverMode == EServerMode::LOBBY_HOST);
+}
+
+void CLobbyScreen::updateCompatibilityNotice(size_t requiredHumanPlayers)
+{
+	const size_t hiddenIncompatibleMaps = tabSel->getHiddenIncompatibleMapsCount();
+	if(hiddenIncompatibleMaps && screenType == ESelectionScreen::newGame && GAME->server().loadMode == ELoadMode::MULTI)
+	{
+		MetaString warningText;
+		warningText.appendTextID("vcmi.lobby.system.hidingIncompatibleMaps");
+		warningText.replaceNumber(requiredHumanPlayers);
+		const std::string warningTextFormatted = warningText.toString(&GAME->translator());
+
+		if(lastCompatibilityNotice != warningTextFormatted)
+		{
+			logGlobal->info("%s", warningTextFormatted);
+			if(!GAME->server().hotseatMode)
+				GAME->server().getGameChat().onNewLobbyMessageReceived("System", warningTextFormatted);
+			lastCompatibilityNotice = warningTextFormatted;
+		}
+	}
+	else
+	{
+		lastCompatibilityNotice.clear();
+	}
+}
+
+void CLobbyScreen::updateHostLobbyChatState()
+{
+	if(!isLanOrOnlineMultiplayerHost())
+		return;
+
+	buttonChat->setTextOverlay(card->showChat ? LIBRARY->generaltexth->allTexts[531] : LIBRARY->generaltexth->allTexts[532], FONT_SMALL, Colors::WHITE);
+
+}
+
+void CLobbyScreen::updateStartButtonState()
+{
+	buttonStart->block(!canStartLobbyGame());
+}
+
+void CLobbyScreen::onRemoteClientLobbyStateChanged()
+{
+	if(!isLanOrOnlineMultiplayerHost())
+	{
+		updateHostLobbyChatState();
+		return;
+	}
+
+	const bool hasRemoteClient = GAME->server().hasRemoteClientInLobby();
+
+	if(hasRemoteClient)
+	{
+		waitingForPlayersMessageShown = false;
+	}
+	else if(!waitingForPlayersMessageShown)
+	{
+		// Show this message exactly once per "everyone disconnected" event,
+		// regardless of how many state refreshes the lobby screen performs.
+		GAME->server().getGameChat().onNewLobbyMessageReceived("System", LIBRARY->generaltexth->translate("vcmi.lobby.system.waitingForPlayers"));
+		waitingForPlayersMessageShown = true;
+	}
+
+	updateHostLobbyChatState();
 }
 
 void CLobbyScreen::toggleTab(std::shared_ptr<CIntObject> tab)
 {
 	if(tab == curTab)
-		CSH->sendGuiAction(LobbyGuiAction::NO_TAB);
+		GAME->server().sendGuiAction(LobbyGuiAction::NO_TAB);
 	else if(tab == tabOpt)
-		CSH->sendGuiAction(LobbyGuiAction::OPEN_OPTIONS);
+		GAME->server().sendGuiAction(LobbyGuiAction::OPEN_OPTIONS);
 	else if(tab == tabSel)
-		CSH->sendGuiAction(LobbyGuiAction::OPEN_SCENARIO_LIST);
+		GAME->server().sendGuiAction(LobbyGuiAction::OPEN_SCENARIO_LIST);
 	else if(tab == tabRand)
-		CSH->sendGuiAction(LobbyGuiAction::OPEN_RANDOM_MAP_OPTIONS);
+		GAME->server().sendGuiAction(LobbyGuiAction::OPEN_RANDOM_MAP_OPTIONS);
+	else if(tab == tabTurnOptions)
+		GAME->server().sendGuiAction(LobbyGuiAction::OPEN_TURN_OPTIONS);
+	else if(tab == tabExtraOptions)
+		GAME->server().sendGuiAction(LobbyGuiAction::OPEN_EXTRA_OPTIONS);
+	else if(tab == tabBattleOnlyMode)
+		GAME->server().sendGuiAction(LobbyGuiAction::BATTLE_MODE);
+
+	if(tab == tabBattleOnlyMode)
+	{
+		tabBattleOnlyMode->setStartButtonEnabled();
+		card->clearSelection();
+	}
+	else
+	{
+		updateStartButtonState();
+		card->changeSelection();
+	}
+
 	CSelectionBase::toggleTab(tab);
+}
+
+void CLobbyScreen::start(bool campaign)
+{
+	if(curTab == tabBattleOnlyMode)
+		tabBattleOnlyMode->startBattle();
+	else if(campaign)
+		startCampaign();
+	else
+		startScenario(false);
 }
 
 void CLobbyScreen::startCampaign()
 {
-	if(CSH->mi)
-	{
-		auto ourCampaign = std::make_shared<CCampaignState>(CCampaignHandler::getCampaign(CSH->mi->fileURI));
-		CSH->setCampaignState(ourCampaign);
-	}
+	if(!GAME->server().mi)
+		return;
+
+	GAME->server().startCampaign(GAME->server().mi->fileURI, "");
 }
 
 void CLobbyScreen::startScenario(bool allowOnlyAI)
 {
-	try
+	if (tabRand && GAME->server().si->mapGenOptions)
 	{
-		CSH->sendStartGame(allowOnlyAI);
-		buttonStart->block(true);
+		// Save RMG settings at game start
+		tabRand->saveOptions(*GAME->server().si->mapGenOptions);
 	}
-	catch(ExceptionMapMissing & e)
-	{
-		(void)e;	// unused
-	}
-	catch(ExceptionNoHuman & e)
-	{
-		(void)e;	// unused
-		// You must position yourself prior to starting the game.
-		CInfoWindow::showYesNoDialog(std::ref(CGI->generaltexth->allTexts[530]), CInfoWindow::TCompsInfo(), 0, std::bind(&CLobbyScreen::startScenario, this, true), PlayerColor(1));
-	}
-	catch(ExceptionNoTemplate & e)
-	{
-		(void)e; // unused
-		CInfoWindow::showInfoDialog(std::ref(CGI->generaltexth->allTexts[751]), CInfoWindow::TCompsInfo(), PlayerColor(1));
-	}
-	catch(...)
-	{
 
+	// Save chosen difficulty
+	Settings lastDifficulty = settings.write["general"]["lastDifficulty"];
+	lastDifficulty->Integer() = getCurrentDifficulty();
+
+	if (GAME->server().validateGameStart(allowOnlyAI))
+	{
+		GAME->server().sendStartGame(allowOnlyAI);
+		buttonStart->block(true);
 	}
 }
 
 void CLobbyScreen::toggleMode(bool host)
 {
-	tabSel->toggleMode();
-	buttonStart->block(!host);
-	if(screenType == ESelectionScreen::campaignList)
+	// hidden lobby goes straight to bonus selection, so the list is never shown
+	if(blackScreen)
 		return;
 
+	tabSel->toggleMode();
+	if(screenType == ESelectionScreen::campaignList)
+	{
+		buttonStart->block(!host);
+		return;
+	}
+
 	auto buttonColor = host ? Colors::WHITE : Colors::ORANGE;
-	buttonSelect->addTextOverlay(CGI->generaltexth->allTexts[500], FONT_SMALL, buttonColor);
-	buttonOptions->addTextOverlay(CGI->generaltexth->allTexts[501], FONT_SMALL, buttonColor);
+	buttonSelect->setTextOverlay("  " + LIBRARY->generaltexth->allTexts[500], FONT_SMALL, buttonColor);
+	buttonOptions->setTextOverlay(LIBRARY->generaltexth->allTexts[501], FONT_SMALL, buttonColor);
+
+	if (buttonBattleMode)
+		buttonBattleMode->setTextOverlay(LIBRARY->generaltexth->translate("vcmi.lobby.battleOnlyMode"), FONT_SMALL, buttonColor);
+
+	if (buttonExtraOptions)
+		buttonExtraOptions->setTextOverlay(LIBRARY->generaltexth->translate("vcmi.optionsTab.extraOptions.hover"), FONT_SMALL, buttonColor);
+
 	if(buttonRMG)
 	{
-		buttonRMG->addTextOverlay(CGI->generaltexth->allTexts[740], FONT_SMALL, buttonColor);
+		buttonRMG->setTextOverlay("  " + LIBRARY->generaltexth->allTexts[740], FONT_SMALL, buttonColor);
 		buttonRMG->block(!host);
 	}
 	buttonSelect->block(!host);
 	buttonOptions->block(!host);
 
-	if(CSH->mi)
+	if (buttonBattleMode)
+		buttonBattleMode->block(!host);
+
+	if (buttonExtraOptions)
+		buttonExtraOptions->block(!host);
+
+	if (tabOpt)
 		tabOpt->recreate();
+
+	if(GAME->server().mi)
+	{
+		tabTurnOptions->recreate();
+		tabExtraOptions->recreate();
+	}
+
+	updateStartButtonState();
 }
 
 void CLobbyScreen::toggleChat()
 {
+	if(!buttonChat)
+		return;
+
 	card->toggleChat();
 	if(card->showChat)
-		buttonChat->addTextOverlay(CGI->generaltexth->allTexts[531], FONT_SMALL);
+		buttonChat->setTextOverlay(LIBRARY->generaltexth->allTexts[531], FONT_SMALL, Colors::WHITE);
 	else
-		buttonChat->addTextOverlay(CGI->generaltexth->allTexts[532], FONT_SMALL);
+		buttonChat->setTextOverlay(LIBRARY->generaltexth->allTexts[532], FONT_SMALL, Colors::WHITE);
 }
 
 void CLobbyScreen::updateAfterStateChange()
 {
-	if(CSH->mi && tabOpt)
+	OBJECT_CONSTRUCTION;
+	onRemoteClientLobbyStateChanged();
+	const bool shouldFilterByPlayerCount = screenType == ESelectionScreen::newGame && GAME->server().loadMode == ELoadMode::MULTI;
+	const size_t requiredHumanPlayers = shouldFilterByPlayerCount ? std::max<size_t>(2, GAME->server().playerNames.size()) : 0;
+	if(!compatibilityFilterInitialized || (shouldFilterByPlayerCount && requiredHumanPlayers != lastRequiredHumanPlayers))
+	{
+		tabSel->filter(-1, requiredHumanPlayers);
+		tabSel->restoreLastSelection();
+		updateCompatibilityNotice(requiredHumanPlayers);
+		compatibilityFilterInitialized = true;
+		lastRequiredHumanPlayers = requiredHumanPlayers;
+	}
+
+	if(!tabBattleOnlyMode)
+	{
+		tabBattleOnlyMode = std::make_shared<BattleOnlyModeTab>();
+		tabBattleOnlyMode->setEnabled(false);
+
+		// Make sure scenario selection is centered
+		if(settings["general"]["enableUiEnhancements"].Bool())
+		{
+			if((screenType == ESelectionScreen::newGame || screenType == ESelectionScreen::loadGame) && !ENGINE->isDemoData())
+				tabBattleOnlyMode->moveBy(Point(19, 0));
+		}
+
+		if(GAME->server().battleMode)
+			toggleTab(tabBattleOnlyMode);
+	}
+
+	if(GAME->server().isHost() && screenType == ESelectionScreen::newGame)
+	{
+		bool isMultiplayer = GAME->server().loadMode == ELoadMode::MULTI;
+		ExtraOptionsInfo info = SEL->getStartInfo()->extraOptionsInfo;
+		info.cheatsAllowed = isMultiplayer ? persistentStorage["startExtraOptions"]["multiPlayer"]["cheatsAllowed"].Bool() : !persistentStorage["startExtraOptions"]["singlePlayer"]["cheatsNotAllowed"].Bool();
+		info.unlimitedReplay = persistentStorage["startExtraOptions"][isMultiplayer ? "multiPlayer" : "singlePlayer"]["unlimitedReplay"].Bool();
+		info.recordGame = persistentStorage["startExtraOptions"][isMultiplayer ? "multiPlayer" : "singlePlayer"]["recordGame"].Bool();
+		if(info != GAME->server().si->extraOptionsInfo)
+			GAME->server().setExtraOptionsInfo(info);
+	}
+
+	if (tabOpt)
 		tabOpt->recreate();
 
-	card->changeSelection();
+	if(GAME->server().mi)
+	{
+		if (tabTurnOptions)
+			tabTurnOptions->recreate();
+		if (tabExtraOptions)
+			tabExtraOptions->recreate();
+	}
+
+	if(curTab != tabBattleOnlyMode)
+	{
+		updateStartButtonState();
+		card->changeSelection();
+	}
+
 	if (card->iconDifficulty)
 	{
 		if (screenType == ESelectionScreen::loadGame)
 		{
 			// When loading the game, only one button in the difficulty toggle group should be enabled, so here disable all other buttons first, then make selection
-			card->iconDifficulty->setSelectedOnly(CSH->si->difficulty);
+			card->iconDifficulty->setSelectedOnly(GAME->server().si->difficulty);
 		}
 		else
 		{
-			card->iconDifficulty->setSelected(CSH->si->difficulty);
+			card->iconDifficulty->setSelected(GAME->server().si->difficulty);
 		}
 	}
 	
-	if(curTab == tabRand && CSH->si->mapGenOptions)
-		tabRand->setMapGenOptions(CSH->si->mapGenOptions);
+	if(curTab && curTab == tabRand && GAME->server().si->mapGenOptions)
+		tabRand->setMapGenOptions(GAME->server().si->mapGenOptions);
 }
 
 const StartInfo * CLobbyScreen::getStartInfo()
 {
-	return CSH->si.get();
+	return GAME->server().si.get();
 }
 
 const CMapInfo * CLobbyScreen::getMapInfo()
 {
-	return CSH->mi.get();
+	return GAME->server().mi.get();
 }

@@ -10,25 +10,25 @@
 #include "StdInc.h"
 #include "CConfigHandler.h"
 
-#include "../lib/filesystem/Filesystem.h"
-#include "../lib/filesystem/FileStream.h"
-#include "../lib/GameConstants.h"
-#include "../lib/VCMIDirs.h"
-
-using namespace config;
+#include "filesystem/Filesystem.h"
+#include "GameConstants.h"
+#include "VCMIDirs.h"
+#include "json/JsonUtils.h"
+#include "json/JsonValidator.h"
 
 SettingsStorage settings;
-CConfigHandler conf;
+SettingsStorage persistentStorage;
+SettingsStorage keyBindingsConfig;
 
 template<typename Accessor>
 SettingsStorage::NodeAccessor<Accessor>::NodeAccessor(SettingsStorage & _parent, std::vector<std::string> _path):
 	parent(_parent),
-	path(_path)
+	path(std::move(_path))
 {
 }
 
 template<typename Accessor>
-SettingsStorage::NodeAccessor<Accessor> SettingsStorage::NodeAccessor<Accessor>::operator [](std::string nextNode) const
+SettingsStorage::NodeAccessor<Accessor> SettingsStorage::NodeAccessor<Accessor>::operator[](const std::string & nextNode) const
 {
 	std::vector<std::string> newPath = path;
 	newPath.push_back(nextNode);
@@ -55,18 +55,44 @@ SettingsStorage::SettingsStorage():
 {
 }
 
-void SettingsStorage::init()
+SettingsStorage::~SettingsStorage()
 {
-	std::string confName = "config/settings.json";
+	// hack for possible crash due to static destruction order (setting storage can be destroyed before all listeners have died)
+	for(SettingsListener * listener : listeners)
+		listener->terminate();
+}
 
-	JsonUtils::assembleFromFiles(confName).swap(config);
+void SettingsStorage::init(const std::string & dataFilename, const std::string & schemaName)
+{
+	this->dataFilename = dataFilename;
 
-	// Probably new install. Create config file to save settings to
-	if (!CResourceHandler::get("local")->existsResource(ResourceID(confName)))
-		CResourceHandler::get("local")->createResource(confName);
+	JsonPath confName = JsonPath::builtin(dataFilename);
 
-	JsonUtils::maximize(config, "vcmi:settings");
-	JsonUtils::validate(config, "vcmi:settings", "settings");
+	auto * userConfigs = CResourceHandler::get("config");
+
+	// default values shipped with the game, if any
+	config = JsonUtils::assembleFromFiles(confName.getOriginalName());
+
+	if (userConfigs->existsResource(confName))
+	{
+		JsonNode userConfig(confName, *userConfigs);
+		JsonUtils::merge(config, userConfig);
+	}
+	else
+	{
+		// Probably new install. Create config file to save settings to
+		userConfigs->createResource(dataFilename);
+		if(schemaName.empty())
+			invalidateNode(std::vector<std::string>());
+	}
+
+	if(!schemaName.empty())
+	{
+		JsonValidator validator;
+		schema = validator.getSchema(schemaName);
+		JsonUtils::maximize(config, schema);
+		validator.validate(config, schemaName, "settings");
+	}
 }
 
 void SettingsStorage::invalidateNode(const std::vector<std::string> &changedPath)
@@ -76,27 +102,28 @@ void SettingsStorage::invalidateNode(const std::vector<std::string> &changedPath
 
 	JsonNode savedConf = config;
 	savedConf.Struct().erase("session");
-	JsonUtils::minimize(savedConf, "vcmi:settings");
+	if(!schema.isNull())
+		JsonUtils::minimize(savedConf, schema);
 
-	FileStream file(*CResourceHandler::get()->getResourceName(ResourceID("config/settings.json")), std::ofstream::out | std::ofstream::trunc);
-	file << savedConf.toJson();
+	std::fstream file(CResourceHandler::get("config")->getResourceName(JsonPath::builtin(dataFilename))->c_str(), std::ofstream::out | std::ofstream::trunc);
+	file << savedConf.toString();
 }
 
-JsonNode & SettingsStorage::getNode(std::vector<std::string> path)
+JsonNode & SettingsStorage::getNode(const std::vector<std::string> & path)
 {
 	JsonNode *node = &config;
-	for(std::string& value : path)
+	for(const std::string & value : path)
 		node = &(*node)[value];
 
 	return *node;
 }
 
-Settings SettingsStorage::get(std::vector<std::string> path)
+Settings SettingsStorage::get(const std::vector<std::string> & path)
 {
 	return Settings(*this, path);
 }
 
-const JsonNode & SettingsStorage::operator [](std::string value) const
+const JsonNode & SettingsStorage::operator[](const std::string & value) const
 {
 	return config[value];
 }
@@ -106,9 +133,9 @@ const JsonNode & SettingsStorage::toJsonNode() const
 	return config;
 }
 
-SettingsListener::SettingsListener(SettingsStorage &_parent, const std::vector<std::string> &_path):
+SettingsListener::SettingsListener(SettingsStorage & _parent, std::vector<std::string> _path):
 	parent(_parent),
-	path(_path)
+	path(std::move(_path))
 {
 	parent.listeners.insert(this);
 }
@@ -121,9 +148,15 @@ SettingsListener::SettingsListener(const SettingsListener &sl):
 	parent.listeners.insert(this);
 }
 
+void SettingsListener::terminate()
+{
+	wasTerminated = true;
+}
+
 SettingsListener::~SettingsListener()
 {
-	parent.listeners.erase(this);
+	if (!wasTerminated)
+		parent.listeners.erase(this);
 }
 
 void SettingsListener::nodeInvalidated(const std::vector<std::string> &changedPath)
@@ -140,7 +173,7 @@ void SettingsListener::nodeInvalidated(const std::vector<std::string> &changedPa
 
 void SettingsListener::operator() (std::function<void(const JsonNode&)> _callback)
 {
-	callback = _callback;
+	callback = std::move(_callback);
 }
 
 Settings::Settings(SettingsStorage &_parent, const std::vector<std::string> &_path):
@@ -167,135 +200,14 @@ const JsonNode* Settings::operator ->() const
 	return &node;
 }
 
-const JsonNode& Settings::operator [](std::string value) const
+const JsonNode & Settings::operator[](const std::string & value) const
 {
 	return node[value];
 }
 
-JsonNode& Settings::operator [](std::string value)
+JsonNode & Settings::operator[](const std::string & value)
 {
 	return node[value];
-}
-//
-// template DLL_LINKAGE struct SettingsStorage::NodeAccessor<SettingsListener>;
-// template DLL_LINKAGE struct SettingsStorage::NodeAccessor<Settings>;
-
-static void setButton(ButtonInfo &button, const JsonNode &g)
-{
-	button.x = static_cast<int>(g["x"].Float());
-	button.y = static_cast<int>(g["y"].Float());
-	button.playerColoured = g["playerColoured"].Float();
-	button.defName = g["graphic"].String();
-
-	if (!g["additionalDefs"].isNull()) {
-		const JsonVector &defs_vec = g["additionalDefs"].Vector();
-
-		for(const JsonNode &def : defs_vec) {
-			button.additionalDefs.push_back(def.String());
-		}
-	}
-}
-
-static void setGem(AdventureMapConfig &ac, const int gem, const JsonNode &g)
-{
-	ac.gemX[gem] = static_cast<int>(g["x"].Float());
-	ac.gemY[gem] = static_cast<int>(g["y"].Float());
-	ac.gemG.push_back(g["graphic"].String());
-}
-
-CConfigHandler::CConfigHandler()
-	: current(nullptr)
-{
-}
-
-CConfigHandler::~CConfigHandler()
-{
-}
-
-void config::CConfigHandler::init()
-{
-	/* Read resolutions. */
-	const JsonNode config(ResourceID("config/resolutions.json"));
-	const JsonVector &guisettings_vec = config["GUISettings"].Vector();
-
-	for(const JsonNode &g : guisettings_vec)
-	{
-		std::pair<int,int> curRes((int)g["resolution"]["x"].Float(), (int)g["resolution"]["y"].Float());
-		GUIOptions *current = &conf.guiOptions[curRes];
-
-		current->ac.inputLineLength =  static_cast<int>(g["InGameConsole"]["maxInputPerLine"].Float());
-		current->ac.outputLineLength = static_cast<int>(g["InGameConsole"]["maxOutputPerLine"].Float());
-
-		current->ac.advmapX = static_cast<int>(g["AdvMap"]["x"].Float());
-		current->ac.advmapY = static_cast<int>(g["AdvMap"]["y"].Float());
-		current->ac.advmapW = static_cast<int>(g["AdvMap"]["width"].Float());
-		current->ac.advmapH = static_cast<int>(g["AdvMap"]["height"].Float());
-		current->ac.smoothMove = g["AdvMap"]["smoothMove"].Float();
-		current->ac.puzzleSepia = g["AdvMap"]["puzzleSepia"].Float();
-		current->ac.screenFading = g["AdvMap"]["screenFading"].isNull() ? true : g["AdvMap"]["screenFading"].Float(); // enabled by default
-		current->ac.objectFading = g["AdvMap"]["objectFading"].isNull() ? true : g["AdvMap"]["objectFading"].Float();
-
-		current->ac.infoboxX = static_cast<int>(g["InfoBox"]["x"].Float());
-		current->ac.infoboxY = static_cast<int>(g["InfoBox"]["y"].Float());
-
-		setGem(current->ac, 0, g["gem0"]);
-		setGem(current->ac, 1, g["gem1"]);
-		setGem(current->ac, 2, g["gem2"]);
-		setGem(current->ac, 3, g["gem3"]);
-
-		current->ac.mainGraphic = g["background"].String();
-		current->ac.worldViewGraphic = g["backgroundWorldView"].String();
-
-		current->ac.hlistX =    static_cast<int>(g["HeroList"]["x"].Float());
-		current->ac.hlistY =    static_cast<int>(g["HeroList"]["y"].Float());
-		current->ac.hlistSize = static_cast<int>(g["HeroList"]["size"].Float());
-		current->ac.hlistMB = g["HeroList"]["movePoints"].String();
-		current->ac.hlistMN = g["HeroList"]["manaPoints"].String();
-		current->ac.hlistAU = g["HeroList"]["arrowUp"].String();
-		current->ac.hlistAD = g["HeroList"]["arrowDown"].String();
-
-		current->ac.tlistX =    static_cast<int>(g["TownList"]["x"].Float());
-		current->ac.tlistY =    static_cast<int>(g["TownList"]["y"].Float());
-		current->ac.tlistSize = static_cast<int>(g["TownList"]["size"].Float());
-		current->ac.tlistAU = g["TownList"]["arrowUp"].String();
-		current->ac.tlistAD = g["TownList"]["arrowDown"].String();
-
-		current->ac.minimapW = static_cast<int>(g["Minimap"]["width"].Float());
-		current->ac.minimapH = static_cast<int>(g["Minimap"]["height"].Float());
-		current->ac.minimapX = static_cast<int>(g["Minimap"]["x"].Float());
-		current->ac.minimapY = static_cast<int>(g["Minimap"]["y"].Float());
-
-		current->ac.overviewPics = static_cast<int>(g["Overview"]["pics"].Float());
-		current->ac.overviewSize = static_cast<int>(g["Overview"]["size"].Float());
-		current->ac.overviewBg = g["Overview"]["graphic"].String();
-
-		current->ac.statusbarX = static_cast<int>(g["Statusbar"]["x"].Float());
-		current->ac.statusbarY = static_cast<int>(g["Statusbar"]["y"].Float());
-		current->ac.statusbarG = g["Statusbar"]["graphic"].String();
-
-		current->ac.resdatabarX = static_cast<int>(g["ResDataBar"]["x"].Float());
-		current->ac.resdatabarY = static_cast<int>(g["ResDataBar"]["y"].Float());
-		current->ac.resOffsetX =  static_cast<int>(g["ResDataBar"]["offsetX"].Float());
-		current->ac.resOffsetY =  static_cast<int>(g["ResDataBar"]["offsetY"].Float());
-		current->ac.resDist =     static_cast<int>(g["ResDataBar"]["resSpace"].Float());
-		current->ac.resDateDist = static_cast<int>(g["ResDataBar"]["resDateSpace"].Float());
-		current->ac.resdatabarG = g["ResDataBar"]["graphic"].String();
-
-		setButton(current->ac.kingOverview, g["ButtonKingdomOv"]);
-		setButton(current->ac.underground, g["ButtonUnderground"]);
-		setButton(current->ac.questlog, g["ButtonQuestLog"]);
-		setButton(current->ac.sleepWake, g["ButtonSleepWake"]);
-		setButton(current->ac.moveHero, g["ButtonMoveHero"]);
-		setButton(current->ac.spellbook, g["ButtonSpellbook"]);
-		setButton(current->ac.advOptions, g["ButtonAdvOptions"]);
-		setButton(current->ac.sysOptions, g["ButtonSysOptions"]);
-		setButton(current->ac.nextHero, g["ButtonNextHero"]);
-		setButton(current->ac.endTurn, g["ButtonEndTurn"]);
-	}
-
-	const JsonNode& screenRes = settings["video"]["screenRes"];
-
-	SetResolution((int)screenRes["width"].Float(), (int)screenRes["height"].Float());
 }
 
 // Force instantiation of the SettingsStorage::NodeAccessor class template.

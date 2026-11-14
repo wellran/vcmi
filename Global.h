@@ -15,25 +15,6 @@
 // Fixed width bool data type is important for serialization
 static_assert(sizeof(bool) == 1, "Bool needs to be 1 byte in size.");
 
-#ifdef __GNUC__
-#  define GCC_VERSION (__GNUC__ * 100 + __GNUC_MINOR__ * 10 + __GNUC_PATCHLEVEL__)
-#endif
-
-#if !defined(__clang__) && defined(__GNUC__) && (GCC_VERSION < 470)
-#  error VCMI requires at least gcc-4.7.2 for successful compilation or clang-3.1. Please update your compiler
-#endif
-
-#if defined(__GNUC__) && (GCC_VERSION == 470 || GCC_VERSION == 471)
-#  error This GCC version has buggy std::array::at version and should not be used. Please update to 4.7.2 or later
-#endif
-
-/* ---------------------------------------------------------------------------- */
-/* Suppress some compiler warnings */
-/* ---------------------------------------------------------------------------- */
-#ifdef _MSC_VER
-#  pragma warning (disable : 4800 ) /* disable conversion to bool warning -- I think it's intended in all places */
-#endif
-
 /* ---------------------------------------------------------------------------- */
 /* System detection. */
 /* ---------------------------------------------------------------------------- */
@@ -53,13 +34,21 @@ static_assert(sizeof(bool) == 1, "Bool needs to be 1 byte in size.");
 #elif defined(__linux__) || defined(__gnu_linux__) || defined(linux) || defined(__linux)
 #  define VCMI_UNIX
 #  define VCMI_XDG
-#  ifdef __ANDROID__
+#  if defined(__ANDROID__) || defined(ANDROID)
 #    define VCMI_ANDROID
 #  endif
 #elif defined(__FreeBSD_kernel__) || defined(__FreeBSD__)
 #  define VCMI_UNIX
 #  define VCMI_XDG
 #  define VCMI_FREEBSD
+#elif defined(__OpenBSD__)
+#  define VCMI_UNIX
+#  define VCMI_XDG
+#  define VCMI_OPENBSD
+#elif defined(__HAIKU__)
+#  define VCMI_UNIX
+#  define VCMI_XDG
+#  define VCMI_HAIKU
 #elif defined(__GNU__) || defined(__gnu_hurd__) || (defined(__MACH__) && !defined(__APPLE__))
 #  define VCMI_UNIX
 #  define VCMI_XDG
@@ -68,7 +57,7 @@ static_assert(sizeof(bool) == 1, "Bool needs to be 1 byte in size.");
 #  define VCMI_UNIX
 #  define VCMI_APPLE
 #  include "TargetConditionals.h"
-#  if TARGET_IPHONE_SIMULATOR
+#  if TARGET_OS_SIMULATOR || TARGET_IPHONE_SIMULATOR
 #    define VCMI_IOS
 #    define VCMI_IOS_SIM
 #  elif TARGET_OS_IPHONE
@@ -79,130 +68,105 @@ static_assert(sizeof(bool) == 1, "Bool needs to be 1 byte in size.");
 //#  warning "Unknown Apple target."?
 #  endif
 #else
-#  error "VCMI supports only Windows, OSX, Linux and Android targets"
+#  error "This platform isn't supported"
 #endif
 
-#ifdef VCMI_IOS
-#  error "iOS system isn't yet supported."
-#endif
-
-// Each compiler uses own way to supress fall through warning. Try to find it.
-#ifdef __has_cpp_attribute
-#  if __has_cpp_attribute(fallthrough)
-#    define FALLTHROUGH [[fallthrough]];
-#  elif __has_cpp_attribute(gnu::fallthrough)
-#    define FALLTHROUGH [[gnu::fallthrough]];
-#  elif __has_cpp_attribute(clang::fallthrough)
-#    define FALLTHROUGH [[clang::fallthrough]];
-#  else
-#    define FALLTHROUGH
-#  endif
-#else
-#  define FALLTHROUGH
+#if defined(VCMI_ANDROID) || defined(VCMI_IOS)
+#define VCMI_MOBILE
 #endif
 
 /* ---------------------------------------------------------------------------- */
 /* Commonly used C++, Boost headers */
 /* ---------------------------------------------------------------------------- */
 #ifdef VCMI_WINDOWS
-#  define WIN32_LEAN_AND_MEAN		// Exclude rarely-used stuff from Windows headers - delete this line if something is missing.
-#  define NOMINMAX					// Exclude min/max macros from <Windows.h>. Use std::[min/max] from <algorithm> instead.
-#  define _NO_W32_PSEUDO_MODIFIERS  // Exclude more macros for compiling with MinGW on Linux.
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN		 // Exclude rarely-used stuff from Windows headers - delete this line if something is missing.
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX				 // Exclude min/max macros from <Windows.h>. Use std::[min/max] from <algorithm> instead.
+#  endif
+#  ifndef NOGDI
+#    define NOGDI
+#  endif
+#  ifndef _NO_W32_PSEUDO_MODIFIERS
+#    define _NO_W32_PSEUDO_MODIFIERS // Exclude more macros for compiling with MinGW on Linux.
+#  endif
 #endif
 
-#ifdef VCMI_ANDROID
-#  define NO_STD_TOSTRING // android runtime (gnustl) currently doesn't support std::to_string, so we provide our impl in this case
-#endif // VCMI_ANDROID
-
-/* ---------------------------------------------------------------------------- */
-/* A macro to force inlining some of our functions */
-/* ---------------------------------------------------------------------------- */
-// Compiler (at least MSVC) is not so smart here-> without that displaying is MUCH slower
-#ifdef _MSC_VER
-#  define STRONG_INLINE __forceinline
-#elif __GNUC__
-#  define STRONG_INLINE inline __attribute__((always_inline))
-#else
-#  define STRONG_INLINE inline
+// Required for building boost::stacktrace on macOS.
+// See https://github.com/boostorg/stacktrace/issues/88
+#if defined(VCMI_APPLE)
+#define _GNU_SOURCE
 #endif
-
-#define TO_STRING_HELPER(x) #x
-#define TO_STRING(x) TO_STRING_HELPER(x)
-#define LINE_IN_FILE __FILE__ ":" TO_STRING(__LINE__)
 
 #define _USE_MATH_DEFINES
 
-#include <cstdio>
-#include <stdio.h>
-
 #include <algorithm>
+#include <any>
 #include <array>
+#include <atomic>
+#include <bitset>
 #include <cassert>
+#include <chrono>
 #include <climits>
 #include <cmath>
+#include <compare>
+#include <condition_variable>
+#include <cstdio>
 #include <cstdlib>
-#include <functional>
 #include <fstream>
+#include <functional>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <numeric>
+#include <optional>
 #include <queue>
 #include <random>
+#include <ranges>
+#include <regex>
 #include <set>
+#include <shared_mutex>
 #include <sstream>
 #include <string>
-#include <unordered_set>
+#include <string_view>
+#include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
-#include <atomic>
 
-//The only available version is 3, as of Boost 1.50
+// VCMI requires features that were added to TBB 2021.4
+// However, until TBB 2021.7 they were only available with this define
+// For versions TBB 2021.7 and later this define is not required
+#define TBB_PREVIEW_TASK_GROUP_EXTENSIONS 1
+
 #include <boost/version.hpp>
 
+// As of Boost 1.50+, the only available version is 3,
+// Version 4 has been added in Boost 1.77
 #define BOOST_FILESYSTEM_VERSION 3
-#if BOOST_VERSION > 105000
-#  define BOOST_THREAD_VERSION 3
-#endif
-#define BOOST_THREAD_DONT_PROVIDE_THREAD_DESTRUCTOR_CALLS_TERMINATE_IF_JOINABLE 1
-//need to link boost thread dynamically to avoid https://stackoverflow.com/questions/35978572/boost-thread-interupt-does-not-work-when-crossing-a-dll-boundary
-#define BOOST_THREAD_USE_DLL //for example VCAI::finish() may freeze on thread join after interrupt when linking this statically
-#define BOOST_BIND_NO_PLACEHOLDERS
-
-#if defined(_MSC_VER) && (_MSC_VER == 1900 || _MSC_VER == 1910 || _MSC_VER == 1911)
-#define BOOST_NO_CXX11_VARIADIC_TEMPLATES //Variadic templates are buggy in VS2015 and VS2017, so turn this off to avoid compile errors
-#endif
-#if BOOST_VERSION >= 106600
-#define BOOST_ASIO_ENABLE_OLD_SERVICES
+#if BOOST_VERSION == 107400
+#  define BOOST_ALLOW_DEPRECATED_HEADERS
 #endif
 
 #include <boost/algorithm/string.hpp>
-#include <boost/any.hpp>
-#include <boost/cstdint.hpp>
+#include <boost/container/flat_map.hpp>
+#include <boost/container/small_vector.hpp>
+#include <boost/container/static_vector.hpp>
+// C++ 20 -> std::source_location::function_name
 #include <boost/current_function.hpp>
-#include <boost/crc.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
-#include <boost/date_time/posix_time/posix_time_io.hpp>
-#include <boost/filesystem.hpp>
+// C++ 17 -> std::filesystem
+#include <boost/filesystem/directory.hpp>
+#include <boost/filesystem/exception.hpp>
+#include <boost/filesystem/file_status.hpp>
+#include <boost/filesystem/operations.hpp>
 #include <boost/filesystem/path.hpp>
-#include <boost/filesystem/fstream.hpp>
 #include <boost/format.hpp>
-#include <boost/functional/hash.hpp>
-#include <boost/lexical_cast.hpp>
-#ifdef VCMI_WINDOWS
-#include <boost/locale/generator.hpp>
-#endif
-#include <boost/logic/tribool.hpp>
-#include <boost/optional.hpp>
-#include <boost/optional/optional_io.hpp>
-#include <boost/range/adaptor/filtered.hpp>
-#include <boost/range/adaptor/reversed.hpp>
-#include <boost/range/algorithm.hpp>
-#include <boost/thread.hpp>
-#include <boost/variant.hpp>
-#include <boost/math/special_functions/round.hpp>
 #include <boost/multi_array.hpp>
 
 #ifndef M_PI
@@ -213,7 +177,6 @@ static_assert(sizeof(bool) == 1, "Bool needs to be 1 byte in size.");
 /* Usings */
 /* ---------------------------------------------------------------------------- */
 using namespace std::placeholders;
-namespace range = boost::range;
 
 /* ---------------------------------------------------------------------------- */
 /* Typedefs */
@@ -228,16 +191,15 @@ typedef int32_t si32; //signed int 32 bits (4 bytes)
 typedef int16_t si16; //signed int 16 bits (2 bytes)
 typedef int8_t si8; //signed int 8 bits (1 byte)
 
-// Lock typedefs
-typedef boost::lock_guard<boost::mutex> TLockGuard;
-typedef boost::lock_guard<boost::recursive_mutex> TLockGuardRec;
-
 /* ---------------------------------------------------------------------------- */
 /* Macros */
 /* ---------------------------------------------------------------------------- */
 // Import + Export macro declarations
 #ifdef VCMI_WINDOWS
-#  ifdef __GNUC__
+#  ifdef VCMI_DLL_STATIC
+#    define DLL_IMPORT
+#    define DLL_EXPORT
+#  elif defined(__GNUC__)
 #    define DLL_IMPORT __attribute__((dllimport))
 #    define DLL_EXPORT __attribute__((dllexport))
 #  else
@@ -259,43 +221,22 @@ typedef boost::lock_guard<boost::recursive_mutex> TLockGuardRec;
 #  define DLL_LINKAGE DLL_IMPORT
 #endif
 
-#define THROW_FORMAT(message, formatting_elems)  throw std::runtime_error(boost::str(boost::format(message) % formatting_elems))
+// old iOS SDKs compatibility
+#ifdef VCMI_IOS
+#include <AvailabilityVersions.h>
 
-// can be used for counting arrays
-template<typename T, size_t N> char (&_ArrayCountObj(const T (&)[N]))[N];
-#define ARRAY_COUNT(arr)    (sizeof(_ArrayCountObj(arr)))
-
-// should be used for variables that becomes unused in release builds (e.g. only used for assert checks)
-#define UNUSED(VAR) ((void)VAR)
+#ifndef __IPHONE_13_0
+#define __IPHONE_13_0 130000
+#endif
+#endif // VCMI_IOS
 
 /* ---------------------------------------------------------------------------- */
 /* VCMI standard library */
 /* ---------------------------------------------------------------------------- */
 #include <vstd/CLoggerBase.h>
 
-void inline handleException()
-{
-	try
-	{
-		throw;
-	}
-	catch(const std::exception & ex)
-	{
-		logGlobal->error(ex.what());
-	}
-	catch(const std::string & ex)
-	{
-		logGlobal->error(ex);
-	}
-	catch(...)
-	{
-		logGlobal->error("Sorry, caught unknown exception type. No more info available.");
-	}
-}
-
 namespace vstd
 {
-
 	// combine hashes. Present in boost but not in std
 	template <class T>
 	inline void hash_combine(std::size_t& seed, const T& v)
@@ -353,7 +294,7 @@ namespace vstd
 	template <typename Container, typename Func>
 	int find_pos_if(const Container & c, const Func &f)
 	{
-		auto ret = boost::range::find_if(c, f);
+		auto ret = std::find_if(c.begin(), c.end(), f);
 		if(ret != std::end(c))
 			return std::distance(std::begin(c), ret);
 
@@ -372,6 +313,24 @@ namespace vstd
 	typename Container::const_iterator find(const Container & c, const Item &i)
 	{
 		return std::find(c.begin(),c.end(),i);
+	}
+
+	// returns existing value from map, or default value if key does not exists
+	template <typename Map>
+	const typename Map::mapped_type & find_or(const Map& m, const typename Map::key_type& key, const typename Map::mapped_type& defaultValue) {
+		auto it = m.find(key);
+		if (it == m.end())
+			return defaultValue;
+		return it->second;
+	}
+
+	// given a map from keys to values, creates a new map from values to keys 
+	template<typename K, typename V>
+	static std::map<V, K> reverseMap(const std::map<K, V>& m) {
+		std::map<V, K> r;
+ 		for (const auto& kv : m)
+			r[kv.second] = kv.first;
+		return r;
 	}
 
 	//returns first key that maps to given value if present, returns success via found if provided
@@ -430,12 +389,10 @@ namespace vstd
 	}
 
 	//makes a to fit the range <b, c>
-	template <typename t1, typename t2, typename t3>
-	t1 &abetween(t1 &a, const t2 &b, const t3 &c)
+	template <typename T>
+	void abetween(T &value, const T &min, const T &max)
 	{
-		amax(a,b);
-		amin(a,c);
-		return a;
+		value = std::clamp(value, min, max);
 	}
 
 	//checks if a is between b and c
@@ -467,52 +424,6 @@ namespace vstd
 		}
 	};
 
-	// Assigns value a2 to a1. The point of time of the real operation can be controlled
-	// with the () operator.
-	template <typename t1, typename t2>
-	assigner<t1,t2> assigno(t1 &a1, const t2 &a2)
-	{
-		return assigner<t1,t2>(a1,a2);
-	}
-
-	//deleted pointer and sets it to nullptr
-	template <typename T>
-	void clear_pointer(T* &ptr)
-	{
-		delete ptr;
-		ptr = nullptr;
-	}
-
-#if _MSC_VER >= 1800
-	using std::make_unique;
-#else
-	template<typename T>
-	std::unique_ptr<T> make_unique()
-	{
-		return std::unique_ptr<T>(new T());
-	}
-	template<typename T, typename Arg1>
-	std::unique_ptr<T> make_unique(Arg1 &&arg1)
-	{
-		return std::unique_ptr<T>(new T(std::forward<Arg1>(arg1)));
-	}
-	template<typename T, typename Arg1, typename Arg2>
-	std::unique_ptr<T> make_unique(Arg1 &&arg1, Arg2 &&arg2)
-	{
-		return std::unique_ptr<T>(new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2)));
-	}
-	template<typename T, typename Arg1, typename Arg2, typename Arg3>
-	std::unique_ptr<T> make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3)
-	{
-		return std::unique_ptr<T>(new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2), std::forward<Arg3>(arg3)));
-	}
-	template<typename T, typename Arg1, typename Arg2, typename Arg3, typename Arg4>
-	std::unique_ptr<T> make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4)
-	{
-		return std::unique_ptr<T>(new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2), std::forward<Arg3>(arg3), std::forward<Arg4>(arg4)));
-	}
-#endif
-
 	template <typename Container>
 	typename Container::const_reference circularAt(const Container &r, size_t index)
 	{
@@ -523,14 +434,33 @@ namespace vstd
 		return *itr;
 	}
 
+	template <typename Container, typename Item>
+	void erase(Container &c, const Item &item)
+	{
+		c.erase(std::remove(c.begin(), c.end(), item), c.end());
+	}
+
 	template<typename Range, typename Predicate>
 	void erase_if(Range &vec, Predicate pred)
 	{
-		vec.erase(boost::remove_if(vec, pred),vec.end());
+		vec.erase(std::remove_if(vec.begin(), vec.end(), pred), vec.end());
 	}
 
 	template<typename Elem, typename Predicate>
 	void erase_if(std::set<Elem> &setContainer, Predicate pred)
+	{
+		auto itr = setContainer.begin();
+		auto endItr = setContainer.end();
+		while(itr != endItr)
+		{
+			auto tmpItr = itr++;
+			if(pred(*tmpItr))
+				setContainer.erase(tmpItr);
+		}
+	}
+
+	template<typename Elem, typename Predicate>
+	void erase_if(std::unordered_set<Elem> &setContainer, Predicate pred)
 	{
 		auto itr = setContainer.begin();
 		auto endItr = setContainer.end();
@@ -556,10 +486,33 @@ namespace vstd
 		}
 	}
 
+	//works for std::unordered_map, maybe something else
+	template<typename Key, typename Val, typename Predicate>
+	void erase_if(std::unordered_map<Key, Val> & container, Predicate pred)
+	{
+		auto itr = container.begin();
+		auto endItr = container.end();
+		while(itr != endItr)
+		{
+			auto tmpItr = itr++;
+			if(pred(*tmpItr))
+				container.erase(tmpItr);
+		}
+	}
+
+	// Removes all duplicate elements from the vector
+	template<typename T>
+	void unique(std::vector<T> &vec)
+	{
+		std::sort(vec.begin(), vec.end());
+		auto newEnd = std::unique(vec.begin(), vec.end());
+		vec.erase(newEnd, vec.end());
+	}
+
 	template<typename InputRange, typename OutputIterator, typename Predicate>
 	OutputIterator copy_if(const InputRange &input, OutputIterator result, Predicate pred)
 	{
-		return std::copy_if(boost::const_begin(input), std::end(input), result, pred);
+		return std::copy_if(std::cbegin(input), std::end(input), result, pred);
 	}
 
 	template <typename Container>
@@ -570,14 +523,14 @@ namespace vstd
 
 	//Returns iterator to the element for which the value of ValueFunction is minimal
 	template<class ForwardRange, class ValueFunction>
-	auto minElementByFun(const ForwardRange& rng, ValueFunction vf) -> decltype(std::begin(rng))
+	auto minElementByFun(const ForwardRange& rng, ValueFunction vf)
 	{
 		/* Clang crashes when instantiating this function template and having PCH compilation enabled.
 		 * There is a bug report here: http://llvm.org/bugs/show_bug.cgi?id=18744
 		 * Current bugfix is to don't use a typedef for decltype(*std::begin(rng)) and to use decltype
 		 * directly for both function parameters.
 		 */
-		return boost::min_element(rng, [&] (decltype(*std::begin(rng)) lhs, decltype(*std::begin(rng)) rhs) -> bool
+		return std::ranges::min_element(rng, [&] (decltype(*std::begin(rng)) lhs, decltype(*std::begin(rng)) rhs) -> bool
 		{
 			return vf(lhs) < vf(rhs);
 		});
@@ -585,23 +538,25 @@ namespace vstd
 
 	//Returns iterator to the element for which the value of ValueFunction is maximal
 	template<class ForwardRange, class ValueFunction>
-	auto maxElementByFun(const ForwardRange& rng, ValueFunction vf) -> decltype(std::begin(rng))
+	auto maxElementByFun(const ForwardRange& rng, ValueFunction vf)
 	{
 		/* Clang crashes when instantiating this function template and having PCH compilation enabled.
 		 * There is a bug report here: http://llvm.org/bugs/show_bug.cgi?id=18744
 		 * Current bugfix is to don't use a typedef for decltype(*std::begin(rng)) and to use decltype
 		 * directly for both function parameters.
 		 */
-		return boost::max_element(rng, [&] (decltype(*std::begin(rng)) lhs, decltype(*std::begin(rng)) rhs) -> bool
+		return std::ranges::max_element(rng, [&] (decltype(*std::begin(rng)) lhs, decltype(*std::begin(rng)) rhs) -> bool
 		{
 			return vf(lhs) < vf(rhs);
 		});
 	}
 
+	/// Increments value by specific delta
+	/// similar to std::next but works with other types, e.g. enum class
 	template<typename T>
-	void advance(T &obj, int change)
+	T next(const T &obj, int change)
 	{
-		obj = (T)(((int)obj) + change);
+		return static_cast<T>(static_cast<ptrdiff_t>(obj) + change);
 	}
 
 	template <typename Container>
@@ -626,28 +581,6 @@ namespace vstd
 	bool isValidIndex(const Container &c, Index i)
 	{
 		return i >= 0  &&  i < c.size();
-	}
-
-	template <typename Container, typename Index>
-	boost::optional<typename Container::const_reference> tryAt(const Container &c, Index i)
-	{
-		if(isValidIndex(c, i))
-		{
-			auto itr = c.begin();
-			std::advance(itr, i);
-			return *itr;
-		}
-		return boost::none;
-	}
-
-	template <typename Container, typename Pred>
-	static boost::optional<typename Container::const_reference> tryFindIf(const Container &r, const Pred &t)
-	{
-		auto pos = range::find_if(r, t);
-		if(pos == boost::end(r))
-			return boost::none;
-		else
-			return *pos;
 	}
 
 	template <typename Container>
@@ -684,21 +617,15 @@ namespace vstd
 		return false;
 	}
 
-	template <typename Container, typename Pred>
-	void erase(Container &c, Pred pred)
+	template <typename Container>
+	void removeDuplicates(Container &vec)
 	{
-		c.erase(boost::remove_if(c, pred), c.end());
-	}
-
-	template<typename T>
-	void removeDuplicates(std::vector<T> &vec)
-	{
-		boost::sort(vec);
+		std::sort(vec.begin(), vec.end());
 		vec.erase(std::unique(vec.begin(), vec.end()), vec.end());
 	}
 
-	template <typename T>
-	void concatenate(std::vector<T> &dest, const std::vector<T> &src)
+	template <typename Container>
+	void concatenate(Container &dest, const Container &src)
 	{
 		dest.reserve(dest.size() + src.size());
 		dest.insert(dest.end(), src.begin(), src.end());
@@ -714,6 +641,14 @@ namespace vstd
 		return v3;
 	}
 
+	template <typename T>
+	std::set<T> difference(const std::set<T> &s1, const std::set<T> s2)
+	{
+		std::set<T> s3;
+		std::set_difference(s1.begin(), s1.end(), s2.begin(), s2.end(), std::inserter(s3, s3.end()));
+		return s3;
+	}
+
 	template <typename Key, typename V>
 	bool containsMapping(const std::multimap<Key,V> & map, const std::pair<const Key,V> & mapping)
 	{
@@ -726,20 +661,73 @@ namespace vstd
 		return false;
 	}
 
-	using boost::math::round;
-}
-using vstd::operator-=;
-using vstd::make_unique;
-
-#ifdef NO_STD_TOSTRING
-namespace std
-{
-	template <typename T>
-	inline std::string to_string(const T& value)
+	//c++20 feature
+	template<typename Arithmetic, typename Floating>
+	Arithmetic lerp(const Arithmetic & a, const Arithmetic & b, const Floating & f)
 	{
-		std::ostringstream ss;
-		ss << value;
-		return ss.str();
+		return a + (b - a) * f;
+	}
+
+	/// Divides dividend by divisor and rounds result away from zero
+	/// For use with integer-only arithmetic
+	template<typename Integer1, typename Integer2>
+	Integer1 divideAndCeil(const Integer1 & dividend, const Integer2 & divisor)
+	{
+		static_assert(std::is_integral_v<Integer1> && std::is_integral_v<Integer2>, "This function should only be used with integral types");
+		if (dividend >= 0)
+			return (dividend + divisor - 1) / divisor;
+		else
+			return (dividend - divisor + 1) / divisor;
+	}
+
+	/// Divides dividend by divisor and rounds result to nearest
+	/// For use with integer-only arithmetic
+	template<typename Integer1, typename Integer2>
+	Integer1 divideAndRound(const Integer1 & dividend, const Integer2 & divisor)
+	{
+		static_assert(std::is_integral_v<Integer1> && std::is_integral_v<Integer2>, "This function should only be used with integral types");
+		if (dividend >= 0)
+			return (dividend + divisor / 2 - 1) / divisor;
+		else
+			return (dividend - divisor / 2 + 1) / divisor;
+	}
+
+	/// Divides dividend by divisor and rounds result towards zero
+	/// For use with integer-only arithmetic
+	template<typename Integer1, typename Integer2>
+	Integer1 divideAndFloor(const Integer1 & dividend, const Integer2 & divisor)
+	{
+		static_assert(std::is_integral_v<Integer1> && std::is_integral_v<Integer2>, "This function should only be used with integral types");
+		return dividend / divisor;
+	}
+
+	template<typename Floating>
+	bool isAlmostZero(const Floating & value)
+	{
+		constexpr Floating epsilon(0.00001);
+		return std::abs(value) <= epsilon;
+	}
+
+	template<typename Floating1, typename Floating2>
+	bool isAlmostEqual(const Floating1 & left, const Floating2 & right)
+	{
+		using Floating = decltype(left + right);
+		constexpr Floating epsilon(0.00001);
+		const Floating relativeEpsilon = std::max(std::abs(left), std::abs(right)) * epsilon;
+		const Floating value = std::abs(left - right);
+		return value <= relativeEpsilon;
+	}
+
+	///compile-time version of std::abs for ints for int3, in clang++15 std::abs is constexpr
+	static constexpr int abs(int i) {
+		if(i < 0) return -i;
+		return i;
+	}
+
+	///C++23
+	template< class Enum > constexpr std::underlying_type_t<Enum> to_underlying( Enum e ) noexcept
+	{
+		return static_cast<std::underlying_type_t<Enum>>(e);
 	}
 }
-#endif // NO_STD_TOSTRING
+using vstd::operator-=;

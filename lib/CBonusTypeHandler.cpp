@@ -13,316 +13,274 @@
 
 #include "CBonusTypeHandler.h"
 
-#include "JsonNode.h"
 #include "filesystem/Filesystem.h"
 
-#include "GameConstants.h"
 #include "CCreatureHandler.h"
+#include <vcmi/Creature.h>
+#include <vcmi/spells/Spell.h>
+#include "bonuses/BonusParameters.h"
+#include "scripting/ScriptService.h"
+#include "GameConstants.h"
+#include "GameLibrary.h"
+#include "modding/ModScope.h"
+#include "modding/LibraryLoadContext.h"
+#include "texts/CGeneralTextHandler.h"
+#include "json/JsonUtils.h"
 #include "spells/CSpellHandler.h"
-
-template class std::vector<CBonusType>;
-
-///MacroString
-
-MacroString::MacroString(const std::string & format)
-{
-	static const std::string MACRO_START = "${";
-	static const std::string MACRO_END = "}";
-	static const size_t MACRO_START_L = 2;
-	static const size_t MACRO_END_L = 1;
-
-	size_t end_pos = 0;
-	size_t start_pos = std::string::npos;
-	do
-	{
-		start_pos = format.find(MACRO_START, end_pos);
-
-		if(!(start_pos == std::string::npos))
-		{
-			//chunk before macro
-			items.push_back(Item(Item::STRING, format.substr(end_pos, start_pos - end_pos)));
-
-			start_pos += MACRO_START_L;
-			end_pos = format.find(MACRO_END, start_pos);
-
-			if(end_pos == std::string::npos)
-			{
-				logBonus->warn("Format error in: %s", format);
-				end_pos = start_pos;
-				break;
-			}
-			else
-			{
-				items.push_back(Item(Item::MACRO, format.substr(start_pos, end_pos - start_pos)));
-				end_pos += MACRO_END_L;
-			}
-		}
-	}
-	while(start_pos != std::string::npos);
-
-	//no more macros
-	items.push_back(Item(Item::STRING, format.substr(end_pos)));
-}
-
-std::string MacroString::build(const GetValue & getValue) const
-{
-	std::string result;
-
-	for(const Item & i : items)
-	{
-		switch(i.type)
-		{
-		case Item::MACRO:
-		{
-			result += getValue(i.value);
-			break;
-		}
-		case Item::STRING:
-		{
-			result += i.value;
-			break;
-		}
-		}
-	}
-	return result;
-}
 
 ///CBonusType
 
-CBonusType::CBonusType()
+std::string CBonusType::getDescriptionTextID() const
 {
-	hidden = true;
-	icon = nameTemplate = descriptionTemplate = "";
+	return TextIdentifier( "core", "bonus", identifier, "description").get();
 }
-
-CBonusType::~CBonusType()
-{
-
-}
-
-void CBonusType::buildMacros()
-{
-	name = MacroString(nameTemplate);
-	description = MacroString(descriptionTemplate);
-}
-
 
 ///CBonusTypeHandler
 
-CBonusTypeHandler::CBonusTypeHandler()
+CBonusTypeHandler::CBonusTypeHandler(LibraryLoadContext & context)
 {
 	//register predefined bonus types
 
-	#define BONUS_NAME(x) \
-	do { \
-		bonusTypes.push_back(CBonusType()); \
-	} while(0);
+	// MOD COMPATIBILITY FOR 1.6
+	registerObject(context, ModScope::scopeBuiltin(), "bonus", "FEAR", JsonNode(), 0);
+	registerObject(context, ModScope::scopeBuiltin(), "bonus", "FEARLESS", JsonNode(), 0);
 
-
-	BONUS_LIST;
-	#undef BONUS_NAME
-
-	load();
-}
-
-CBonusTypeHandler::~CBonusTypeHandler()
-{
-	//dtor
-}
-
-std::string CBonusTypeHandler::bonusToString(const std::shared_ptr<Bonus> & bonus, const IBonusBearer * bearer, bool description) const
-{
-	auto getValue = [=](const std::string & name) -> std::string
-	{
-		if(name == "val")
-		{
-			 return boost::lexical_cast<std::string>(bearer->valOfBonuses(Selector::typeSubtype(bonus->type, bonus->subtype)));
-		}
-		else if(name == "subtype.creature")
-		{
-			 const CreatureID cre(bonus->subtype);
-			 return cre.toCreature()->namePl;
-		}
-		else if(name == "subtype.spell")
-		{
-			 const SpellID sp(bonus->subtype);
-			 return sp.toSpell()->name;
-		}
-		else if(name == "MR")
-		{
-			 return boost::lexical_cast<std::string>(bearer->magicResistance());
-		}
-		else
-		{
-			 logBonus->warn("Unknown macro in bonus config: %s", name);
-			 return "[error]";
-		}
+#define BONUS_NAME(x) { #x },
+	builtinBonusNames = {
+		BONUS_LIST
 	};
+#undef BONUS_NAME
 
-	const CBonusType & bt = bonusTypes[bonus->type];
+	for (int i = 0; i < builtinBonusNames.size(); ++i)
+		bonusTypes.push_back(std::make_shared<CBonusType>());
+
+	for (int i = 0; i < builtinBonusNames.size(); ++i)
+		registerObject(context, ModScope::scopeBuiltin(), "bonus", builtinBonusNames[i], JsonNode(), i);
+}
+
+CBonusTypeHandler::~CBonusTypeHandler() = default;
+
+std::string CBonusTypeHandler::bonusToString(const std::shared_ptr<Bonus> & bonus, const IBonusBearer * bearer) const
+{
+	if(!bearer)
+		throw std::runtime_error("CBonusTypeHandler::bonusToString: invalid bonus system node!"); 
+
+	return bonusToString(bonus, bearer->valOfBonuses(bonus->type, bonus->subtype));
+}
+
+std::string CBonusTypeHandler::bonusToString(const std::shared_ptr<Bonus> & bonus) const
+{
+	return bonusToString(bonus, bonus->val);
+}
+
+/// A json key on its own can name a creature and a spell at once, and an ordinary string parameter
+/// must not be mistaken for either, so what a parameter denotes is taken from its schema rather
+/// than guessed by asking every service in turn.
+std::string CBonusTypeHandler::describeParameter(const JsonNode & value, const std::string & entityType) const
+{
+	if(entityType == "creature")
+		if(const auto * creature = LIBRARY->creatures()->getByName(value.String()))
+			return creature->getNamePluralTranslated();
+
+	if(entityType == "spell")
+		if(const auto * spell = LIBRARY->spells()->getByName(value.String()))
+			return spell->getNameTranslated();
+
+	return value.toCompactString();
+}
+
+std::string CBonusTypeHandler::combatScriptToString(const std::shared_ptr<Bonus> & bonus, int bonusValue) const
+{
+	ScriptID scriptID = bonus->subtype.as<ScriptID>();
+
+	// content declaring a script that does not exist - reported on load, and there is nothing to describe
+	if(!scriptID.hasValue())
+		return "";
+
+	const ScriptTypeDescription & script = LIBRARY->scriptTypes()->getById(scriptID);
+
+	// only a combat event script is required to describe itself, and only one of those belongs here
+	if(script.descriptionTextID.empty())
+		return "";
+
+	std::string text = LIBRARY->generaltexth->translate(script.descriptionTextID);
+
+	boost::algorithm::replace_all(text, "${val}", std::to_string(bonusValue));
+
+	// besides the magnitude, script parameters are named, so the description refers to them by name
+	if(bonus->parameters)
+	{
+		const JsonNode & properties = script.parametersSchema["properties"];
+
+		for(const auto & parameter : bonus->parameters->toCustom<JsonNode>().Struct())
+		{
+			const std::string & entityType = properties[parameter.first]["entity"].String();
+
+			boost::algorithm::replace_all(text, "${" + parameter.first + "}", describeParameter(parameter.second, entityType));
+		}
+	}
+
+	return text;
+}
+
+std::string CBonusTypeHandler::bonusToString(const std::shared_ptr<Bonus> & bonus, int bonusValue) const
+{
+	// a scripted ability is described by its script - the bonus type is shared by all of them,
+	// so the type-level description and its hidden flag can not say anything useful here
+	if(bonus->type == BonusType::COMBAT_EVENT_TRIGGER)
+		return combatScriptToString(bonus, bonusValue);
+
+	const CBonusType & bt = *bonusTypes.at(vstd::to_underlying(bonus->type));
 	if(bt.hidden)
 		return "";
-	const MacroString & macro = description ? bt.description : bt.name;
 
-	return macro.build(getValue);
+	std::string textID = bt.getDescriptionTextID();
+	std::string text = LIBRARY->generaltexth->translate(textID);
+
+	auto subtype = bonus->subtype.getNum();
+	if (bt.subtypeDescriptions.count(subtype))
+	{
+		std::string fullTextID = textID + '.' + bt.subtypeDescriptions.at(subtype);
+		text = LIBRARY->generaltexth->translate(fullTextID);
+	}
+	else if (bt.valueDescriptions.count(bonusValue))
+	{
+		std::string fullTextID = textID + '.' + bt.valueDescriptions.at(bonusValue);
+		text = LIBRARY->generaltexth->translate(fullTextID);
+	}
+
+	if (text.find("${val}") != std::string::npos)
+		boost::algorithm::replace_all(text, "${val}", std::to_string(bonusValue));
+
+	if (text.find("${subtype.creature}") != std::string::npos && bonus->subtype.as<CreatureID>().hasValue())
+		boost::algorithm::replace_all(text, "${subtype.creature}", bonus->subtype.as<CreatureID>().toCreature()->getNamePluralTranslated());
+
+	if (text.find("${subtype.spell}") != std::string::npos && bonus->subtype.as<SpellID>().hasValue())
+		boost::algorithm::replace_all(text, "${subtype.spell}", bonus->subtype.as<SpellID>().toSpell()->getNameTranslated());
+
+	return text;
 }
 
-std::string CBonusTypeHandler::bonusToGraphics(const std::shared_ptr<Bonus> & bonus) const
+ImagePath CBonusTypeHandler::bonusToGraphics(const std::shared_ptr<Bonus> & bonus) const
 {
-	std::string fileName;
-	bool fullPath = false;
+	const CBonusType & bt = *bonusTypes.at(vstd::to_underlying(bonus->type));
 
-	switch(bonus->type)
+	if (bonus->type == BonusType::SPELL_IMMUNITY && bonus->subtype.as<SpellID>().hasValue())
 	{
-	case Bonus::SECONDARY_SKILL_PREMY:
-		if(bonus->subtype == SecondarySkill::RESISTANCE)
-		{
-			fileName = "E_DWARF.bmp";
-		}
-		break;
-	case Bonus::SPELL_IMMUNITY:
-	{
-		fullPath = true;
-		const CSpell * sp = SpellID(bonus->subtype).toSpell();
-		fileName = sp->getIconImmune();
-		break;
-	}
-	case Bonus::FIRE_IMMUNITY:
-		switch(bonus->subtype)
-		{
-		case 0:
-			fileName = "E_SPFIRE.bmp";
-			break;//all
-		case 1:
-			fileName = "E_SPFIRE1.bmp";
-			break;//not positive
-		case 2:
-			fileName = "E_FIRE.bmp";
-			break;//direct damage
-		}
-		break;
-	case Bonus::WATER_IMMUNITY:
-		switch(bonus->subtype)
-		{
-		case 0:
-			fileName = "E_SPWATER.bmp";
-			break;//all
-		case 1:
-			fileName = "E_SPWATER1.bmp";
-			break;//not positive
-		case 2:
-			fileName = "E_SPCOLD.bmp";
-			break;//direct damage
-		}
-		break;
-	case Bonus::AIR_IMMUNITY:
-		switch(bonus->subtype)
-		{
-		case 0:
-			fileName = "E_SPAIR.bmp";
-			break;//all
-		case 1:
-			fileName = "E_SPAIR1.bmp";
-			break;//not positive
-		case 2:
-			fileName = "E_LIGHT.bmp";
-			break;//direct damage
-		}
-		break;
-	case Bonus::EARTH_IMMUNITY:
-		switch(bonus->subtype)
-		{
-		case 0:
-			fileName = "E_SPEATH.bmp";
-			break;//all
-		case 1:
-		case 2://no specific icon for direct damage immunity
-			fileName = "E_SPEATH1.bmp";
-			break;//not positive
-		}
-		break;
-	case Bonus::LEVEL_SPELL_IMMUNITY:
-	{
-		if(vstd::iswithin(bonus->val, 1, 5))
-		{
-			fileName = "E_SPLVL" + boost::lexical_cast<std::string>(bonus->val) + ".bmp";
-		}
-		break;
-	}
-	case Bonus::GENERAL_DAMAGE_REDUCTION:
-	{
-		switch(bonus->subtype)
-		{
-		case 0:
-			fileName = "DamageReductionMelee.bmp";
-			break;
-		case 1:
-			fileName = "DamageReductionRanged.bmp";
-			break;
-		}
-		break;
+		const CSpell * sp = bonus->subtype.as<SpellID>().toSpell();
+		return sp->getIconImmune();
 	}
 
-	default:
-		{
-			const CBonusType & bt = bonusTypes[bonus->type];
-			fileName = bt.icon;
-			fullPath = true;
-		}
-		break;
-	}
+	if (bt.subtypeIcons.count(bonus->subtype.getNum()))
+		return bt.subtypeIcons.at(bonus->subtype.getNum());
 
-	if(!fileName.empty() && !fullPath)
-		fileName = "zvs/Lib1.res/" + fileName;
-	return fileName;
+	if (bt.valueIcons.count(bonus->val))
+		return bt.valueIcons.at(bonus->val);
+
+	return bt.icon;
 }
 
-void CBonusTypeHandler::load()
+std::vector<JsonNode> CBonusTypeHandler::loadLegacyData(LibraryLoadContext & context)
 {
-	const JsonNode gameConf(ResourceID("config/gameConfig.json"));
-	const JsonNode config(JsonUtils::assembleFromFiles(gameConf["bonuses"].convertTo<std::vector<std::string>>()));
-	load(config);
+	return {};
 }
 
-void CBonusTypeHandler::load(const JsonNode & config)
+void CBonusTypeHandler::loadObject(LibraryLoadContext & context, const std::string & scope, const std::string & name, const JsonNode & data)
 {
-	for(auto & node : config.Struct())
+	if (vstd::contains(builtinBonusNames, name))
 	{
-		auto it = bonusNameMap.find(node.first);
-
-		if(it == bonusNameMap.end())
-		{
-			//TODO: new bonus
-//			CBonusType bt;
-//			loadItem(node.second, bt);
-//
-//			auto new_id = bonusTypes.size();
-//
-//			bonusTypes.push_back(bt);
-
-			logBonus->warn("Adding new bonuses not implemented (%s)", node.first);
-		}
-		else
-		{
-			CBonusType & bt = bonusTypes[it->second];
-
-			loadItem(node.second, bt);
-			logBonus->trace("Loaded bonus type %s", node.first);
-		}
+		//h3 bonus
+		BonusType bonus = static_cast<BonusType>(vstd::find_pos(builtinBonusNames, name));
+		CBonusType & bt =*bonusTypes.at(vstd::to_underlying(bonus));
+		loadItem(context, data, bt, name);
+		logBonus->trace("Loaded bonus type %s", name);
+	}
+	else
+	{
+		// new bonus
+		registerObject(context, scope, "bonus", name, data, bonusTypes.size());
+		bonusTypes.push_back(std::make_shared<CBonusType>());
+		loadItem(context, data, *bonusTypes.back(), name);
+		logBonus->trace("New bonus type %s", name);
 	}
 }
 
-void CBonusTypeHandler::loadItem(const JsonNode & source, CBonusType & dest)
+void CBonusTypeHandler::loadObject(LibraryLoadContext & context, const std::string & scope, const std::string & name, const JsonNode & data, size_t index)
 {
-	dest.nameTemplate = source["name"].String();
-	dest.descriptionTemplate = source["description"].String();
+	assert(0);
+}
+
+void CBonusTypeHandler::loadItem(LibraryLoadContext & context, const JsonNode & source, CBonusType & dest, const std::string & name) const
+{
+	dest.identifier = name;
 	dest.hidden = source["hidden"].Bool(); //Null -> false
+	dest.creatureNature = source["creatureNature"].Bool(); //Null -> false
+	dest.blockDescriptionPropagation = source["blockDescriptionPropagation"].Bool(); //Null -> false
+
+	if (!dest.hidden)
+		context.lib.generaltexth->registerString( "vcmi", dest.getDescriptionTextID(), source["description"]);
 
 	const JsonNode & graphics = source["graphics"];
 
 	if(!graphics.isNull())
+		dest.icon = ImagePath::fromJson(graphics["icon"]);
+
+	for (const auto & additionalIcon : graphics["subtypeIcons"].Struct())
 	{
-		dest.icon = graphics["icon"].String();
+		auto path = ImagePath::fromJson(additionalIcon.second);
+		context.resolver.requestIdentifier(additionalIcon.second.getModScope(), additionalIcon.first, [&dest, path](int32_t index)
+		{
+			dest.subtypeIcons[index] = path;
+		});
 	}
-	dest.buildMacros();
+
+	for (const auto & additionalIcon : graphics["valueIcons"].Struct())
+	{
+		auto path = ImagePath::fromJson(additionalIcon.second);
+		int value = std::stoi(additionalIcon.first);
+		dest.valueIcons[value] = path;
+	}
+
+	for (const auto & additionalDescription : source["subtypeDescriptions"].Struct())
+	{
+		context.lib.generaltexth->registerString( "vcmi", dest.getDescriptionTextID() + "." + additionalDescription.first, additionalDescription.second);
+		auto stringID = additionalDescription.first;
+		context.resolver.requestIdentifier(additionalDescription.second.getModScope(), additionalDescription.first, [&dest, stringID](int32_t index)
+		{
+			dest.subtypeDescriptions[index] = stringID;
+		});
+	}
+
+	for (const auto & additionalDescription : source["valueDescriptions"].Struct())
+	{
+		context.lib.generaltexth->registerString( "vcmi", dest.getDescriptionTextID() + "." + additionalDescription.first, additionalDescription.second);
+		auto stringID = additionalDescription.first;
+		int value = std::stoi(additionalDescription.first);
+		dest.valueDescriptions[value] = stringID;
+	}
+}
+
+const std::string & CBonusTypeHandler::bonusToString(BonusType bonus) const
+{
+	return bonusTypes.at(static_cast<int>(bonus))->identifier;
+}
+
+bool CBonusTypeHandler::isCreatureNatureBonus(BonusType bonus) const
+{
+	return bonusTypes.at(static_cast<int>(bonus))->creatureNature;
+}
+
+bool CBonusTypeHandler::shouldPropagateDescription(BonusType bonus) const
+{
+	return !bonusTypes.at(static_cast<int>(bonus))->blockDescriptionPropagation;
+}
+
+
+std::vector<BonusType> CBonusTypeHandler::getAllObjets() const
+{
+	std::vector<BonusType> ret;
+	for (int i = 0; i < bonusTypes.size(); ++i)
+		ret.push_back(static_cast<BonusType>(i));
+
+	return ret;
 }

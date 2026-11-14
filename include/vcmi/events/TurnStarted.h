@@ -12,11 +12,12 @@
 
 #include "Event.h"
 #include "SubscriptionRegistry.h"
+#include "../scripting/ApiTags.h"
 
 namespace events
 {
 
-class DLL_LINKAGE TurnStarted : public Event
+class DLL_LINKAGE TurnStarted : public Event, public scripting::ApiRawPointer<TurnStarted>
 {
 public:
 	using Sub = SubscriptionRegistry<TurnStarted>;

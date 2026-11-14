@@ -12,6 +12,7 @@
 
 
 #include <vcmi/Services.h>
+#include <vcmi/spells/SchoolService.h>
 
 class ServicesMock : public Services
 {
@@ -21,14 +22,18 @@ public:
 	MOCK_CONST_METHOD0(factions, const FactionService *());
 	MOCK_CONST_METHOD0(heroClasses, const HeroClassService *());
 	MOCK_CONST_METHOD0(heroTypes, const HeroTypeService *());
+	MOCK_CONST_METHOD0(resources, const ResourceTypeService *());
 	MOCK_CONST_METHOD0(scripts, const scripting::Service *());
 	MOCK_CONST_METHOD0(spells, const spells::Service *());
-	MOCK_CONST_METHOD0(skills, const SkillService *());
+	MOCK_CONST_METHOD0(skills, const SkillService * ());
+	MOCK_CONST_METHOD0(battlefields, const BattleFieldService *());
+	MOCK_CONST_METHOD0(obstacles, const ObstacleService *());
+	MOCK_CONST_METHOD0(engineSettings, const IGameSettings *());
 
 	MOCK_METHOD3(updateEntity, void(Metatype, int32_t, const JsonNode &));
 
-	MOCK_CONST_METHOD0(spellEffects, const spells::effects::Registry *());
-	MOCK_METHOD0(spellEffects, spells::effects::Registry *());
+	MOCK_CONST_METHOD0(spellSchools, const spells::SchoolService *());
+	MOCK_CONST_METHOD0(scriptTypes, const ScriptService *());
 };
 
 

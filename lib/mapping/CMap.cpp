@@ -10,151 +10,204 @@
 #include "StdInc.h"
 #include "CMap.h"
 
-#include "../CArtHandler.h"
-#include "../VCMI_Lib.h"
-#include "../CCreatureHandler.h"
-#include "../CTownHandler.h"
-#include "../CHeroHandler.h"
-#include "../mapObjects/CObjectClassesHandler.h"
-#include "../mapObjects/CGHeroInstance.h"
-#include "../CGeneralTextHandler.h"
-#include "../spells/CSpellHandler.h"
-#include "../CSkillHandler.h"
 #include "CMapEditManager.h"
+#include "CMapOperation.h"
+#include "CCastleEvent.h"
+
+#include "../CCreatureHandler.h"
+#include "../CRandomGenerator.h"
+#include "../CSkillHandler.h"
+#include "../GameLibrary.h"
+#include "../GameSettings.h"
+#include "../MapLayerHandler.h"
+#include "../RiverHandler.h"
+#include "../RoadHandler.h"
+#include "../TerrainHandler.h"
+
+#include "../bonuses/Limiters.h"
+#include "../callback/IGameInfoCallback.h"
+#include "../entities/artifact/CArtHandler.h"
+#include "../entities/hero/CHeroHandler.h"
+#include "../gameState/CGameState.h"
+#include "../mapObjects/CGHeroInstance.h"
+#include "../mapObjects/CGTownInstance.h"
+#include "../mapObjects/MiscObjects.h"
+#include "../mapObjects/Quest.h"
+#include "../mapObjects/ObjectTemplate.h"
 #include "../serializer/JsonSerializeFormat.h"
+#include "../spells/CSpellHandler.h"
+#include "../texts/CGeneralTextHandler.h"
 
-SHeroName::SHeroName() : heroId(-1)
+#include <vstd/RNG.h>
+
+const CGHeroPlaceholder * CMap::findHeroPlaceholder(const int3 & position) const
 {
-
-}
-
-PlayerInfo::PlayerInfo(): canHumanPlay(false), canComputerPlay(false),
-	aiTactic(EAiTactic::RANDOM), isFactionRandom(false), hasRandomHero(false), mainCustomHeroPortrait(-1), mainCustomHeroId(-1), hasMainTown(false),
-	generateHeroAtMainTown(false), posOfMainTown(-1), team(TeamID::NO_TEAM), /* following are unused */ generateHero(false), p7(0), powerPlaceholders(-1)
-{
-	allowedFactions = VLC->townh->getAllowedFactions();
-}
-
-si8 PlayerInfo::defaultCastle() const
-{
-	//if random allowed set it as default
-	if(isFactionRandom)
-		return -1;
-
-	if(!allowedFactions.empty())
-		return *allowedFactions.begin();
-
-	// fall back to random
-	return -1;
-}
-
-si8 PlayerInfo::defaultHero() const
-{
-	// we will generate hero in front of main town
-	if((generateHeroAtMainTown && hasMainTown) || hasRandomHero)
+	for(const auto * placeholder : getObjects<CGHeroPlaceholder>())
 	{
-		//random hero
-		return -1;
+		if(placeholder->coveringAt(position))
+			return placeholder;
 	}
 
-	return -2;
+	return nullptr;
 }
 
-bool PlayerInfo::canAnyonePlay() const
+const CGHeroPlaceholder * CMap::isHeroPlaceholderObjective(const EventCondition & condition) const
 {
-	return canHumanPlay || canComputerPlay;
+	if((condition.condition != EventCondition::CONTROL &&
+		condition.condition != EventCondition::CONTROL_CURRENT &&
+		condition.condition != EventCondition::DESTROY) ||
+		condition.objectType.as<MapObjectID>() != Obj::HERO)
+		return nullptr;
+
+	return findHeroPlaceholder(condition.position);
 }
 
-bool PlayerInfo::hasCustomMainHero() const
+void CMap::resolveHeroPlaceholderObjectives()
 {
-	return !mainCustomHeroName.empty() && mainCustomHeroPortrait != -1;
-}
+	for(TriggeredEvent & event : triggeredEvents)
+	{
+		auto patcher = [this, &event](EventCondition cond) -> EventExpression::Variant
+		{
+			if(const auto * placeholder = isHeroPlaceholderObjective(cond))
+			{
+				const std::string placeholderName = placeholder->heroType.has_value() ?
+					placeholder->heroType->toHeroType()->getNameTranslated() :
+					placeholder->instanceName;
+				cond.objectType = MapObjectID(Obj::HERO_PLACEHOLDER);
+				logGlobal->warn("Objective '%s': hero objective at %s points to hero placeholder '%s'; condition will remain unresolved until placeholder replacement is supported for normal maps",
+					event.identifier, cond.position.toString(), placeholderName);
+			}
 
-EventCondition::EventCondition(EWinLoseType condition):
-	object(nullptr),
-	metaType(EMetaclass::INVALID),
-	value(-1),
-	objectType(-1),
-	objectSubtype(-1),
-	position(-1, -1, -1),
-	condition(condition)
-{
-}
+			return cond;
+		};
 
-EventCondition::EventCondition(EWinLoseType condition, si32 value, si32 objectType, int3 position):
-	object(nullptr),
-	metaType(EMetaclass::INVALID),
-	value(value),
-	objectType(objectType),
-	objectSubtype(-1),
-	position(position),
-	condition(condition)
-{}
+		event.trigger = event.trigger.morph(patcher);
+	}
+}
 
 void Rumor::serializeJson(JsonSerializeFormat & handler)
 {
 	handler.serializeString("name", name);
-	handler.serializeString("text", text);
+	handler.serializeStruct("text", text);
 }
 
-DisposedHero::DisposedHero() : heroId(0), portrait(255), players(0)
+CMapEvent::CMapEvent()
+	: humanAffected(false)
+	, computerAffected(false)
+	, firstOccurrence(0)
+	, nextOccurrence(0)
 {
 
 }
 
-CMapEvent::CMapEvent() : players(0), humanAffected(0), computerAffected(0),
-	firstOccurence(0), nextOccurence(0)
+bool CMapEvent::occursToday(int currentDay) const
 {
+	if (disabled)
+		return false;
 
+	if (currentDay == firstOccurrence + 1)
+		return true;
+
+	if (nextOccurrence == 0)
+		return false;
+
+	if (currentDay < firstOccurrence)
+		return false;
+
+	return (currentDay - firstOccurrence - 1) % nextOccurrence == 0;
 }
 
-bool CMapEvent::earlierThan(const CMapEvent & other) const
+bool CMapEvent::affectsDifficulty(EMapDifficulty difficulty) const
 {
-	return firstOccurence < other.firstOccurence;
+	return affectedDifficulties.contains(difficulty);
 }
 
-bool CMapEvent::earlierThanOrEqual(const CMapEvent & other) const
+bool CMapEvent::affectsPlayer(PlayerColor color, bool isHuman) const
 {
-	return firstOccurence <= other.firstOccurence;
+	if (players.count(color) == 0)
+		return false;
+
+	if (!isHuman && !computerAffected)
+		return false;
+
+	if (isHuman && !humanAffected)
+		return false;
+
+	return true;
 }
 
-CCastleEvent::CCastleEvent() : town(nullptr)
+void CMapEvent::serializeJson(JsonSerializeFormat & handler)
 {
+	handler.serializeString("name", name);
+	handler.serializeStruct("message", message);
+	if (!handler.saving && handler.getCurrent()["players"].isNumber())
+	{
+		// compatibility for old maps
+		int playersMask = 0;
+		handler.serializeInt("players", playersMask);
+		for (int i = 0; i < 8; ++i)
+			if ((playersMask & (1 << i)) != 0)
+				players.insert(PlayerColor(i));
+	}
+	else
+	{
+		handler.serializeIdArray("players", players);
+	}
+	handler.serializeInt("humanAffected", humanAffected);
+	handler.serializeInt("computerAffected", computerAffected);
+	handler.serializeInt("firstOccurrence", firstOccurrence);
+	handler.serializeInt("nextOccurrence", nextOccurrence);
+	resources.serializeJson(handler, "resources");
 
+	auto deletedObjects = handler.enterArray("deletedObjectsInstances");
+	deletedObjects.serializeArray(deletedObjectsInstances);
 }
 
-TerrainTile::TerrainTile() : terType(ETerrainType::BORDER), terView(0), riverType(ERiverType::NO_RIVER),
-	riverDir(0), roadType(ERoadType::NO_ROAD), roadDir(0), extTileFlags(0), visitable(false),
-	blocked(false)
+void CCastleEvent::serializeJson(JsonSerializeFormat & handler)
 {
+	CMapEvent::serializeJson(handler);
+	handler.serializeBool("neutralAffected", neutralAffected, false);
 
+	// TODO: handler.serializeIdArray("buildings", buildings);
+	{
+		std::vector<BuildingID> temp(buildings.begin(), buildings.end());
+		auto a = handler.enterArray("buildings");
+		a.syncSize(temp);
+		for(int i = 0; i < temp.size(); ++i)
+		{
+			int buildingID = temp[i].getNum();
+			a.serializeInt(i, buildingID);
+			buildings.insert(buildingID);
+		}
+	}
+
+	{
+		auto a = handler.enterArray("creatures");
+		a.syncSize(creatures);
+		for(int i = 0; i < creatures.size(); ++i)
+			a.serializeInt(i, creatures[i]);
+	}
 }
 
-bool TerrainTile::entrableTerrain(const TerrainTile * from) const
+TerrainTile::TerrainTile():
+	riverType(River::NO_RIVER),
+	roadType(Road::NO_ROAD),
+	terView(0),
+	riverDir(0),
+	roadDir(0),
+	extTileFlags(0)
 {
-	return entrableTerrain(from ? from->terType != ETerrainType::WATER : true, from ? from->terType == ETerrainType::WATER : true);
-}
-
-bool TerrainTile::entrableTerrain(bool allowLand, bool allowSea) const
-{
-	return terType != ETerrainType::ROCK
-			&& ((allowSea && terType == ETerrainType::WATER)  ||  (allowLand && terType != ETerrainType::WATER));
 }
 
 bool TerrainTile::isClear(const TerrainTile * from) const
 {
-	return entrableTerrain(from) && !blocked;
+	return entrableTerrain(from) && !blocked();
 }
 
-Obj TerrainTile::topVisitableId(bool excludeTop) const
-{
-	return topVisitableObj(excludeTop) ? topVisitableObj(excludeTop)->ID : Obj(Obj::NO_OBJ);
-}
-
-CGObjectInstance * TerrainTile::topVisitableObj(bool excludeTop) const
+ObjectInstanceID TerrainTile::topVisitableObj(bool excludeTop) const
 {
 	if(visitableObjects.empty() || (excludeTop && visitableObjects.size() == 1))
-		return nullptr;
+		return {};
 
 	if(excludeTop)
 		return visitableObjects[visitableObjects.size()-2];
@@ -162,190 +215,167 @@ CGObjectInstance * TerrainTile::topVisitableObj(bool excludeTop) const
 	return visitableObjects.back();
 }
 
+ObjectInstanceID TerrainTile::objectVisitedBy(ObjectInstanceID heroID) const
+{
+	return topVisitableObj(topVisitableObj() == heroID);
+}
+
 EDiggingStatus TerrainTile::getDiggingStatus(const bool excludeTop) const
 {
-	if(terType == ETerrainType::WATER || terType == ETerrainType::ROCK)
+	if(isWater() || !getTerrain()->isPassable())
 		return EDiggingStatus::WRONG_TERRAIN;
 
 	int allowedBlocked = excludeTop ? 1 : 0;
-	if(blockingObjects.size() > allowedBlocked || topVisitableObj(excludeTop))
+	if(blockingObjects.size() > allowedBlocked || topVisitableObj(excludeTop).hasValue())
 		return EDiggingStatus::TILE_OCCUPIED;
 	else
 		return EDiggingStatus::CAN_DIG;
 }
 
-bool TerrainTile::hasFavorableWinds() const
+CMap::CMap(IGameInfoCallback * cb)
+	: GameCallbackHolder(cb)
+	, grailPos(-1, -1, -1)
+	, grailRadius(0)
+	, waterMap(false)
+	, uidCounter(0)
 {
-	return extTileFlags & 128;
-}
+	heroesPool.resize(LIBRARY->heroh->size());
+	allowedAbilities = LIBRARY->skillh->getDefaultAllowed();
+	allowedArtifact = LIBRARY->arth->getDefaultAllowed();
+	allowedSpells = LIBRARY->spellh->getDefaultAllowed();
 
-bool TerrainTile::isWater() const
-{
-	return terType == ETerrainType::WATER;
-}
-
-void CMapHeader::setupEvents()
-{
-	EventCondition victoryCondition(EventCondition::STANDARD_WIN);
-	EventCondition defeatCondition(EventCondition::DAYS_WITHOUT_TOWN);
-	defeatCondition.value = 7;
-
-	//Victory condition - defeat all
-	TriggeredEvent standardVictory;
-	standardVictory.effect.type = EventEffect::VICTORY;
-	standardVictory.effect.toOtherMessage = VLC->generaltexth->allTexts[5];
-	standardVictory.identifier = "standardVictory";
-	standardVictory.description = ""; // TODO: display in quest window
-	standardVictory.onFulfill = VLC->generaltexth->allTexts[659];
-	standardVictory.trigger = EventExpression(victoryCondition);
-
-	//Loss condition - 7 days without town
-	TriggeredEvent standardDefeat;
-	standardDefeat.effect.type = EventEffect::DEFEAT;
-	standardDefeat.effect.toOtherMessage = VLC->generaltexth->allTexts[8];
-	standardDefeat.identifier = "standardDefeat";
-	standardDefeat.description = ""; // TODO: display in quest window
-	standardDefeat.onFulfill = VLC->generaltexth->allTexts[7];
-	standardDefeat.trigger = EventExpression(defeatCondition);
-
-	triggeredEvents.push_back(standardVictory);
-	triggeredEvents.push_back(standardDefeat);
-
-	victoryIconIndex = 11;
-	victoryMessage = VLC->generaltexth->victoryConditions[0];
-
-	defeatIconIndex = 3;
-	defeatMessage = VLC->generaltexth->lossCondtions[0];
-}
-
-CMapHeader::CMapHeader() : version(EMapFormat::SOD), height(72), width(72),
-	twoLevel(true), difficulty(1), levelLimit(0), howManyTeams(0), areAnyPlayers(false)
-{
-	setupEvents();
-	allowedHeroes = VLC->heroh->getDefaultAllowed();
-	players.resize(PlayerColor::PLAYER_LIMIT_I);
-}
-
-CMapHeader::~CMapHeader()
-{
-
-}
-
-CMap::CMap()
-	: checksum(0), grailPos(-1, -1, -1), grailRadius(0), terrain(nullptr),
-	guardingCreaturePositions(nullptr)
-{
-	allHeroes.resize(allowedHeroes.size());
-	allowedAbilities = VLC->skillh->getDefaultAllowed();
-	allowedArtifact = VLC->arth->getDefaultAllowed();
-	allowedSpell = VLC->spellh->getDefaultAllowed();
+	gameSettings = std::make_unique<GameSettings>();
+	gameSettings->loadBase(LIBRARY->settingsHandler->getFullConfig());
 }
 
 CMap::~CMap()
 {
-	if(terrain)
-	{
-		for (int i=0; i<width; i++)
-		{
-			for(int j=0; j<height; j++)
-			{
-				delete [] terrain[i][j];
-				delete [] guardingCreaturePositions[i][j];
-			}
-			delete [] terrain[i];
-			delete [] guardingCreaturePositions[i];
-		}
-		delete [] terrain;
-		delete [] guardingCreaturePositions;
-	}
-
-	for(auto obj : objects)
-		obj.dellNull();
-
-	for(auto quest : quests)
-		quest.dellNull();
-
-	resetStaticData();
+	// Workaround for destruction order - parts are not "aware" of their composite artifact
+	// As result, destruction of part of a composite artifact leads to a hanging pointer in combined artifact
+	// Force-detach everything before executing actual deletion. Parts are attached only once loading
+	// has finished, so detach from actual parents instead of the parts listed in artifact
+	for (const auto & artifact : artInstances)
+		if (artifact && artifact->hasParts())
+			artifact->detachFromAll();
 }
 
-void CMap::removeBlockVisTiles(CGObjectInstance * obj, bool total)
+bool CMap::isHoleAt(const int3 & pos) const
 {
-	for(int fx=0; fx<obj->getWidth(); ++fx)
+	return holePositions.contains(pos);
+}
+
+void CMap::hideObject(CGObjectInstance * obj)
+{
+	if(obj->ID == Obj::HOLE)
+		holePositions.erase(obj->anchorPos());
+
+	const int zVal = obj->anchorPos().z;
+	for(int fx = 0; fx < obj->getWidth(); ++fx)
 	{
-		for(int fy=0; fy<obj->getHeight(); ++fy)
+		int xVal = obj->anchorPos().x - fx;
+		for(int fy = 0; fy < obj->getHeight(); ++fy)
 		{
-			int xVal = obj->pos.x - fx;
-			int yVal = obj->pos.y - fy;
-			int zVal = obj->pos.z;
-			if(xVal>=0 && xVal<width && yVal>=0 && yVal<height)
+			int yVal = obj->anchorPos().y - fy;
+			if(xVal>=0 && xVal < width && yVal>=0 && yVal < height)
 			{
-				TerrainTile & curt = terrain[xVal][yVal][zVal];
-				if(total || obj->visitableAt(xVal, yVal))
+				TerrainTile & curt = getTile(int3(xVal, yVal, zVal));
+				curt.visitableObjects -= obj->id;
+				curt.blockingObjects -= obj->id;
+			}
+		}
+	}
+}
+
+void CMap::showObject(CGObjectInstance * obj)
+{
+	if(obj->ID == Obj::HOLE)
+		holePositions.insert(obj->anchorPos());
+
+	const int zVal = obj->anchorPos().z;
+	for(int fx = 0; fx < obj->getWidth(); ++fx)
+	{
+		int xVal = obj->anchorPos().x - fx;
+		for(int fy = 0; fy < obj->getHeight(); ++fy)
+		{
+			int yVal = obj->anchorPos().y - fy;
+			if(xVal>=0 && xVal < width && yVal >= 0 && yVal < height)
+			{
+				TerrainTile & curt = getTile(int3(xVal, yVal, zVal));
+				if(obj->visitableAt(int3(xVal, yVal, zVal)))
 				{
-					curt.visitableObjects -= obj;
-					curt.visitable = curt.visitableObjects.size();
+					assert(!vstd::contains(curt.visitableObjects, obj->id));
+					curt.visitableObjects.push_back(obj->id);
 				}
-				if(total || obj->blockingAt(xVal, yVal))
+
+				if(obj->blockingAt(int3(xVal, yVal, zVal)))
 				{
-					curt.blockingObjects -= obj;
-					curt.blocked = curt.blockingObjects.size();
+					assert(!vstd::contains(curt.blockingObjects, obj->id));
+					curt.blockingObjects.push_back(obj->id);
 				}
 			}
 		}
 	}
 }
 
-void CMap::addBlockVisTiles(CGObjectInstance * obj)
-{
-	for(int fx=0; fx<obj->getWidth(); ++fx)
-	{
-		for(int fy=0; fy<obj->getHeight(); ++fy)
-		{
-			int xVal = obj->pos.x - fx;
-			int yVal = obj->pos.y - fy;
-			int zVal = obj->pos.z;
-			if(xVal>=0 && xVal<width && yVal>=0 && yVal<height)
-			{
-				TerrainTile & curt = terrain[xVal][yVal][zVal];
-				if( obj->visitableAt(xVal, yVal))
-				{
-					curt.visitableObjects.push_back(obj);
-					curt.visitable = true;
-				}
-				if( obj->blockingAt(xVal, yVal))
-				{
-					curt.blockingObjects.push_back(obj);
-					curt.blocked = true;
-				}
-			}
-		}
-	}
-}
 
 void CMap::calculateGuardingGreaturePositions()
 {
-	int levels = twoLevel ? 2 : 1;
-	for (int i=0; i<width; i++)
+	calculateGuardingGreaturePositions(int3(0,0,0), int3(width, height, levels()));
+}
+
+void CMap::calculateGuardingGreaturePositions(int3 topleft, int3 bottomright)
+{
+	int3 topleftReal = {
+		std::max(0, topleft.x),
+		std::max(0, topleft.y),
+		std::max(0, topleft.z)
+	};
+
+	int3 bottomrightReal = {
+		std::min(width,    bottomright.x + 1),
+		std::min(height,   bottomright.y + 1),
+		std::min<int>(levels(), bottomright.z + 1)
+	};
+
+	for(int z = topleftReal.z; z < bottomrightReal.z; z++)
 	{
-		for(int j=0; j<height; j++)
+		for(int x = topleftReal.x; x < bottomrightReal.x; x++)
 		{
-			for (int k = 0; k < levels; k++)
-				guardingCreaturePositions[i][j][k] = guardingCreaturePosition(int3(i,j,k));
+			for(int y = topleftReal.y; y < bottomrightReal.y; y++)
+			{
+				guardingCreaturePositions[int3(x,y,z)] = guardingCreaturePosition(int3(x, y, z));
+			}
 		}
 	}
 }
 
-CGHeroInstance * CMap::getHero(int heroID)
+CGHeroInstance * CMap::getHero(HeroTypeID heroID)
 {
-	for(auto & elem : heroesOnMap)
-		if(elem->subID == heroID)
-			return elem;
+	for (const auto & objectID : heroesOnMap)
+	{
+		const auto hero = std::dynamic_pointer_cast<CGHeroInstance>(objects.at(objectID.getNum()));
+
+		if (hero->getHeroTypeID() == heroID)
+			return hero.get();
+	}
+	return nullptr;
+}
+
+const CGHeroInstance * CMap::getHero(HeroTypeID heroID) const
+{
+	for (const auto & objectID : heroesOnMap)
+	{
+		const auto hero = std::dynamic_pointer_cast<CGHeroInstance>(objects.at(objectID.getNum()));
+
+		if (hero->getHeroTypeID() == heroID)
+			return hero.get();
+	}
 	return nullptr;
 }
 
 bool CMap::isCoastalTile(const int3 & pos) const
 {
-	//todo: refactoring: extract neighbor tile iterator and use it in GameState
+	//todo: refactoring: extract neighbour tile iterator and use it in GameState
 	static const int3 dirs[] = { int3(0,1,0),int3(0,-1,0),int3(-1,0,0),int3(+1,0,0),
 					int3(1,1,0),int3(-1,1,0),int3(1,-1,0),int3(-1,-1,0) };
 
@@ -355,10 +385,10 @@ bool CMap::isCoastalTile(const int3 & pos) const
 		return false;
 	}
 
-	if(isWaterTile(pos))
+	if(getTile(pos).isWater())
 		return false;
 
-	for (auto & dir : dirs)
+	for(const auto & dir : dirs)
 	{
 		const int3 hlp = pos + dir;
 
@@ -372,35 +402,6 @@ bool CMap::isCoastalTile(const int3 & pos) const
 	return false;
 }
 
-bool CMap::isInTheMap(const int3 & pos) const
-{
-	if(pos.x < 0 || pos.y < 0 || pos.z < 0 || pos.x >= width || pos.y >= height
-			|| pos.z > (twoLevel ? 1 : 0))
-	{
-		return false;
-	}
-	else
-	{
-		return true;
-	}
-}
-
-TerrainTile & CMap::getTile(const int3 & tile)
-{
-	assert(isInTheMap(tile));
-	return terrain[tile.x][tile.y][tile.z];
-}
-
-const TerrainTile & CMap::getTile(const int3 & tile) const
-{
-	assert(isInTheMap(tile));
-	return terrain[tile.x][tile.y][tile.z];
-}
-
-bool CMap::isWaterTile(const int3 &pos) const
-{
-	return isInTheMap(pos) && getTile(pos).isWater();
-}
 bool CMap::canMoveBetween(const int3 &src, const int3 &dst) const
 {
 	const TerrainTile * dstTile = &getTile(dst);
@@ -408,16 +409,16 @@ bool CMap::canMoveBetween(const int3 &src, const int3 &dst) const
 	return checkForVisitableDir(src, dstTile, dst) && checkForVisitableDir(dst, srcTile, src);
 }
 
-bool CMap::checkForVisitableDir(const int3 & src, const TerrainTile *pom, const int3 & dst ) const
+bool CMap::checkForVisitableDir(const int3 & src, const TerrainTile * pom, const int3 & dst) const
 {
 	if (!pom->entrableTerrain()) //rock is never accessible
 		return false;
-	for (auto obj : pom->visitableObjects) //checking destination tile
+	for(const auto & objID : pom->visitableObjects) //checking destination tile
 	{
-		if(!vstd::contains(pom->blockingObjects, obj)) //this visitable object is not blocking, ignore
+		if(!vstd::contains(pom->blockingObjects, objID)) //this visitable object is not blocking, ignore
 			continue;
 
-		if (!obj->appearance.isVisitableFrom(src.x - dst.x, src.y - dst.y))
+		if (!getObject(objID)->appearance->isVisitableFrom(src.x - dst.x, src.y - dst.y))
 			return false;
 	}
 	return true;
@@ -430,17 +431,13 @@ int3 CMap::guardingCreaturePosition (int3 pos) const
 	if (!isInTheMap(pos))
 		return int3(-1, -1, -1);
 	const TerrainTile &posTile = getTile(pos);
-	if (posTile.visitable)
+	if (posTile.visitable())
 	{
-		for (CGObjectInstance* obj : posTile.visitableObjects)
+		for (const auto & objID : posTile.visitableObjects)
 		{
-			if(obj->blockVisit)
-			{
-				if (obj->ID == Obj::MONSTER) // Monster
-					return pos;
-				else
-					return int3(-1, -1, -1); //blockvis objects are not guarded by neighbouring creatures
-			}
+			const auto * object = getObject(objID);
+			if (object->ID == Obj::MONSTER)
+				return pos;
 		}
 	}
 
@@ -455,14 +452,13 @@ int3 CMap::guardingCreaturePosition (int3 pos) const
 			if (isInTheMap(pos))
 			{
 				const auto & tile = getTile(pos);
-                if (tile.visitable && (tile.isWater() == water))
+				if (tile.visitable() && (tile.isWater() == water))
 				{
-					for (CGObjectInstance* obj : tile.visitableObjects)
+					for (const auto & objID : tile.visitableObjects)
 					{
-						if (obj->ID == Obj::MONSTER  &&  checkForVisitableDir(pos, &posTile, originalPos)) // Monster being able to attack investigated tile
-						{
+						const auto * object = getObject(objID);
+						if (object->ID == Obj::MONSTER  &&  checkForVisitableDir(pos, &posTile, originalPos)) // Monster being able to attack investigated tile
 							return pos;
-						}
 					}
 				}
 			}
@@ -476,108 +472,133 @@ int3 CMap::guardingCreaturePosition (int3 pos) const
 	return int3(-1, -1, -1);
 }
 
-const CGObjectInstance * CMap::getObjectiveObjectFrom(int3 pos, Obj::EObj type)
+const CGObjectInstance * CMap::getHeroAtTownEntrance(const CGTownInstance & town) const
 {
-	for (CGObjectInstance * object : getTile(pos).visitableObjects)
+	for(const auto & objectID : getTile(town.visitablePos()).visitableObjects)
 	{
+		const auto * object = getObject(objectID);
+		if(object->ID == Obj::HERO || object->ID == Obj::RANDOM_HERO)
+			return object;
+	}
+	return nullptr;
+}
+
+const CGObjectInstance * CMap::getObjectiveObjectFrom(const int3 & pos, Obj type)
+{
+	for(const auto & objID : getTile(pos).visitableObjects)
+	{
+		const auto * object = getObject(objID);
 		if (object->ID == type)
 			return object;
 	}
-	// There is weird bug because of which sometimes heroes will not be found properly despite having correct position
-	// Try to workaround that and find closest object that we can use
 
-	logGlobal->error("Failed to find object of type %d at %s", int(type), pos.toString());
-	logGlobal->error("Will try to find closest matching object");
-
-	CGObjectInstance * bestMatch = nullptr;
-	for (CGObjectInstance * object : objects)
+	for(const auto & object : objects)
 	{
-		if (object && object->ID == type)
-		{
-			if (bestMatch == nullptr)
-				bestMatch = object;
-			else
-			{
-				if (object->pos.dist2dSQ(pos) < bestMatch->pos.dist2dSQ(pos))
-					bestMatch = object;// closer than one we already found
-			}
-		}
+		if(object && object->ID == type && object->anchorPos() == pos)
+			return object.get();
 	}
-	assert(bestMatch != nullptr); // if this happens - victory conditions or map itself is very, very broken
 
-	logGlobal->error("Will use %s from %s", bestMatch->getObjectName(), bestMatch->pos.toString());
-	return bestMatch;
+	logGlobal->error("Failed to find object of type %d at %s", type.getNum(), pos.toString());
+	return nullptr;
 }
 
 void CMap::checkForObjectives()
 {
 	// NOTE: probably should be moved to MapFormatH3M.cpp
-	for (TriggeredEvent & event : triggeredEvents)
+	for(TriggeredEvent & event : triggeredEvents)
 	{
 		auto patcher = [&](EventCondition cond) -> EventExpression::Variant
 		{
-			switch (cond.condition)
+			switch(cond.condition)
 			{
 				case EventCondition::HAVE_ARTIFACT:
-					boost::algorithm::replace_first(event.onFulfill, "%s", VLC->arth->objects[cond.objectType]->getName());
+					event.onFulfill.replaceTextID(cond.objectType.as<ArtifactID>().toEntity(LIBRARY)->getNameTextID());
 					break;
 
 				case EventCondition::HAVE_CREATURES:
-					boost::algorithm::replace_first(event.onFulfill, "%s", VLC->creh->objects[cond.objectType]->nameSing);
-					boost::algorithm::replace_first(event.onFulfill, "%d", boost::lexical_cast<std::string>(cond.value));
+					event.onFulfill.replaceTextID(cond.objectType.as<CreatureID>().toEntity(LIBRARY)->getNameSingularTextID());
+					event.onFulfill.replaceNumber(cond.value);
 					break;
 
 				case EventCondition::HAVE_RESOURCES:
-					boost::algorithm::replace_first(event.onFulfill, "%s", VLC->generaltexth->restypes[cond.objectType]);
-					boost::algorithm::replace_first(event.onFulfill, "%d", boost::lexical_cast<std::string>(cond.value));
+					event.onFulfill.replaceName(cond.objectType.as<GameResID>());
+					event.onFulfill.replaceNumber(cond.value);
 					break;
 
 				case EventCondition::HAVE_BUILDING:
 					if (isInTheMap(cond.position))
-						cond.object = getObjectiveObjectFrom(cond.position, Obj::TOWN);
+					{
+						if(const auto * object = getObjectiveObjectFrom(cond.position, Obj::TOWN))
+							cond.objectID = object->id;
+						else
+							logGlobal->warn("Objective '%s': failed to resolve town target for building objective at %s", event.identifier, cond.position.toString());
+					}
 					break;
 
 				case EventCondition::CONTROL:
-					if (isInTheMap(cond.position))
-						cond.object = getObjectiveObjectFrom(cond.position, Obj::EObj(cond.objectType));
-
-					if (cond.object)
+					if(event.effect.type == EventEffect::VICTORY)
+						cond.condition = EventCondition::CONTROL_CURRENT;
+					[[fallthrough]];
+				case EventCondition::CONTROL_CURRENT:
+					if(isInTheMap(cond.position))
 					{
-						const CGTownInstance *town = dynamic_cast<const CGTownInstance*>(cond.object);
-						if (town)
-							boost::algorithm::replace_first(event.onFulfill, "%s", town->name);
-						const CGHeroInstance *hero = dynamic_cast<const CGHeroInstance*>(cond.object);
-						if (hero)
-							boost::algorithm::replace_first(event.onFulfill, "%s", hero->name);
+						const auto & type = cond.objectType.as<MapObjectID>();
+						if(const auto * object = getObjectiveObjectFrom(cond.position, type))
+						{
+							cond.objectID = object->id;
+						}
+						else if (type == MapObjectID::HERO)	//HotA maps can put event conditions on an imprisoned hero
+						{
+							const CGObjectInstance * prison = getObjectiveObjectFrom(cond.position, MapObjectID::PRISON);
+							if (prison)
+								cond.objectID = prison->id;
+						}
+					}
+
+					if(cond.objectID != ObjectInstanceID::NONE)
+					{
+						const auto * town = dynamic_cast<const CGTownInstance *>(objects[cond.objectID].get());
+						if(town)
+							event.onFulfill.replaceTextID(town->getNameTextID());
+						const auto * hero = dynamic_cast<const CGHeroInstance *>(objects[cond.objectID].get());
+						if(hero)
+							event.onFulfill.replaceTextID(hero->getNameTextID());
 					}
 					break;
 
 				case EventCondition::DESTROY:
-					if (isInTheMap(cond.position))
-						cond.object = getObjectiveObjectFrom(cond.position, Obj::EObj(cond.objectType));
+					// Placeholder-targeted "defeat hero" objectives stay unresolved until normal-map placeholder replacement is supported.
+					if(cond.objectType.as<MapObjectID>() == Obj::HERO_PLACEHOLDER)
+						break;
 
-					if (cond.object)
+					if(isInTheMap(cond.position))
 					{
-						const CGHeroInstance *hero = dynamic_cast<const CGHeroInstance*>(cond.object);
-						if (hero)
-							boost::algorithm::replace_first(event.onFulfill, "%s", hero->name);
+						if(const auto * object = getObjectiveObjectFrom(cond.position, cond.objectType.as<MapObjectID>()))
+							cond.objectID = object->id;
+						else
+							logGlobal->warn("Objective '%s': failed to resolve destroy target of type %d at %s",
+								event.identifier,
+								cond.objectType.as<MapObjectID>().getNum(),
+								cond.position.toString());
+					}
+
+					if(cond.objectID != ObjectInstanceID::NONE)
+					{
+						const auto * hero = dynamic_cast<const CGHeroInstance *>(objects[cond.objectID].get());
+						if(hero)
+							event.onFulfill.replaceTextID(hero->getNameTextID());
 					}
 					break;
 				case EventCondition::TRANSPORT:
-					cond.object = getObjectiveObjectFrom(cond.position, Obj::TOWN);
+					if(const auto * object = getObjectiveObjectFrom(cond.position, Obj::TOWN))
+						cond.objectID = object->id;
+					else
+						logGlobal->warn("Objective '%s': failed to resolve town target for transport objective at %s", event.identifier, cond.position.toString());
 					break;
 				//break; case EventCondition::DAYS_PASSED:
 				//break; case EventCondition::IS_HUMAN:
 				//break; case EventCondition::DAYS_WITHOUT_TOWN:
 				//break; case EventCondition::STANDARD_WIN:
-
-				//TODO: support new condition format
-				case EventCondition::HAVE_0:
-					break;
-				case EventCondition::DESTROY_0:
-					break;
-				case EventCondition::HAVE_BUILDING_0:
-					break;
 			}
 			return cond;
 		};
@@ -585,70 +606,586 @@ void CMap::checkForObjectives()
 	}
 }
 
-void CMap::addNewArtifactInstance(CArtifactInstance * art)
+void CMap::eraseArtifactInstance(ArtifactInstanceID art)
 {
-	art->id = ArtifactInstanceID((si32)artInstances.size());
-	artInstances.push_back(art);
+	//TODO: handle for artifacts removed in map editor
+	artInstances[art.getNum()] = nullptr;
 }
 
-void CMap::eraseArtifactInstance(CArtifactInstance * art)
+void CMap::moveArtifactInstance(
+	CArtifactSet & srcSet, const ArtifactPosition & srcSlot,
+	CArtifactSet & dstSet, const ArtifactPosition & dstSlot)
 {
-	assert(artInstances[art->id.getNum()] == art);
-	artInstances[art->id.getNum()].dellNull();
+	auto art = srcSet.getArt(srcSlot);
+	removeArtifactInstance(srcSet, srcSlot);
+	putArtifactInstance(dstSet, art->getId(), dstSlot);
 }
 
-void CMap::addNewQuestInstance(CQuest* quest)
+void CMap::putArtifactInstance(CArtifactSet & set, ArtifactInstanceID artID, const ArtifactPosition & slot)
 {
-	quest->qid = static_cast<si32>(quests.size());
-	quests.push_back(quest);
+	auto artifact = artInstances.at(artID.getNum());
+
+	artifact->addPlacementMap(set.putArtifact(slot, artifact.get()));
 }
 
-void CMap::addNewObject(CGObjectInstance * obj)
+void CMap::removeArtifactInstance(CArtifactSet & set, const ArtifactPosition & slot)
 {
-	if(obj->id != ObjectInstanceID((si32)objects.size()))
+	ArtifactInstanceID artID = set.getArtID(slot);
+	auto artifact = artInstances.at(artID.getNum());
+	assert(artifact);
+	set.removeArtifact(slot);
+	CArtifactSet::ArtPlacementMap partsMap;
+	for(auto & part : artifact->getPartsInfo())
+	{
+		if(part.slot != ArtifactPosition::PRE_FIRST)
+			partsMap.try_emplace(part.getArtifact(), ArtifactPosition::PRE_FIRST);
+	}
+	artifact->addPlacementMap(partsMap);
+}
+
+void CMap::generateUniqueInstanceName(CGObjectInstance * target)
+{
+	//this gives object unique name even if objects are removed later
+	auto uid = uidCounter++;
+
+	boost::format fmt("%s_%d");
+	fmt % target->getTypeName() % uid;
+	target->instanceName = fmt.str();
+}
+
+void CMap::addNewObject(std::shared_ptr<CGObjectInstance> obj)
+{
+	if (!obj->id.hasValue())
+		obj->id = ObjectInstanceID(objects.size());
+
+	if(obj->id != ObjectInstanceID(objects.size()) && objects.at(obj->id.getNum()) != nullptr)
 		throw std::runtime_error("Invalid object instance id");
 
-	if(obj->instanceName == "")
+	if(obj->instanceName.empty())
 		throw std::runtime_error("Object instance name missing");
 
-	auto it = instanceNames.find(obj->instanceName);
-	if(it != instanceNames.end())
+	if (vstd::contains(instanceNames, obj->instanceName))
 		throw std::runtime_error("Object instance name duplicated: "+obj->instanceName);
 
-	objects.push_back(obj);
+	if(const auto * teleport = dynamic_cast<const CGTeleport *>(obj.get()))
+		teleport->warnIfNotVisitable();
+
+	if (obj->id == ObjectInstanceID(objects.size()))
+		objects.emplace_back(obj);
+	else
+		objects[obj->id.getNum()] = obj;
+
 	instanceNames[obj->instanceName] = obj;
-	addBlockVisTiles(obj);
+	showObject(obj.get());
+
+	//TODO: how about defeated heroes recruited again?
 
 	obj->afterAddToMap(this);
 }
 
-void CMap::initTerrain()
+void CMap::moveObject(ObjectInstanceID target, const int3 & dst)
 {
-	int level = twoLevel ? 2 : 1;
-	terrain = new TerrainTile**[width];
-	guardingCreaturePositions = new int3**[width];
-	for (int i = 0; i < width; ++i)
+	auto obj = objects.at(target).get();
+	hideObject(obj);
+	obj->setAnchorPos(dst);
+	showObject(obj);
+}
+
+bool CMap::adjustToMapBounds(CGObjectInstance * obj)
+{
+	if(!obj || !obj->isVisitable())
+		return false;
+
+	const auto oldVisitablePos = obj->visitablePos();
+	if(isInTheMap(oldVisitablePos))
+		return false;
+
+	int3 newVisitablePos = oldVisitablePos;
+	newVisitablePos.x = std::clamp(newVisitablePos.x, 0, width - 1);
+	newVisitablePos.y = std::clamp(newVisitablePos.y, 0, height - 1);
+
+	if(!isInTheMap(newVisitablePos))
+		return false;
+
+	// Keep object shape unchanged by translating anchor with the clamped visitable tile delta.
+	const int3 newAnchorPos = obj->anchorPos() + (newVisitablePos - oldVisitablePos);
+	if(obj->id.hasValue() && obj->id.getNum() < objects.size() && objects.at(obj->id.getNum()).get() == obj)
+		moveObject(obj->id, newAnchorPos);
+	else
+		obj->setAnchorPos(newAnchorPos);
+
+	return true;
+}
+
+std::shared_ptr<CGObjectInstance> CMap::removeObject(ObjectInstanceID oldObject)
+{
+	auto obj = objects.at(oldObject);
+
+	hideObject(obj.get());
+	instanceNames.erase(obj->instanceName);
+	obj->afterRemoveFromMap(this);
+
+	//update indices
+
+	auto iter = std::next(objects.begin(), obj->id.getNum());
+	iter = objects.erase(iter);
+
+	for(int i = obj->id.getNum(); iter != objects.end(); ++i, ++iter)
+		(*iter)->id = ObjectInstanceID(i);
+
+	for (auto & town : towns)
+		if (town.getNum() >= obj->id)
+			town = ObjectInstanceID(town.getNum()-1);
+
+	for (auto & hero : heroesOnMap)
+		if (hero.getNum() >= obj->id)
+			hero = ObjectInstanceID(hero.getNum()-1);
+
+	for(auto & tile : terrain)
 	{
-		terrain[i] = new TerrainTile*[height];
-		guardingCreaturePositions[i] = new int3*[height];
-		for (int j = 0; j < height; ++j)
+		for (auto & objectID : tile.blockingObjects)
+			if (objectID.getNum() >= obj->id)
+				objectID = ObjectInstanceID(objectID.getNum()-1);
+
+		for (auto & objectID : tile.visitableObjects)
+			if (objectID.getNum() >= obj->id)
+				objectID = ObjectInstanceID(objectID.getNum()-1);
+	}
+
+	//TODO: Clean artifact instances (mostly worn by hero?) and quests related to this object
+	//This causes crash with undo/redo in editor
+
+	return obj;
+}
+
+std::shared_ptr<CGObjectInstance> CMap::replaceObject(ObjectInstanceID oldObjectID, const std::shared_ptr<CGObjectInstance> & newObject)
+{
+	auto oldObject = objects.at(oldObjectID.getNum());
+
+	if(oldObject)
+	{
+		hideObject(oldObject.get());
+		instanceNames.erase(oldObject->instanceName);
+		oldObject->afterRemoveFromMap(this);
+	}
+
+	newObject->id = oldObjectID;
+	objects.at(oldObjectID.getNum()) = newObject;
+	showObject(newObject.get());
+	instanceNames[newObject->instanceName] = newObject;
+
+	newObject->afterAddToMap(this);
+
+	return oldObject;
+}
+
+std::shared_ptr<CGObjectInstance> CMap::eraseObject(ObjectInstanceID oldObjectID)
+{
+	auto oldObject = objects.at(oldObjectID.getNum());
+
+	instanceNames.erase(oldObject->instanceName);
+	objects.at(oldObjectID) = nullptr;
+	hideObject(oldObject.get());
+	oldObject->afterRemoveFromMap(this);
+
+	return oldObject;
+}
+
+bool CMap::isHeroOnMap(const ObjectInstanceID &heroId) const {
+	return vstd::contains(heroesOnMap, heroId);
+}
+
+void CMap::heroAddedToMap(const CGHeroInstance * hero)
+{
+	assert(!vstd::contains(heroesOnMap, hero->id));
+	heroesOnMap.push_back(hero->id);
+}
+
+void CMap::heroRemovedFromMap(const CGHeroInstance * hero)
+{
+	assert(vstd::contains(heroesOnMap, hero->id));
+	vstd::erase(heroesOnMap, hero->id);
+}
+
+void CMap::townAddedToMap(const CGTownInstance * town)
+{
+	assert(!vstd::contains(towns, town->id));
+	towns.push_back(town->id);
+}
+
+void CMap::townRemovedFromMap(const CGTownInstance * town)
+{
+	assert(vstd::contains(towns, town->id));
+	vstd::erase(towns, town->id);
+}
+
+bool CMap::isWaterMap() const
+{
+	return waterMap;
+}
+
+bool CMap::calculateWaterContent()
+{
+	size_t totalTiles = height * width * levels();
+	size_t waterTiles = 0;
+
+	for(auto & tile : terrain)
+	{
+		if (tile.isWater())
 		{
-			terrain[i][j] = new TerrainTile[level];
-			guardingCreaturePositions[i][j] = new int3[level];
+			waterTiles++;
 		}
 	}
+
+	if (waterTiles >= totalTiles / 100) //At least 1% of area is water
+	{
+		waterMap = true;
+	}
+	else
+	{
+		waterMap = false;
+	}
+
+	return waterMap;
+}
+
+void CMap::banWaterContent()
+{
+	banWaterHeroes(isWaterMap());
+	banWaterArtifacts();
+	banWaterSpells();
+	banWaterSkills();
+}
+
+void CMap::banWaterSpells()
+{
+	vstd::erase_if(allowedSpells, [&](SpellID spell)
+	{
+		return spell.toSpell()->onlyOnWaterMap && !isWaterMap();
+	});
+}
+
+void CMap::banWaterArtifacts()
+{
+	vstd::erase_if(allowedArtifact, [&](ArtifactID artifact)
+	{
+		return artifact.toArtifact()->onlyOnWaterMap && !isWaterMap();
+	});
+}
+
+void CMap::banWaterSkills()
+{
+	vstd::erase_if(allowedAbilities, [&](SecondarySkill skill)
+	{
+		return skill.toSkill()->isOnlyOnWaterMap() && !isWaterMap();
+	});
+}
+
+void CMapHeader::banWaterHeroes(bool isWaterMap)
+{
+	vstd::erase_if(allowedHeroes, [&](HeroTypeID hero)
+	{
+		return hero.toHeroType()->onlyOnWaterMap && !isWaterMap;
+	});
+
+	vstd::erase_if(allowedHeroes, [&](HeroTypeID hero)
+	{
+		return hero.toHeroType()->onlyOnMapWithoutWater && isWaterMap;
+	});
+}
+
+void CMap::banHero(const HeroTypeID & id)
+{
+	if (!vstd::contains(allowedHeroes, id))
+		logGlobal->warn("Attempt to ban hero %s, who is already not allowed", id.encode(id));
+	allowedHeroes.erase(id);
+}
+
+void CMap::unbanHero(const HeroTypeID & id)
+{
+	if (vstd::contains(allowedHeroes, id))
+		logGlobal->warn("Attempt to unban hero %s, who is already allowed", id.encode(id));
+	allowedHeroes.insert(id);
+}
+
+void CMap::initTerrain()
+{
+	terrain = MapTilesStorage<TerrainTile>(int3(width, height, levels()));
+	guardingCreaturePositions = MapTilesStorage<int3>(int3(width, height, levels()));
+}
+
+void CMap::addLevel(const MapLayerId & layerType)
+{
+	terrain.addLevel();
+	guardingCreaturePositions.addLevel();
+	mapLayers.push_back(layerType);
+
+	int newLevel = levels() - 1;
+	getEditManager()->getTerrainSelection().selectRange(MapRect(int3(0, 0, newLevel), width, height));
+	getEditManager()->drawTerrain(layerType.toEntity(LIBRARY)->getDefaultTerrain(), 0, &CRandomGenerator::getDefault());
+
+	// newly appended tiles start default-constructed, which is not a valid "no guard" sentinel
+	calculateGuardingGreaturePositions();
 }
 
 CMapEditManager * CMap::getEditManager()
 {
-	if(!editManager) editManager = make_unique<CMapEditManager>(this);
+	if(!editManager) editManager = std::make_unique<CMapEditManager>(this);
 	return editManager.get();
 }
 
-void CMap::resetStaticData()
+void CMap::reindexObjects()
 {
-	CGKeys::reset();
-	CGMagi::reset();
-	CGObelisk::reset();
-	CGTownInstance::reset();
+	// Only reindex at editor / RMG operations
+
+	auto oldIndex = objects;
+
+	objects.erase(std::remove(objects.begin(), objects.end(), nullptr), objects.end());
+
+	std::sort(objects.begin(), objects.end(), [](const auto & lhs, const auto & rhs)
+	{
+		// Obstacles first, then visitable, at the end - removable
+
+		if (!lhs->isVisitable() && rhs->isVisitable())
+			return true;
+		if (lhs->isVisitable() && !rhs->isVisitable())
+			return false;
+
+		// Special case for Windomill - draw on top of other objects
+		if (lhs->ID != Obj::WINDMILL && rhs->ID == Obj::WINDMILL)
+			return true;
+		if (lhs->ID == Obj::WINDMILL && rhs->ID != Obj::WINDMILL)
+			return false;
+
+		if (!lhs->isRemovable() && rhs->isRemovable())
+			return true;
+		if (lhs->isRemovable() && !rhs->isRemovable())
+			return false;
+
+		return lhs->anchorPos().y < rhs->anchorPos().y;
+	});
+
+	// instanceNames don't change
+	for (size_t i = 0; i < objects.size(); ++i)
+		objects[i]->id = ObjectInstanceID(i);
+
+	for (auto & town : towns)
+		town = oldIndex.at(town.getNum())->id;
+
+	for (auto & hero : heroesOnMap)
+		hero = oldIndex.at(hero.getNum())->id;
+
+	for(auto & tile : terrain)
+	{
+		for (auto & objectID : tile.blockingObjects)
+			objectID = oldIndex.at(objectID.getNum())->id;
+
+		for (auto & objectID : tile.visitableObjects)
+			objectID = oldIndex.at(objectID.getNum())->id;
+	}
 }
+
+const IGameSettings & CMap::getSettings() const
+{
+	return *gameSettings;
+}
+
+void CMap::overrideGameSetting(EGameSettings option, const JsonNode & input)
+{
+	return gameSettings->addOverride(option, input);
+}
+
+void CMap::overrideGameSettings(const JsonNode & input)
+{
+	return gameSettings->loadOverrides(input);
+}
+
+CArtifactInstance * CMap::createScroll(const SpellID & spellId)
+{
+	return createArtifact(ArtifactID::SPELL_SCROLL, spellId);
+}
+
+CArtifactInstance * CMap::createArtifactComponent(const ArtifactID & artId)
+{
+	auto art = artId.toArtifact();
+	auto newArtifact = std::make_shared<CArtifactInstance>(cb, art);
+
+	newArtifact->setId(ArtifactInstanceID(artInstances.size()));
+	artInstances.push_back(newArtifact);
+
+	for (const auto & bonus : art->instanceBonuses)
+		newArtifact->addNewBonus(std::make_shared<Bonus>(*bonus, newArtifact->getId()));
+
+	return newArtifact.get();
+}
+
+CArtifactInstance * CMap::createArtifact(const ArtifactID & artID, const SpellID & spellId)
+{
+	if(!artID.hasValue())
+		throw std::runtime_error("Can't create empty artifact!");
+
+	auto art = artID.toArtifact();
+
+	auto artInst = createArtifactComponent(artID);
+	if(art->isCombined() && !art->isFused())
+	{
+		for(const auto & part : art->getConstituents())
+			artInst->addPart(createArtifact(part->getId(), spellId), ArtifactPosition::PRE_FIRST);
+	}
+	if(art->isGrowing())
+	{
+		auto bonus = std::make_shared<Bonus>();
+		bonus->type = BonusType::ARTIFACT_GROWING;
+		bonus->val = 0;
+		artInst->addNewBonus(bonus);
+	}
+	if(art->isScroll())
+	{
+		artInst->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::SPELL,
+													 BonusSource::ARTIFACT_INSTANCE, -1, BonusSourceID(ArtifactID(ArtifactID::SPELL_SCROLL)), BonusSubtypeID(spellId)));
+	}
+	if(art->isCharged())
+	{
+		auto bonus = std::make_shared<Bonus>();
+		bonus->type = BonusType::ARTIFACT_CHARGE;
+		bonus->sid = artInst->getId();
+		bonus->val = 0;
+		artInst->addNewBonus(bonus);
+		artInst->addCharges(art->getDefaultStartCharges());
+	}
+
+	return artInst;
+}
+
+CArtifactInstance * CMap::getArtifactInstance(const ArtifactInstanceID & artifactID)
+{
+	return artInstances.at(artifactID.getNum()).get();
+}
+
+const CArtifactInstance * CMap::getArtifactInstance(const ArtifactInstanceID & artifactID) const
+{
+	return artInstances.at(artifactID.getNum()).get();
+}
+
+const std::vector<ObjectInstanceID> & CMap::getAllTowns() const
+{
+	return towns;
+}
+
+const std::vector<ObjectInstanceID> & CMap::getHeroesOnMap() const
+{
+	return heroesOnMap;
+}
+
+void CMap::addToHeroPool(std::shared_ptr<CGHeroInstance> hero)
+{
+	assert(hero->getHeroTypeID().isValid());
+	assert(!vstd::contains(heroesOnMap, hero->id));
+	assert(heroesPool.at(hero->getHeroTypeID().getNum()) == nullptr);
+
+	heroesPool.at(hero->getHeroTypeID().getNum()) = hero;
+
+	if (!hero->id.hasValue())
+	{
+		// reserve ID for this new hero, if needed (but don't actually add it since hero is not present on map)
+		hero->id = ObjectInstanceID(objects.size());
+		objects.push_back(nullptr);
+	}
+}
+
+CGHeroInstance * CMap::tryGetFromHeroPool(HeroTypeID hero)
+{
+	return heroesPool.at(hero.getNum()).get();
+}
+
+std::shared_ptr<CGHeroInstance> CMap::tryTakeFromHeroPool(HeroTypeID hero)
+{
+	auto result = heroesPool.at(hero.getNum());
+	heroesPool.at(hero.getNum()) = nullptr;
+	return result;
+}
+
+std::vector<HeroTypeID> CMap::getHeroesInPool() const
+{
+	std::vector<HeroTypeID> result;
+	for (const auto & hero : heroesPool)
+	{
+		if (!hero)
+			continue;
+
+		result.push_back(hero->getHeroTypeID());
+		assert(heroesPool.at(hero->getHeroTypeID().getNum()) == hero);
+	}
+
+	return result;
+}
+
+CGObjectInstance * CMap::getObject(ObjectInstanceID obj)
+{
+	if (static_cast<size_t>(obj.getNum()) < objects.size())
+		return objects.at(obj).get();
+	return nullptr;
+}
+
+const CGObjectInstance * CMap::getObject(ObjectInstanceID obj) const
+{
+	if (static_cast<size_t>(obj.getNum()) < objects.size())
+		return objects.at(obj).get();
+	return nullptr;
+}
+
+ObjectInstanceID CMap::allocateUniqueInstanceID()
+{
+	objects.push_back(nullptr);
+	return ObjectInstanceID(objects.size() - 1);
+}
+
+void CMap::parseUidCounter()
+{
+	int max_index = -1;
+
+	auto updateMaxIndex = [&](const std::string & key)
+	{
+		const size_t pos = key.find_last_of('_');
+
+		// Validate underscore position
+		if (pos == std::string::npos || pos + 1 >= key.size()) {
+			logGlobal->error("Instance name '%s' is not valid.", key);
+			return;
+		}
+
+		const std::string index_part = key.substr(pos + 1);
+		try {
+			const int current_index = std::stoi(index_part);
+			max_index = std::max(max_index, current_index);
+		}
+		catch (const std::invalid_argument&) {
+			logGlobal->error("Instance name %s contains non-numeric index part: %s", key, index_part);
+		}
+		catch (const std::out_of_range&) {
+			logGlobal->error("Instance name %s index part is overflow.", key);
+		}
+	};
+
+	for (const auto & entry : instanceNames) {
+		updateMaxIndex(entry.first);
+	}
+
+	for (const auto & hero : heroesPool) {
+		if (hero && !hero->instanceName.empty()) {
+			updateMaxIndex(hero->instanceName);
+		}
+	}
+
+	// Directly set uidCounter using simplified logic
+	uidCounter = max_index + 1;  // Automatically 0 when max_index = -1
+}
+
+void CMap::deserializeHeroPool(const std::vector<std::shared_ptr<CGHeroInstance> > & poolFromSave)
+{
+	heroesPool.resize(LIBRARY->heroh->size());
+	for (const auto & hero : poolFromSave)
+		if (hero)
+			heroesPool.at(hero->getHeroTypeID().getNum()) = hero;
+}
+

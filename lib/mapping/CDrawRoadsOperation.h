@@ -10,26 +10,26 @@
  
 #pragma once
  
-#include "../CRandomGenerator.h"
-#include "CMapEditManager.h"
+#include "CMapOperation.h"
 
 struct TerrainTile;
 
-class CDrawRoadsOperation : public CMapOperation
+template <typename T> class CDrawLinesOperation : public CMapOperation
 {
 public:
-	CDrawRoadsOperation(CMap * map, const CTerrainSelection & terrainSel, ERoadType::ERoadType roadType, CRandomGenerator * gen);
 	void execute() override;
 	void undo() override;
 	void redo() override;
-	std::string getLabel() const override;	
-private:
 	
-	struct RoadPattern
+protected:
+	
+	struct LinePattern
 	{
 		std::string data[9];
-		std::pair<int, int> roadMapping, riverMapping;
-		bool hasHFlip, hasVFlip;
+		std::pair<int, int> roadMapping;
+		std::pair<int, int> riverMapping;
+		bool hasHFlip;
+		bool hasVFlip;
 	};
 	
 	struct ValidationResult
@@ -38,21 +38,65 @@ private:
 		bool result;
 		int flip;
 	};
+
+	CDrawLinesOperation(CMap * map, CTerrainSelection terrainSel, T lineType, vstd::RNG * gen);
+
+	virtual void executeTile(TerrainTile & tile, T type) = 0;
+	virtual bool canApplyPattern(const LinePattern & pattern) const = 0;
+	virtual bool needUpdateTile(const TerrainTile & tile) const = 0;
+	virtual bool tileHasSomething(const int3 & pos) const = 0;
+	virtual void updateTile(TerrainTile & tile, const LinePattern & pattern, const int flip) = 0;
+	virtual T getIdentifier(TerrainTile & tile) const = 0;
+
+	static const std::vector<LinePattern> patterns;
 	
-	static const std::vector<RoadPattern> patterns;
-	
-	void flipPattern(RoadPattern & pattern, int flip) const;
+	void flipPattern(LinePattern & pattern, int flip) const;
 	
 	void updateTiles(std::set<int3> & invalidated);
 	
-	ValidationResult validateTile(const RoadPattern & pattern, const int3 & pos);
-	void updateTile(TerrainTile & tile, const RoadPattern & pattern, const int flip);
-	
-	bool canApplyPattern(const RoadPattern & pattern) const;
-	bool needUpdateTile(const TerrainTile & tile) const;
-	bool tileHasSomething(const int3 & pos) const;
+	ValidationResult validateTile(const LinePattern & pattern, const int3 & pos);
 	
 	CTerrainSelection terrainSel;
-	ERoadType::ERoadType roadType;
-	CRandomGenerator * gen;	
+	T lineType;
+	vstd::RNG * gen;
+	std::map<T, CTerrainSelection> formerState;
+
+private:
+	void drawLines(CTerrainSelection selection, T type);
+};
+
+class CDrawRoadsOperation : public CDrawLinesOperation<RoadId>
+{
+public:
+	CDrawRoadsOperation(CMap * map, const CTerrainSelection & terrainSel, RoadId roadType, vstd::RNG * gen);
+	std::string getLabel() const override;
+	
+protected:
+	void executeTile(TerrainTile & tile, RoadId type) override;
+	bool canApplyPattern(const LinePattern & pattern) const override;
+	bool needUpdateTile(const TerrainTile & tile) const override;
+	bool tileHasSomething(const int3 & pos) const override;
+	void updateTile(TerrainTile & tile, const LinePattern & pattern, const int flip) override;
+	RoadId getIdentifier(TerrainTile & tile) const override;
+	
+private:
+	RoadId roadType;
+};
+
+class CDrawRiversOperation : public CDrawLinesOperation<RiverId>
+{
+public:
+	CDrawRiversOperation(CMap * map, const CTerrainSelection & terrainSel, RiverId roadType, vstd::RNG * gen);
+	std::string getLabel() const override;
+	
+protected:
+	void executeTile(TerrainTile & tile, RiverId type) override;
+	bool canApplyPattern(const LinePattern & pattern) const override;
+	bool needUpdateTile(const TerrainTile & tile) const override;
+	bool tileHasSomething(const int3 & pos) const override;
+	void updateTile(TerrainTile & tile, const LinePattern & pattern, const int flip) override;
+	RiverId getIdentifier(TerrainTile & tile) const override;
+	
+private:
+	RiverId riverType;
 };

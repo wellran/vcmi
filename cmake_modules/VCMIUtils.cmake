@@ -7,16 +7,22 @@
 macro(vcmi_set_output_dir name dir)
 	# Multi-config builds for Visual Studio, Xcode
 	foreach(OUTPUTCONFIG ${CMAKE_CONFIGURATION_TYPES})
-		 string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIGUPPERCASE)
-		 set_target_properties(${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIGUPPERCASE} ${CMAKE_BINARY_DIR}/bin/${OUTPUTCONFIG}/${dir})
-		 set_target_properties(${name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY_${OUTPUTCONFIGUPPERCASE} ${CMAKE_BINARY_DIR}/bin/${OUTPUTCONFIG}/${dir})
-		 set_target_properties(${name} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY_${OUTPUTCONFIGUPPERCASE} ${CMAKE_BINARY_DIR}/bin/${OUTPUTCONFIG}/${dir})
+		string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIGUPPERCASE)
+		set_target_properties(${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIGUPPERCASE} ${CMAKE_BINARY_DIR}/bin/${OUTPUTCONFIG}/${dir})
+		if(ANDROID)
+			set_target_properties(${name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY_${OUTPUTCONFIGUPPERCASE} "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
+		else()
+			set_target_properties(${name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY_${OUTPUTCONFIGUPPERCASE} ${CMAKE_BINARY_DIR}/bin/${OUTPUTCONFIG}/${dir})
+		endif()
+		set_target_properties(${name} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY_${OUTPUTCONFIGUPPERCASE} ${CMAKE_BINARY_DIR}/bin/${OUTPUTCONFIG}/${dir})
 	endforeach()
 
 	# Generic no-config case for Makefiles, Ninja.
 	# This is what Qt Creator is using
 	set_target_properties(${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/${dir})
-	set_target_properties(${name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/${dir})
+	if(NOT ANDROID)
+		set_target_properties(${name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/${dir})
+	endif()
 	set_target_properties(${name} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/${dir})
 endmacro()
 
@@ -39,23 +45,10 @@ function(assign_source_group)
 endfunction(assign_source_group)
 
 # Macro to add subdirectory and set appropriate FOLDER for generated projects files
-function(add_subdirectory_with_folder _folder_name _folder)
+macro(add_subdirectory_with_folder _folder_name _folder)
 	add_subdirectory(${_folder} ${ARGN})
 	set_property(DIRECTORY "${_folder}" PROPERTY FOLDER "${_folder_name}")
-endfunction()
-
-# Macro for Xcode Projects generation
-# Slightly outdated, but useful reference for all options available here:
-# https://pewpewthespells.com/blog/buildsettings.html
-# https://github.com/samdmarshall/Xcode-Build-Settings-Reference
-if(${CMAKE_GENERATOR} MATCHES "Xcode")
-
-	macro(set_xcode_property TARGET XCODE_PROPERTY XCODE_VALUE)
-		set_property(TARGET ${TARGET} PROPERTY
-			XCODE_ATTRIBUTE_${XCODE_PROPERTY} ${XCODE_VALUE})
-	endmacro(set_xcode_property)
-
-endif(${CMAKE_GENERATOR} MATCHES "Xcode")
+endmacro()
 
 #######################################
 #        CMake debugging              #
@@ -119,8 +112,85 @@ endfunction()
 # Print Git commit hash
 function(vcmi_print_git_commit_hash)
 
-	message(STATUS "-- -- Start of Git information")
-	message(STATUS "GIT_SHA1: " ${GIT_SHA1})
-	message(STATUS "-- -- End of Git information")
+	if(GIT_SHA1)
+		message(STATUS "-- -- Start of Git information")
+		message(STATUS "GIT_SHA1: " ${GIT_SHA1})
+		message(STATUS "-- -- End of Git information")
+	endif()
 
+endfunction()
+
+# install(FILES) of shared libs but using symlink instead of copying
+function(vcmi_install_libs_symlink libs)
+	install(CODE "
+		foreach(lib ${libs})
+			cmake_path(GET lib FILENAME filename)
+			file(CREATE_LINK \${lib} \"\${CMAKE_INSTALL_PREFIX}/${LIB_DIR}/\${filename}\"
+				COPY_ON_ERROR SYMBOLIC
+			)
+		endforeach()
+	")
+endfunction()
+
+# install dependencies from Conan, CONAN_RUNTIME_LIBS_FILE is set in conanfile.py
+function(vcmi_install_conan_deps)
+	if(NOT USING_CONAN)
+		return()
+	endif()
+
+	file(STRINGS "${CONAN_RUNTIME_LIBS_FILE}" runtimeLibs)
+	if(ANDROID)
+		vcmi_install_libs_symlink("${runtimeLibs}")
+	else()
+		install(FILES ${runtimeLibs} DESTINATION ${LIB_DIR})
+	endif()
+endfunction()
+
+function(vcmi_deploy_qt deployQtToolName deployQtOptions)
+	# TODO: use qt_generate_deploy_app_script() with Qt 6
+	find_program(TOOL_DEPLOYQT NAMES ${deployQtToolName} PATHS "${qtBinDir}")
+	if(TOOL_DEPLOYQT)
+		install(CODE "
+			execute_process(
+				COMMAND \"${TOOL_DEPLOYQT}\" ${deployQtOptions} -verbose=2
+				COMMAND_ERROR_IS_FATAL ANY
+			)
+		")
+	else()
+		message(WARNING "${deployQtToolName} not found, running cpack would result in broken package")
+	endif()
+endfunction()
+
+function(vcmi_deploy_qt_runtime targetBinary)
+	if(NOT WIN32)
+		return()
+	endif()
+
+	find_program(TOOL_WINDEPLOYQT NAMES windeployqt PATHS "${qtBinDir}")
+	if(TOOL_WINDEPLOYQT)
+		add_custom_command(TARGET ${targetBinary} POST_BUILD
+			COMMAND ${CMAKE_COMMAND}
+				"-DLOCK_FILE=${CMAKE_BINARY_DIR}/windeployqt.lock"
+				"-DWINDEPLOYQT=${TOOL_WINDEPLOYQT}"
+				"-DTARGET_FILE=$<TARGET_FILE:${targetBinary}>"
+				-P "${CMAKE_SOURCE_DIR}/cmake_modules/RunWinDeployQtLocked.cmake"
+			VERBATIM
+		)
+	else()
+		message(WARNING "windeployqt not found, target ${targetBinary} may miss Qt runtime files")
+	endif()
+endfunction()
+
+# Copy runtime dependencies from CONAN_RUNTIME_LIBS_FILE to target output directory
+function(vcmi_copy_conan_runtime_deps tgt)
+	if(WIN32 AND USING_CONAN AND EXISTS "${CONAN_RUNTIME_LIBS_FILE}")
+		file(STRINGS "${CONAN_RUNTIME_LIBS_FILE}" runtimeLibs)
+		if(runtimeLibs)
+			add_custom_command(TARGET ${tgt} POST_BUILD
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different ${runtimeLibs} "$<TARGET_FILE_DIR:${tgt}>"
+				COMMAND_EXPAND_LISTS
+				VERBATIM
+			)
+		endif()
+	endif()
 endfunction()

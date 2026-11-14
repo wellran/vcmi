@@ -11,12 +11,22 @@
 #pragma once
 
 #include "Entity.h"
+#include "scripting/ApiTags.h"
+
 
 class HeroTypeID;
 
-class DLL_LINKAGE HeroType : public EntityT<HeroTypeID>
+class DLL_LINKAGE HeroType : public EntityT<HeroTypeID>, public scripting::ApiRawPointer<HeroType>
 {
-public:
+	virtual std::string getBiographyTranslated() const = 0;
+	virtual std::string getSpecialtyNameTranslated() const = 0;
+	virtual std::string getSpecialtyDescriptionTranslated() const = 0;
+	virtual std::string getSpecialtyTooltipTranslated() const = 0;
+
+	virtual std::string getBiographyTextID() const = 0;
+	virtual std::string getSpecialtyNameTextID() const = 0;
+	virtual std::string getSpecialtyDescriptionTextID() const = 0;
+	virtual std::string getSpecialtyTooltipTextID() const = 0;
 
 };
 

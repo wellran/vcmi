@@ -8,23 +8,23 @@
  *
  */
 
- #pragma once
+#pragma once
 
- #include "../int3.h"
- #include "../GameConstants.h"
+#include "../int3.h"
+#include "../GameConstants.h"
 
  class CGObjectInstance;
 
  struct DLL_LINKAGE ObjectPosInfo
  {
  	int3 pos;
- 	Obj id;
- 	si32 subId;
- 	PlayerColor owner;
- 	ObjectPosInfo();
- 	ObjectPosInfo(const CGObjectInstance * obj);
+	Obj id = Obj::NO_OBJ;
+	si32 subId = -1;
+	PlayerColor owner = PlayerColor::CANNOT_DETERMINE;
+	ObjectPosInfo() = default;
+	ObjectPosInfo(const CGObjectInstance * obj);
 
-	template <typename Handler> void serialize(Handler & h, const int version)
+	template <typename Handler> void serialize(Handler & h)
 	{
 		h & pos;
 		h & id;

@@ -10,12 +10,8 @@
 #include "StdInc.h"
 #include "JsonSerializeFormat.h"
 
-#include "../JsonNode.h"
-
 //JsonSerializeHelper
-JsonSerializeHelper::JsonSerializeHelper(JsonSerializeHelper && other):
-	owner(other.owner),
-	restoreState(false)
+JsonSerializeHelper::JsonSerializeHelper(JsonSerializeHelper && other) noexcept: owner(other.owner), restoreState(false)
 {
 	std::swap(restoreState, other.restoreState);
 }
@@ -38,33 +34,17 @@ JsonSerializeHelper::JsonSerializeHelper(JsonSerializeFormat * owner_)
 }
 
 //JsonStructSerializer
-JsonStructSerializer::JsonStructSerializer(JsonStructSerializer && other)
-	: JsonSerializeHelper(std::move(static_cast<JsonSerializeHelper &>(other)))
-{
-
-}
+JsonStructSerializer::JsonStructSerializer(JsonStructSerializer && other) noexcept: JsonSerializeHelper(std::move(static_cast<JsonSerializeHelper &>(other))) {}
 
 JsonStructSerializer::JsonStructSerializer(JsonSerializeFormat * owner_)
 	: JsonSerializeHelper(owner_)
 {
 }
 
-JsonStructSerializer::~JsonStructSerializer()
-{
-}
-
 //JsonArraySerializer
-JsonArraySerializer::JsonArraySerializer(JsonArraySerializer && other)
-	: JsonSerializeHelper(std::move(static_cast<JsonSerializeHelper &>(other)))
-{
+JsonArraySerializer::JsonArraySerializer(JsonArraySerializer && other) noexcept: JsonSerializeHelper(std::move(static_cast<JsonSerializeHelper &>(other))) {}
 
-}
-
-JsonArraySerializer::JsonArraySerializer(JsonSerializeFormat * owner_):
-	JsonSerializeHelper(owner_)
-{
-	thisNode = &owner->getCurrent();
-}
+JsonArraySerializer::JsonArraySerializer(JsonSerializeFormat * owner_): JsonSerializeHelper(owner_), thisNode(&owner->getCurrent()) {}
 
 JsonStructSerializer JsonArraySerializer::enterStruct(const size_t index)
 {
@@ -107,27 +87,26 @@ size_t JsonArraySerializer::size() const
     return thisNode->Vector().size();
 }
 
-//JsonSerializeFormat::LIC
-JsonSerializeFormat::LIC::LIC(const std::vector<bool> & Standard, const TDecoder Decoder, const TEncoder Encoder):
-	standard(Standard), decoder(Decoder), encoder(Encoder)
-{
-	any.resize(standard.size(), false);
-	all.resize(standard.size(), false);
-	none.resize(standard.size(), false);
-}
-
-JsonSerializeFormat::LICSet::LICSet(const std::set<si32>& Standard, const TDecoder Decoder, const TEncoder Encoder):
-	standard(Standard), decoder(Decoder), encoder(Encoder)
+JsonSerializeFormat::LICSet::LICSet(const std::set<si32> & Standard, TDecoder Decoder, TEncoder Encoder):
+	standard(Standard),
+	decoder(std::move(Decoder)),
+	encoder(std::move(Encoder))
 {
 
 }
 
 //JsonSerializeFormat
-JsonSerializeFormat::JsonSerializeFormat(const IInstanceResolver * instanceResolver_, const bool saving_, const bool updating_)
+JsonSerializeFormat::JsonSerializeFormat(const IInstanceResolver * instanceResolver_, IIdentifierResolver * identifierResolver_, const bool saving_)
 	: saving(saving_),
-	updating(updating_),
-	instanceResolver(instanceResolver_)
+	instanceResolver(instanceResolver_),
+	identifierResolver(identifierResolver_)
 {
+}
+
+IIdentifierResolver & JsonSerializeFormat::getIdentifierResolver()
+{
+	assert(identifierResolver);
+	return *identifierResolver;
 }
 
 JsonStructSerializer JsonSerializeFormat::enterStruct(const std::string & fieldName)
@@ -150,4 +129,23 @@ void JsonSerializeFormat::serializeBool(const std::string & fieldName, bool & va
 void JsonSerializeFormat::serializeBool(const std::string & fieldName, bool & value, const bool defaultValue)
 {
 	serializeBool<bool>(fieldName, value, true, false, defaultValue);
+}
+
+void JsonSerializeFormat::readLICPart(const JsonNode & part, const JsonSerializeFormat::TDecoder & decoder, std::set<si32> & value) const
+{
+	for(const auto & index : part.Vector())
+	{
+		const std::string & identifier = index.String();
+
+		try
+		{
+			const si32 rawId = decoder(identifier);
+			value.insert(rawId);
+		}
+		catch (const IdentifierResolutionException & e)
+		{
+			// downgrade exception to warning (printed as part of exception generation
+			// this is usually caused by loading allowed heroes / artifacts list from vmap's
+		}
+	}
 }

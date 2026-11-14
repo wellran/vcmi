@@ -11,33 +11,22 @@
 
 #include "LocationEffect.h"
 #include "../ISpellMechanics.h"
+#include "battle/BattleHexArray.h"
 
 namespace spells
 {
 namespace effects
 {
 
-LocationEffect::LocationEffect()
-	: Effect()
+void LocationEffect::adjustAffectedHexes(BattleHexArray & hexes, const Mechanics * m, const Target & spellTarget) const
 {
-}
-
-LocationEffect::~LocationEffect() = default;
-
-void LocationEffect::adjustTargetTypes(std::vector<TargetType> & types) const
-{
-
-}
-
-void LocationEffect::adjustAffectedHexes(std::set<BattleHex> & hexes, const Mechanics * m, const Target & spellTarget) const
-{
-	for(auto & destnation : spellTarget)
+	for(const auto & destnation : spellTarget)
 		hexes.insert(destnation.hexValue);
 }
 
-EffectTarget LocationEffect::filterTarget(const Mechanics * m, const EffectTarget & target) const
+Target LocationEffect::filterTarget(const Mechanics * m, const Target & target) const
 {
-	EffectTarget res;
+	Target res;
 	vstd::copy_if(target, std::back_inserter(res), [](const Destination & d)
 	{
 		return !d.unitValue && (d.hexValue.isValid());
@@ -45,10 +34,10 @@ EffectTarget LocationEffect::filterTarget(const Mechanics * m, const EffectTarge
 	return res;
 }
 
-EffectTarget LocationEffect::transformTarget(const Mechanics * m, const Target & aimPoint, const Target & spellTarget) const
+Target LocationEffect::transformTarget(const Mechanics * m, const Target & aimPoint, const Target & spellTarget) const
 {
 	//by default effect covers exactly spell range
-	return EffectTarget(spellTarget);
+	return Target(spellTarget);
 }
 
 }

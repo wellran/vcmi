@@ -23,15 +23,15 @@ MapServiceMock::MapServiceMock(const std::string & path, MapListener * mapListen
 
 	CZipSaver saver(io, "_");
 
-	const JsonNode header(ResourceID(path+CMapFormatJson::HEADER_FILE_NAME));
-	const JsonNode objects(ResourceID(path+CMapFormatJson::OBJECTS_FILE_NAME));
-	const JsonNode surface(ResourceID(path+"surface_terrain.json"));
+	const JsonNode header(JsonPath::builtin(path+CMapFormatJson::HEADER_FILE_NAME));
+	const JsonNode objects(JsonPath::builtin(path+CMapFormatJson::OBJECTS_FILE_NAME));
+	const JsonNode surface(JsonPath::builtin(path+"surface_terrain.json"));
 
 	addToArchive(saver, header, CMapFormatJson::HEADER_FILE_NAME);
 	addToArchive(saver, objects, CMapFormatJson::OBJECTS_FILE_NAME);
 	addToArchive(saver, surface, "surface_terrain.json");
 
-	ResourceID undergroundPath(path+"underground_terrain.json");
+	auto undergroundPath = JsonPath::builtin(path+"underground_terrain.json");
 
     if(CResourceHandler::get()->existsResource(undergroundPath))
 	{
@@ -40,12 +40,12 @@ MapServiceMock::MapServiceMock(const std::string & path, MapListener * mapListen
 	}
 }
 
-std::unique_ptr<CMap> MapServiceMock::loadMap() const
+std::unique_ptr<CMap> MapServiceMock::loadMap(IGameInfoCallback * cb) const
 {
 	initialBuffer.seek(0);
 	CMapLoaderJson initialLoader(&initialBuffer);
 
-	std::unique_ptr<CMap> res = initialLoader.loadMap();
+	std::unique_ptr<CMap> res = initialLoader.loadMap(cb);
 
 	if(mapListener)
 		mapListener->mapLoaded(res.get());
@@ -53,24 +53,24 @@ std::unique_ptr<CMap> MapServiceMock::loadMap() const
 	return res;
 }
 
-std::unique_ptr<CMap> MapServiceMock::loadMap(const ResourceID & name) const
+std::unique_ptr<CMap> MapServiceMock::loadMap(const ResourcePath & name, IGameInfoCallback * cb) const
 {
-	return loadMap();
+	return loadMap(cb);
 }
 
-std::unique_ptr<CMapHeader> MapServiceMock::loadMapHeader(const ResourceID & name) const
+std::unique_ptr<CMapHeader> MapServiceMock::loadMapHeader(const ResourcePath & name, bool isEditor) const
 {
 	initialBuffer.seek(0);
 	CMapLoaderJson initialLoader(&initialBuffer);
 	return initialLoader.loadMapHeader();
 }
 
-std::unique_ptr<CMap> MapServiceMock::loadMap(const ui8 * buffer, int size, const std::string & name) const
+std::unique_ptr<CMap> MapServiceMock::loadMap(const ui8 * buffer, int size, const std::string & name, const std::string & modName, const std::string & encoding, IGameInfoCallback * cb) const
 {
-	return loadMap();
+	return loadMap(cb);
 }
 
-std::unique_ptr<CMapHeader> MapServiceMock::loadMapHeader(const ui8 * buffer, int size, const std::string & name) const
+std::unique_ptr<CMapHeader> MapServiceMock::loadMapHeader(const ui8 * buffer, int size, const std::string & name, const std::string & modName, const std::string & encoding) const
 {
 	initialBuffer.seek(0);
 	CMapLoaderJson initialLoader(&initialBuffer);
@@ -84,7 +84,7 @@ void MapServiceMock::saveMap(const std::unique_ptr<CMap> & map, boost::filesyste
 
 void MapServiceMock::addToArchive(CZipSaver & saver, const JsonNode & data, const std::string & filename)
 {
-	auto s = data.toJson();
+	auto s = data.toString();
 	std::unique_ptr<COutputStream> stream = saver.addFile(filename);
 
 	if(stream->write((const ui8*)s.c_str(), s.size()) != s.size())

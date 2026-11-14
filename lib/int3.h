@@ -13,51 +13,46 @@
 class int3
 {
 public:
-	si32 x, y, z;
+	si32 x;
+	si32 y;
+	si32 z;
 
 	//c-tor: x, y, z initialized to 0
-	int3() : x(0), y(0), z(0) {} // I think that x, y, z should be left uninitialized.
+	constexpr int3() : x(0), y(0), z(0) {} // I think that x, y, z should be left uninitialized.
 	//c-tor: x, y, z initialized to i
-	explicit int3(const si32 i) : x(i), y(i), z(i) {}
+	explicit constexpr int3(const si32 i) : x(i), y(i), z(i) {}
 	//c-tor: x, y, z initialized to X, Y, Z
-	int3(const si32 X, const si32 Y, const si32 Z) : x(X), y(Y), z(Z) {}
-	int3(const int3 & c) : x(c.x), y(c.y), z(c.z) {} // Should be set to default (C++11)?
+	constexpr int3(const si32 X, const si32 Y, const si32 Z) : x(X), y(Y), z(Z) {}
+	constexpr int3(const int3 & c) = default;
 
-	int3 & operator=(const int3 & c) // Should be set to default (C++11)?
-	{
-		x = c.x;
-		y = c.y;
-		z = c.z;
+	constexpr int3 & operator=(const int3 & c) = default;
+	constexpr int3 operator-() const { return int3(-x, -y, -z); }
 
-		return *this;
-	}
-	int3 operator-() const { return int3(-x, -y, -z); }
-
-	int3 operator+(const int3 & i) const { return int3(x + i.x, y + i.y, z + i.z); }
-	int3 operator-(const int3 & i) const { return int3(x - i.x, y - i.y, z - i.z); }
+	constexpr int3 operator+(const int3 & i) const { return int3(x + i.x, y + i.y, z + i.z); }
+	constexpr int3 operator-(const int3 & i) const { return int3(x - i.x, y - i.y, z - i.z); }
 	//returns int3 with coordinates increased by given number
-	int3 operator+(const si32 i) const { return int3(x + i, y + i, z + i); }
+	constexpr int3 operator+(const si32 i) const { return int3(x + i, y + i, z + i); }
 	//returns int3 with coordinates decreased by given number
-	int3 operator-(const si32 i) const { return int3(x - i, y - i, z - i); }
+	constexpr int3 operator-(const si32 i) const { return int3(x - i, y - i, z - i); }
 
 	//returns int3 with coordinates multiplied by given number
-	int3 operator*(const double i) const { return int3((int)(x * i), (int)(y * i), (int)(z * i)); }
+	constexpr int3 operator*(const double i) const { return int3((int)(x * i), (int)(y * i), (int)(z * i)); }
 	//returns int3 with coordinates divided by given number
-	int3 operator/(const double i) const { return int3((int)(x / i), (int)(y / i), (int)(z / i)); }
+	constexpr int3 operator/(const double i) const { return int3((int)(x / i), (int)(y / i), (int)(z / i)); }
 
 	//returns int3 with coordinates multiplied by given number
-	int3 operator*(const si32 i) const { return int3(x * i, y * i, z * i); }
+	constexpr int3 operator*(const si32 i) const { return int3(x * i, y * i, z * i); }
 	//returns int3 with coordinates divided by given number
-	int3 operator/(const si32 i) const { return int3(x / i, y / i, z / i); }
+	constexpr int3 operator/(const si32 i) const { return int3(x / i, y / i, z / i); }
 
-	int3 & operator+=(const int3 & i)
+	constexpr int3 & operator+=(const int3 & i)
 	{
 		x += i.x;
 		y += i.y;
 		z += i.z;
 		return *this;
 	}
-	int3 & operator-=(const int3 & i)
+	constexpr int3 & operator-=(const int3 & i)
 	{
 		x -= i.x;
 		y -= i.y;
@@ -66,7 +61,7 @@ public:
 	}
 
 	//increases all coordinates by given number
-	int3 & operator+=(const si32 i)
+	constexpr int3 & operator+=(const si32 i)
 	{
 		x += i;
 		y += i;
@@ -74,7 +69,7 @@ public:
 		return *this;
 	}
 	//decreases all coordinates by given number
-	int3 & operator-=(const si32 i)
+	constexpr int3 & operator-=(const si32 i)
 	{
 		x -= i;
 		y -= i;
@@ -82,24 +77,19 @@ public:
 		return *this;
 	}
 
-	bool operator==(const int3 & i) const { return (x == i.x && y == i.y && z == i.z); }
-	bool operator!=(const int3 & i) const { return (x != i.x || y != i.y || z != i.z); }
+	constexpr bool operator==(const int3 & i) const { return (x == i.x && y == i.y && z == i.z); }
+	constexpr bool operator!=(const int3 & i) const { return (x != i.x || y != i.y || z != i.z); }
 
-	bool operator<(const int3 & i) const
+	/// Ordered by z, then y, then x - map keys and sorted containers all over lib depend on it
+	constexpr std::strong_ordering operator<=>(const int3 & i) const
 	{
-		if (z < i.z)
-			return true;
-		if (z > i.z)
-			return false;
-		if (y < i.y)
-			return true;
-		if (y > i.y)
-			return false;
-		if (x < i.x)
-			return true;
-		if (x > i.x)
-			return false;
-		return false;
+		if (auto cmp = z <=> i.z; cmp != std::strong_ordering::equal)
+			return cmp;
+
+		if (auto cmp = y <=> i.y; cmp != std::strong_ordering::equal)
+			return cmp;
+
+		return x <=> i.x;
 	}
 
 	enum EDistanceFormula
@@ -115,7 +105,7 @@ public:
 		switch(formula)
 		{
 		case DIST_2D:
-			return static_cast<ui32>(dist2d(o));
+			return std::round(dist2d(o));
 		case DIST_MANHATTAN:
 			return static_cast<ui32>(mandist2d(o));
 		case DIST_CHEBYSHEV:
@@ -128,7 +118,7 @@ public:
 	}
 
 	//returns squared distance on Oxy plane (z coord is not used)
-	ui32 dist2dSQ(const int3 & o) const
+	constexpr ui32 dist2dSQ(const int3 & o) const
 	{
 		const si32 dx = (x - o.x);
 		const si32 dy = (y - o.y);
@@ -140,17 +130,17 @@ public:
 		return std::sqrt((double)dist2dSQ(o));
 	}
 	//manhattan distance used for patrol radius (z coord is not used)
-	double mandist2d(const int3 & o) const
+	constexpr double mandist2d(const int3 & o) const
 	{
-		return abs(o.x - x) + abs(o.y - y);
+		return vstd::abs(o.x - x) + vstd::abs(o.y - y);
 	}
 	//chebyshev distance used for ambient sounds (z coord is not used)
-	double chebdist2d(const int3 & o) const
+	constexpr double chebdist2d(const int3 & o) const
 	{
-		return std::max(std::abs(o.x - x), std::abs(o.y - y));
+		return std::max(vstd::abs(o.x - x), vstd::abs(o.y - y));
 	}
 
-	bool areNeighbours(const int3 & o) const
+	constexpr bool areNeighbours(const int3 & o) const
 	{
 		return (dist2dSQ(o) < 4) && (z == o.z);
 	}
@@ -158,49 +148,45 @@ public:
 	//returns "(x y z)" string
 	std::string toString() const
 	{
-		std::string result("(");
-		result += boost::lexical_cast<std::string>(x); result += ' ';
-		result += boost::lexical_cast<std::string>(y); result += ' ';
-		result += boost::lexical_cast<std::string>(z); result += ')';
+		//Performance is important here
+		std::string result = "(" +
+				std::to_string(x) + " " +
+				std::to_string(y) + " " +
+				std::to_string(z) + ")";
+
 		return result;
 	}
 
-	bool valid() const //Should be named "isValid"?
+	constexpr bool isValid() const //Should be named "isValid"?
 	{
 		return z >= 0; //minimal condition that needs to be fulfilled for tiles in the map
 	}
 
 	template <typename Handler>
-	void serialize(Handler &h, const int version)
+	void serialize(Handler &h)
 	{
 		h & x;
 		h & y;
 		h & z;
 	}
 
-	static std::array<int3, 8> getDirs()
+	constexpr static std::array<int3, 8> getDirs()
 	{
 		return { { int3(0,1,0),int3(0,-1,0),int3(-1,0,0),int3(+1,0,0),
 			int3(1,1,0),int3(-1,1,0),int3(1,-1,0),int3(-1,-1,0) } };
 	}
-};
 
-//Why not normal function?
-struct ShashInt3
-{
-	size_t operator()(int3 const& pos) const
+	friend std::size_t hash_value(const int3 & v)
 	{
-		size_t ret = std::hash<int>()(pos.x);
-		vstd::hash_combine(ret, pos.y);
-		vstd::hash_combine(ret, pos.z);
-		return ret;
+		static const std::size_t max_value = 5000; //leaving space for map size increase
+		return (v.z * max_value * max_value) + (v.y * max_value) + v.x;
 	}
 };
 
 template<typename Container>
 int3 findClosestTile (Container & container, int3 dest)
 {
-	static_assert(std::is_same<typename Container::value_type, int3>::value,
+	static_assert(std::is_same_v<typename Container::value_type, int3>,
 		"findClosestTile requires <int3> container.");
 
 	int3 result(-1, -1, -1);
@@ -216,3 +202,10 @@ int3 findClosestTile (Container & container, int3 dest)
 	}
 	return result;
 }
+
+template<>
+struct std::hash<::int3> {
+	std::size_t operator()(::int3 const& pos) const noexcept {
+		return hash_value(pos);
+	}
+};

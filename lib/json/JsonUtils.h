@@ -1,0 +1,61 @@
+/*
+ * JsonUtils.h, part of VCMI engine
+ *
+ * Authors: listed in file AUTHORS in main folder
+ *
+ * License: GNU General Public License v2.0 or later
+ * Full text of license available in license.txt file, in main folder
+ *
+ */
+#pragma once
+
+#include "JsonNode.h"
+
+namespace JsonUtils
+{
+	/**
+	 * @brief recursively merges source into dest, replacing identical fields
+	 * struct : recursively calls this function
+	 * arrays : each entry will be merged recursively
+	 * values : value in source will replace value in dest
+	 * null   : if value in source is present but set to null it will delete entry in dest
+	 * @note this function will destroy data in source
+	 */
+	DLL_LINKAGE void merge(JsonNode & dest, JsonNode & source, bool ignoreOverride = false, bool copyMeta = false);
+
+	/**
+	 * @brief recursively merges source into dest, replacing identical fields
+	 * struct : recursively calls this function
+	 * arrays : each entry will be merged recursively
+	 * values : value in source will replace value in dest
+	 * null   : if value in source is present but set to null it will delete entry in dest
+	 * @note this function will preserve data stored in source by creating copy
+	 */
+	DLL_LINKAGE void mergeCopy(JsonNode & dest, JsonNode source, bool ignoreOverride = false, bool copyMeta = false);
+
+	/** @brief recursively merges descendant into copy of base node
+	* Result emulates inheritance semantic
+	*/
+	DLL_LINKAGE void inherit(JsonNode & descendant, const JsonNode & base);
+
+	/// Generates one Json structure from all files with specified name in current filesystem, including those overridden by mods
+	DLL_LINKAGE JsonNode assembleFromFiles(const std::string & filename);
+	/// Generates one Json structure from all files with specified name in provided filesystem, including those overridden by mods
+	DLL_LINKAGE JsonNode assembleFromFiles(const ISimpleResourceLoader & filesystem, const std::string & filename);
+
+	/**
+	 * @brief removes all nodes that are identical to default entry in schema
+	 * @param node - JsonNode to minimize
+	 * @param schema - schema to use
+	 * @note for minimizing data must be valid against given schema
+	 */
+	DLL_LINKAGE void minimize(JsonNode & node, const JsonNode & schema);
+	/// opposed to minimize, adds all missing, required entries that have default value
+	DLL_LINKAGE void maximize(JsonNode & node, const JsonNode & schema);
+
+	/// detects potential conflicts - json entries present in both nodes
+	/// returns JsonNode that contains list of conflicting keys
+	/// For each conflict - list of conflicting mods and list of conflicting json values
+	/// result[pathToKey][modID] -> node that was conflicting
+	DLL_LINKAGE void detectConflicts(JsonNode & result, const JsonNode & left, const JsonNode & right, const std::string & keyName);
+}

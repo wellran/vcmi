@@ -10,12 +10,11 @@
 #pragma once
 
 #include "CInputStream.h"
-#include "FileStream.h"
 
 /**
  * A class which provides method definitions for reading a file from the filesystem.
  */
-class DLL_LINKAGE CFileInputStream : public CInputStream
+class CFileInputStream : public CInputStream
 {
 public:
 	/**
@@ -73,5 +72,5 @@ private:
 	si64 dataSize;
 
 	/** Native c++ input file stream object. */
-	FileStream fileStream;
+	std::fstream fileStream;
 };

@@ -8,248 +8,860 @@
  *
  */
 #include "StdInc.h"
+#include "LobbyNetPackVisitors.h"
 
 #include "CVCMIServer.h"
 #include "CGameHandler.h"
+#include "lobby/BattleOnlyMap.h"
+#include "lobby/LastScenarios.h"
+#include "lobby/ScenarioListBuilder.h"
 
-#include "../lib/NetPacksLobby.h"
-#include "../lib/serializer/Connection.h"
 #include "../lib/StartInfo.h"
+#include "../lib/VCMIDirs.h"
+#include "../lib/GameLibrary.h"
+#include "../lib/modding/CModHandler.h"
+#include "../lib/modding/ModDescription.h"
 
-// Campaigns
-#include "../lib/mapping/CCampaignHandler.h"
-#include "../lib/mapping/CMapService.h"
+#include "../lib/CRandomGenerator.h"
+#include "../lib/campaign/CampaignHandler.h"
+#include "../lib/entities/faction/CTownHandler.h"
+#include "../lib/filesystem/Filesystem.h"
+#include "../lib/filesystem/SavegamePath.h"
+#include "../lib/gameState/CGameState.h"
+#include "../lib/mapping/CMap.h"
 #include "../lib/mapping/CMapInfo.h"
+#include "../lib/mapping/CMapHeader.h"
+#include "../lib/serializer/GameConnection.h"
 
-bool CLobbyPackToServer::checkClientPermissions(CVCMIServer * srv) const
+/// Campaigns are not limited to Maps/, campaign sets use campaigns from Data/
+static bool isCampaignResource(const std::string & fileURI)
 {
-	return srv->isClientHost(c->connectionID);
+	return CResourceHandler::get()->existsResource(ResourcePath(fileURI, EResType::CAMPAIGN));
 }
 
-void CLobbyPackToServer::applyOnServerAfterAnnounce(CVCMIServer * srv)
+/// Returns true if canonical path points to an entry inside directory, and not to directory itself
+static bool isInsideDirectory(const boost::filesystem::path & canonicalPath, const boost::filesystem::path & directory)
 {
-	// Propogate options after every CLobbyPackToServer
-	srv->updateAndPropagateLobbyState();
-}
-
-bool LobbyClientConnected::checkClientPermissions(CVCMIServer * srv) const
-{
-	return true;
-}
-
-bool LobbyClientConnected::applyOnServer(CVCMIServer * srv)
-{
-	srv->clientConnected(c, names, uuid, mode);
-	// Server need to pass some data to newly connected client
-	clientId = c->connectionID;
-	mode = srv->si->mode;
-	hostClientId = srv->hostClientId;
-	return true;
-}
-
-void LobbyClientConnected::applyOnServerAfterAnnounce(CVCMIServer * srv)
-{
-	// FIXME: we need to avoid senting something to client that not yet get answer for LobbyClientConnected
-	// Until UUID set we only pass LobbyClientConnected to this client
-	c->uuid = uuid;
-	srv->updateAndPropagateLobbyState();
-}
-
-bool LobbyClientDisconnected::checkClientPermissions(CVCMIServer * srv) const
-{
-	if(clientId != c->connectionID)
+	boost::system::error_code ec;
+	const auto canonicalDirectory = boost::filesystem::canonical(directory, ec);
+	if(ec)
 		return false;
 
-	if(shutdownServer)
-	{
-		if(!srv->cmdLineOptions.count("run-by-client"))
-			return false;
-
-		if(c->uuid != srv->cmdLineOptions["uuid"].as<std::string>())
-			return false;
-	}
-
-	return true;
+	const auto [directoryEnd, pathEnd] = std::mismatch(canonicalDirectory.begin(), canonicalDirectory.end(), canonicalPath.begin(), canonicalPath.end());
+	return directoryEnd == canonicalDirectory.end() && pathEnd != canonicalPath.end();
 }
 
-bool LobbyClientDisconnected::applyOnServer(CVCMIServer * srv)
+void ClientPermissionsCheckerNetPackVisitor::visitForLobby(CPackForLobby & pack)
 {
-	srv->clientDisconnected(c);
-	c->close();
-	c->connected = false;
-	return true;
+	if(pack.isForServer())
+	{
+		result = srv.isClientHost(connection->connectionID);
+	}
 }
 
-void LobbyClientDisconnected::applyOnServerAfterAnnounce(CVCMIServer * srv)
+void ApplyOnServerAfterAnnounceNetPackVisitor::visitForLobby(CPackForLobby & pack)
 {
-	if(c->isOpen())
+	// Propagate options after every CLobbyPackToServer
+	if(pack.isForServer())
 	{
-		boost::unique_lock<boost::mutex> lock(*c->mutexWrite);
-		c->close();
-		c->connected = false;
+		srv.updateAndPropagateLobbyState();
+	}
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyQueryState(LobbyQueryState & pack)
+{
+	// Anyone can query lobby state without being a registered player
+	result = true;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbyQueryState(LobbyQueryState & pack)
+{
+	LobbyModsCheck lms;
+	lms.vcmiVersion = VCMI_VERSION_STRING;
+
+	for(const auto & modId : LIBRARY->modh->getActiveMods())
+		lms.mods[modId] = LIBRARY->modh->getModInfo(modId).getVerificationInfo();
+
+	for(const auto & [playerId, player] : srv.playerNames)
+	{
+		lms.participantNames.push_back(player.name);
+		if(player.connection == srv.hostClientId)
+			lms.hostAccountDisplayName = player.name;
 	}
 
-	if(shutdownServer)
+	connection->sendPack(lms);
+	result = false;
+}
+
+void ApplyOnServerAfterAnnounceNetPackVisitor::visitLobbyQueryState(LobbyQueryState & pack)
+{
+	// Do nothing - query response is sent directly, no broadcast needed
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyQuickLoadGame(LobbyQuickLoadGame & pack)
+{
+	// only host can load quicksave
+	result = srv.isClientHost(connection->connectionID) && srv.getState() == EServerState::GAMEPLAY;
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyRequestQuickLoadInfo(LobbyRequestQuickLoadInfo & pack)
+{
+	result = srv.isClientHost(connection->connectionID) && srv.getState() == EServerState::GAMEPLAY;
+}
+
+static std::string getQuickSavePath(const CGameState & gs)
+{
+	return SavegamePath::getPath(*gs.getStartInfo(), gs.getMap(), "Quicksave");
+}
+
+/// Returns reason why the quick save can not be loaded into the running game, or empty string if it can
+static std::string checkQuickSave(const CGameState & gs, const std::string & path)
+{
+	if(!CResourceHandler::get()->existsResource(ResourcePath(path, EResType::SAVEGAME)))
+		return "No quick save found at " + path;
+
+	CMapInfo mapInfo;
+	try
 	{
-		logNetwork->info("Client requested shutdown, server will close itself...");
-		srv->state = EServerState::SHUTDOWN;
+		mapInfo.saveInit(ResourcePath(path, EResType::SAVEGAME));
+	}
+	catch(const std::exception & e)
+	{
+		return std::string("Failed to load quick save: ") + e.what();
+	}
+
+	// initial start info from quick load slot
+	const auto * startInfo1 = mapInfo.scenarioOptionsOfSave.get();
+	// initial start info from game state (not current start info)
+	const auto * startInfo2 = gs.getInitialStartInfo();
+
+	if(!startInfo1)
+		return "Missing quick load start info.";
+	if(!startInfo2)
+		return "Missing server start info.";
+	if(startInfo1->startTime != startInfo2->startTime)
+		return "Different initial start time.";
+	if(startInfo1->mapname != startInfo2->mapname)
+		return "Different map name.";
+	if(startInfo1->difficulty != startInfo2->difficulty)
+		return "Different difficulty.";
+	const auto & playerInfos1 = startInfo1->playerInfos;
+	const auto & playerInfos2 = startInfo2->playerInfos;
+	if(playerInfos1.size() != playerInfos2.size())
+		return "Different number of players.";
+	if(!std::equal(playerInfos1.begin(), playerInfos1.end(), playerInfos2.begin(), playerInfos2.end(),
+		[](const auto & p1, const auto & p2) { return p1.first == p2.first && p1.second.connectedPlayerIDs == p2.second.connectedPlayerIDs; }))
+		return "Different players.";
+	return {};
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbyRequestQuickLoadInfo(LobbyRequestQuickLoadInfo & pack)
+{
+	LobbyQuickLoadInfo reply;
+	reply.error = checkQuickSave(*srv.gh->gs, getQuickSavePath(*srv.gh->gs));
+	connection->sendPack(reply);
+	result = false;
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyClientConnected(LobbyClientConnected & pack)
+{
+	result = srv.getState() == EServerState::LOBBY;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbyClientConnected(LobbyClientConnected & pack)
+{
+	if(pack.version < ESerializationVersion::MINIMAL_LOBBY)
+	{
+		// client of an older version can not read packs of the current lobby protocol
+		logNetwork->error("Rejecting client with incompatible serialization version %d", static_cast<int>(pack.version));
+		connection->getConnection()->close();
+		vstd::erase(srv.activeConnections, connection);
+		result = false;
 		return;
 	}
-	else if(srv->connections.empty())
+
+	auto compatibleVersion = std::min(pack.version, ESerializationVersion::CURRENT);
+	connection->setSerializationVersion(compatibleVersion);
+
+	srv.clientConnected(connection, pack.names, pack.uuid, pack.mode);
+
+	// Server need to pass some data to newly connected client
+	pack.clientId = connection->connectionID;
+	pack.mode = srv.si->mode;
+	pack.hostClientId = srv.hostClientId;
+	pack.version = compatibleVersion;
+
+	result = true;
+}
+
+void ApplyOnServerAfterAnnounceNetPackVisitor::visitLobbyClientConnected(LobbyClientConnected & pack)
+{
+	// other clients already have map info, only the new client needs it
+	LobbyUpdateMapInfo lumi;
+	lumi.mapInfo = srv.mi;
+	for(const auto & connection : srv.activeConnections)
+		if(connection->connectionID == pack.clientId)
+			connection->sendPack(lumi);
+
+	srv.updateAndPropagateLobbyState();
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyClientDisconnected(LobbyClientDisconnected & pack)
+{
+	if(pack.clientId != connection->connectionID)
 	{
-		logNetwork->error("Last connection lost, server will close itself...");
-		srv->state = EServerState::SHUTDOWN;
+		result = false;
+		return;
 	}
-	else if(c == srv->hostClient)
+
+	if(pack.shutdownServer)
 	{
-		auto ph = vstd::make_unique<LobbyChangeHost>();
-		auto newHost = *RandomGeneratorUtil::nextItem(srv->connections, CRandomGenerator::getDefault());
-		ph->newHostConnectionId = newHost->connectionID;
-		srv->addToAnnounceQueue(std::move(ph));
-	}
-	srv->updateAndPropagateLobbyState();
-}
-
-bool LobbyChatMessage::checkClientPermissions(CVCMIServer * srv) const
-{
-	return true;
-}
-
-bool LobbySetMap::applyOnServer(CVCMIServer * srv)
-{
-	if(srv->state != EServerState::LOBBY)
-		return false;
-
-	srv->updateStartInfoOnMapChange(mapInfo, mapGenOpts);
-	return true;
-}
-
-bool LobbySetCampaign::applyOnServer(CVCMIServer * srv)
-{
-	srv->si->mapname = ourCampaign->camp->header.filename;
-	srv->si->mode = StartInfo::CAMPAIGN;
-	srv->si->campState = ourCampaign;
-	srv->si->turnTime = 0;
-	bool isCurrentMapConquerable = ourCampaign->currentMap && ourCampaign->camp->conquerable(*ourCampaign->currentMap);
-	for(int i = 0; i < ourCampaign->camp->scenarios.size(); i++)
-	{
-		if(ourCampaign->camp->conquerable(i))
+		if(!srv.wasStartedByClient())
 		{
-			if(!isCurrentMapConquerable || (isCurrentMapConquerable && i == *ourCampaign->currentMap))
-			{
-				srv->setCampaignMap(i);
-			}
+			result = false;
+			return;
+		}
+
+		if(connection->connectionID != srv.hostClientId)
+		{
+			result = false;
+			return;
 		}
 	}
-	return true;
+
+	result = true;
 }
 
-bool LobbySetCampaignMap::applyOnServer(CVCMIServer * srv)
+void ApplyOnServerNetPackVisitor::visitLobbyClientDisconnected(LobbyClientDisconnected & pack)
 {
-	srv->setCampaignMap(mapId);
-	return true;
+	connection->getConnection()->close();
+	srv.clientDisconnected(connection);
+	result = true;
 }
 
-bool LobbySetCampaignBonus::applyOnServer(CVCMIServer * srv)
+void ApplyOnServerAfterAnnounceNetPackVisitor::visitLobbyClientDisconnected(LobbyClientDisconnected & pack)
 {
-	srv->setCampaignBonus(bonusId);
-	return true;
+	srv.updateAndPropagateLobbyState();
 }
 
-bool LobbyGuiAction::checkClientPermissions(CVCMIServer * srv) const
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyChatMessage(LobbyChatMessage & pack)
 {
-	return srv->isClientHost(c->connectionID);
+	result = true;
 }
 
-bool LobbyStartGame::checkClientPermissions(CVCMIServer * srv) const
+void ApplyOnServerNetPackVisitor::visitLobbyQuickLoadGame(LobbyQuickLoadGame & pack)
 {
-	return srv->isClientHost(c->connectionID);
+	const std::string path = getQuickSavePath(*srv.gh->gs);
+	LobbyQuickLoadInfo info;
+	info.error = checkQuickSave(*srv.gh->gs, path);
+	if(!info.error.empty())
+	{
+		logNetwork->error("Rejecting quick load: %s", info.error);
+		connection->sendPack(info);
+		result = false;
+		return;
+	}
+
+	*srv.si = *srv.gh->gs->getStartInfo();
+	srv.prepareToRestart();
+	// modify StartInfo to load the quicksave
+	srv.si->mode = EStartMode::LOAD_GAME;
+	srv.si->mapname = path;
+	result = true;
 }
 
-bool LobbyStartGame::applyOnServer(CVCMIServer * srv)
+void ApplyOnServerAfterAnnounceNetPackVisitor::visitLobbyQuickLoadGame(LobbyQuickLoadGame & pack)
+{
+	for(const auto & connection : srv.activeConnections)
+		connection->enterLobbyConnectionMode();
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbySetMap(LobbySetMap & pack)
+{
+	result = srv.isClientHost(connection->connectionID);
+
+	const auto & selection = pack.selection;
+	bool valid = false;
+	switch(selection.type)
+	{
+		case ScenarioSelection::EType::NONE:
+			valid = true;
+			break;
+		case ScenarioSelection::EType::MAP:
+			valid = boost::algorithm::istarts_with(selection.fileURI, "Maps/");
+			break;
+		case ScenarioSelection::EType::CAMPAIGN:
+			valid = isCampaignResource(selection.fileURI);
+			break;
+		case ScenarioSelection::EType::SAVE:
+			valid = boost::algorithm::istarts_with(selection.fileURI, "Saves/");
+			break;
+		case ScenarioSelection::EType::RANDOM_MAP:
+			valid = pack.mapGenOpts != nullptr;
+			break;
+		case ScenarioSelection::EType::BATTLE_ONLY:
+			valid = srv.battleOnlyModeStartInfo != nullptr;
+			break;
+	}
+
+	if(!valid)
+	{
+		logNetwork->error("Rejecting selection of '%s' with type %d", selection.fileURI, static_cast<int>(selection.type));
+		result = false;
+	}
+}
+
+static std::shared_ptr<CMapInfo> createMapInfo(const LobbySetMap & pack, const BattleOnlyModeStartInfo * battleOnlyModeStartInfo)
+{
+	auto mapInfo = std::make_shared<CMapInfo>();
+	switch(pack.selection.type)
+	{
+		case ScenarioSelection::EType::NONE:
+			return nullptr;
+		case ScenarioSelection::EType::MAP:
+			mapInfo->mapInit(pack.selection.fileURI);
+			break;
+		case ScenarioSelection::EType::SAVE:
+			mapInfo->saveInit(ResourcePath(pack.selection.fileURI, EResType::SAVEGAME));
+			break;
+		case ScenarioSelection::EType::CAMPAIGN:
+			mapInfo->fileURI = pack.selection.fileURI;
+			mapInfo->campaignInit();
+			break;
+		case ScenarioSelection::EType::RANDOM_MAP:
+			mapInfo->randomMapInit(*pack.mapGenOpts);
+			break;
+		case ScenarioSelection::EType::BATTLE_ONLY:
+			BattleOnlyMap::write(*battleOnlyModeStartInfo);
+			mapInfo->mapInit(BattleOnlyMap::fileURI);
+			break;
+	}
+	return mapInfo;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbySetMap(LobbySetMap & pack)
+{
+	if(srv.getState() != EServerState::LOBBY)
+	{
+		result = false;
+		return;
+	}
+
+	std::shared_ptr<CMapInfo> mapInfo;
+	try
+	{
+		mapInfo = createMapInfo(pack, srv.battleOnlyModeStartInfo.get());
+	}
+	catch(const std::exception & e)
+	{
+		// list entry is built from metadata, so the rest of the file may still be invalid
+		logGlobal->error("Failed to load %s: %s", pack.selection.fileURI, e.what());
+
+		LobbyShowMessage message;
+		message.message.appendTextID("vcmi.client.errors.invalidMap");
+		message.message.replaceRawString(e.what());
+		connection->sendPack(message);
+	}
+
+	// tutorial and debug start select maps without listing them
+	const auto & listRequest = srv.lastScenarioListRequest;
+	if(mapInfo && pack.selection.type == ScenarioSelection::EType::MAP && listRequest && listRequest->type == ScenarioListEntry::EType::MAP)
+		LastScenarios::rememberMap(pack.selection.fileURI);
+	if(mapInfo && pack.selection.type == ScenarioSelection::EType::CAMPAIGN && listRequest && listRequest->type == ScenarioListEntry::EType::CAMPAIGN)
+		LastScenarios::rememberCampaign(pack.selection.fileURI);
+
+	srv.updateStartInfoOnMapChange(mapInfo, pack.mapGenOpts);
+
+	// map info contains whole map header and clients receive it in LobbyUpdateMapInfo, so pack is not announced
+	srv.updateAndPropagateLobbyState();
+	result = false;
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbySetCampaign(LobbySetCampaign & pack)
+{
+	result = srv.isClientHost(connection->connectionID) && isCampaignResource(pack.fileURI);
+	if(!result)
+		logNetwork->error("Rejecting campaign '%s'", pack.fileURI);
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbySetCampaign(LobbySetCampaign & pack)
+{
+	if(srv.getState() != EServerState::LOBBY)
+	{
+		logNetwork->error("Rejecting campaign selection outside of lobby");
+		result = false;
+		return;
+	}
+
+	std::shared_ptr<CampaignState> campaign;
+	try
+	{
+		campaign = std::make_shared<CampaignState>(CampaignHandler::getCampaign(pack.fileURI));
+	}
+	catch(const std::exception & e)
+	{
+		// campaign header is listed without its maps, which may be in an unsupported format, for example HotA maps without HotA mod
+		logGlobal->error("Failed to load campaign %s: %s", pack.fileURI, e.what());
+
+		LobbyShowMessage message;
+		message.message.appendTextID("vcmi.client.errors.invalidMap");
+		message.message.replaceRawString(e.what());
+		connection->sendPack(message);
+		result = false;
+		return;
+	}
+
+	campaign->campaignSet = pack.campaignSet;
+	srv.setCampaign(campaign);
+	result = true;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbySetCampaignMap(LobbySetCampaignMap & pack)
+{
+	if(srv.getState() != EServerState::LOBBY || !srv.si->campState)
+	{
+		logNetwork->error("Rejecting campaign scenario selection without campaign in lobby");
+		result = false;
+		return;
+	}
+
+	if(!srv.si->campState->getCampaign().allScenarios().contains(pack.mapId) || !srv.si->campState->isAvailable(pack.mapId))
+	{
+		logNetwork->error("Rejecting selection of unavailable campaign scenario %d", pack.mapId.getNum());
+		result = false;
+		return;
+	}
+
+	srv.setCampaignMap(pack.mapId);
+	result = true;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbySetCampaignBonus(LobbySetCampaignBonus & pack)
+{
+	if(srv.getState() != EServerState::LOBBY || !srv.si->campState || srv.campaignMap == CampaignScenarioID::NONE)
+	{
+		logNetwork->error("Rejecting campaign bonus selection without campaign scenario in lobby");
+		result = false;
+		return;
+	}
+
+	const auto & bonuses = srv.si->campState->getCampaign().scenario(srv.campaignMap).travelOptions.bonusesToChoose;
+	if(pack.bonusId < 0 || pack.bonusId >= static_cast<int>(bonuses.size()))
+	{
+		logNetwork->error("Rejecting invalid campaign bonus %d", pack.bonusId);
+		result = false;
+		return;
+	}
+
+	srv.setCampaignBonus(pack.bonusId);
+	result = true;
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyGuiAction(LobbyGuiAction & pack)
+{
+	result = srv.isClientHost(connection->connectionID);
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyRestartGame(LobbyRestartGame & pack)
+{
+	result = srv.isClientHost(connection->connectionID);
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbyRestartGame(LobbyRestartGame & pack)
+{
+	*srv.si = *srv.gh->gs->getInitialStartInfo();
+	srv.prepareToRestart();
+
+	result = true;
+}
+
+void ApplyOnServerAfterAnnounceNetPackVisitor::visitLobbyRestartGame(LobbyRestartGame & pack)
+{
+	for(const auto & connection : srv.activeConnections)
+		connection->enterLobbyConnectionMode();
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyNextCampaignScenario(LobbyNextCampaignScenario & pack)
+{
+	result = srv.isClientHost(connection->connectionID) && srv.getState() == EServerState::GAMEPLAY;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbyNextCampaignScenario(LobbyNextCampaignScenario & pack)
+{
+	auto campaign = srv.gh->gs->getStartInfo()->campState;
+	if(!campaign || !campaign->currentScenario() || !campaign->isConquered(*campaign->currentScenario()) || campaign->isCampaignFinished())
+	{
+		logNetwork->error("Rejecting next campaign scenario: current scenario is not won or campaign is finished");
+		result = false;
+		return;
+	}
+
+	srv.prepareToRestart();
+	srv.si = std::make_shared<StartInfo>();
+	srv.mi.reset();
+	srv.setCampaign(campaign);
+	result = true;
+}
+
+void ApplyOnServerAfterAnnounceNetPackVisitor::visitLobbyNextCampaignScenario(LobbyNextCampaignScenario & pack)
+{
+	for(const auto & connection : srv.activeConnections)
+		connection->enterLobbyConnectionMode();
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyPrepareStartGame(LobbyPrepareStartGame & pack)
+{
+	result = srv.isClientHost(connection->connectionID);
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyStartGame(LobbyStartGame & pack)
+{
+	result = srv.isClientHost(connection->connectionID);
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbyStartGame(LobbyStartGame & pack)
 {
 	try
 	{
-		srv->verifyStateBeforeStart(true);
+		srv.verifyStateBeforeStart(true);
 	}
-	catch(...)
+	catch(const std::exception &)
 	{
-		return false;
+		result = false;
+		return;
 	}
+	
 	// Server will prepare gamestate and we announce StartInfo to clients
-	srv->prepareToStartGame();
-	initializedStartInfo = std::make_shared<StartInfo>(*srv->gh->getStartInfo(true));
-	return true;
-}
-
-void LobbyStartGame::applyOnServerAfterAnnounce(CVCMIServer * srv)
-{
-	srv->startGameImmidiately();
-}
-
-bool LobbyChangeHost::checkClientPermissions(CVCMIServer * srv) const
-{
-	return srv->isClientHost(c->connectionID);
-}
-
-bool LobbyChangeHost::applyOnServer(CVCMIServer * srv)
-{
-	return true;
-}
-
-bool LobbyChangeHost::applyOnServerAfterAnnounce(CVCMIServer * srv)
-{
-	return srv->passHost(newHostConnectionId);
-}
-
-bool LobbyChangePlayerOption::checkClientPermissions(CVCMIServer * srv) const
-{
-	if(srv->isClientHost(c->connectionID))
-		return true;
-
-	if(vstd::contains(srv->getAllClientPlayers(c->connectionID), color))
-		return true;
-
-	return false;
-}
-
-bool LobbyChangePlayerOption::applyOnServer(CVCMIServer * srv)
-{
-	switch(what)
+	if(!srv.prepareToStartGame())
 	{
-	case TOWN:
-		srv->optionNextCastle(color, direction);
+		result = false;
+		return;
+	}
+	
+	// StartInfo of the started game, e.g. with players as generated by RMG. Mode tells clients whether game was loaded
+	pack.initializedStartInfo = std::make_shared<StartInfo>(*srv.gh->gameState().getStartInfo());
+	pack.initializedStartInfo->mode = srv.si->mode;
+	pack.initializedGameState = srv.gh->gs;
+	result = true;
+}
+
+void ApplyOnServerAfterAnnounceNetPackVisitor::visitLobbyStartGame(LobbyStartGame & pack)
+{
+	srv.startGameImmediately();
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyChangePlayerOption(LobbyChangePlayerOption & pack)
+{
+	if(srv.isClientHost(connection->connectionID))
+	{
+		result = true;
+		return;
+	}
+
+	if(vstd::contains(srv.getAllClientPlayers(connection->connectionID), pack.color))
+	{
+		result = true;
+		return;
+	}
+
+	result = false;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbyChangePlayerOption(LobbyChangePlayerOption & pack)
+{
+	// reject option changes for a player not present in the current map (invalid color, or campaign/random-map lobby without a header)
+	if(!srv.mi || !srv.mi->mapHeader || pack.color.getNum() >= srv.mi->mapHeader->players.size())
+	{
+		srv.announceMessage("Cannot change options for player " + pack.color.toString() + " - not present in the current map");
+		return;
+	}
+
+	switch(pack.what)
+	{
+	case LobbyChangePlayerOption::TOWN_ID:
+		srv.optionSetCastle(pack.color, FactionID(pack.value));
 		break;
-	case HERO:
-		srv->optionNextHero(color, direction);
+	case LobbyChangePlayerOption::TOWN:
+		srv.optionNextCastle(pack.color, pack.value);
 		break;
-	case BONUS:
-		srv->optionNextBonus(color, direction);
+	case LobbyChangePlayerOption::HERO_ID:
+		srv.optionSetHero(pack.color, HeroTypeID(pack.value));
+		break;
+	case LobbyChangePlayerOption::HERO:
+		srv.optionNextHero(pack.color, pack.value);
+		break;
+	case LobbyChangePlayerOption::BONUS_ID:
+		srv.optionSetBonus(pack.color, static_cast<PlayerStartingBonus>(pack.value));
+		break;
+	case LobbyChangePlayerOption::BONUS:
+		srv.optionNextBonus(pack.color, pack.value);
 		break;
 	}
-	return true;
+	
+	result = true;
 }
 
-bool LobbySetPlayer::applyOnServer(CVCMIServer * srv)
+void ApplyOnServerNetPackVisitor::visitLobbySetPlayer(LobbySetPlayer & pack)
 {
-	srv->setPlayer(clickedColor);
-	return true;
+	srv.setPlayer(pack.clickedColor);
+	result = true;
 }
 
-bool LobbySetTurnTime::applyOnServer(CVCMIServer * srv)
+void ApplyOnServerNetPackVisitor::visitLobbySetPlayerName(LobbySetPlayerName & pack)
 {
-	srv->si->turnTime = turnTime;
-	return true;
+	srv.setPlayerName(pack.color, pack.name);
+	result = true;
 }
 
-bool LobbySetDifficulty::applyOnServer(CVCMIServer * srv)
+void ApplyOnServerNetPackVisitor::visitLobbySetPlayerHandicap(LobbySetPlayerHandicap & pack)
 {
-	srv->si->difficulty = vstd::abetween(difficulty, 0, 4);
-	return true;
+	srv.setPlayerHandicap(pack.color, pack.handicap);
+	result = true;
 }
 
-bool LobbyForceSetPlayer::applyOnServer(CVCMIServer * srv)
+void ApplyOnServerNetPackVisitor::visitLobbySetSimturns(LobbySetSimturns & pack)
 {
-	srv->si->playerInfos[targetPlayerColor].connectedPlayerIDs.insert(targetConnectedPlayer);
-	return true;
+	srv.si->simturnsInfo = pack.simturnsInfo;
+	result = true;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbySetTurnTime(LobbySetTurnTime & pack)
+{
+	srv.si->turnTimerInfo = pack.turnTimerInfo;
+	result = true;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbySetExtraOptions(LobbySetExtraOptions & pack)
+{
+	srv.si->extraOptionsInfo = pack.extraOptionsInfo;
+	result = true;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbySetDifficulty(LobbySetDifficulty & pack)
+{
+	auto difficulty = static_cast<EMapDifficulty>(std::clamp<uint8_t>(pack.difficulty, 0, 4));
+	if(srv.mi && srv.mi->mapHeader)
+		difficulty = srv.mi->mapHeader->allowedDifficulties.closest(difficulty);
+	srv.si->difficulty = static_cast<uint8_t>(difficulty);
+	result = true;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbyForceSetPlayer(LobbyForceSetPlayer & pack)
+{
+	srv.si->playerInfos[pack.targetPlayerColor].connectedPlayerIDs.insert(pack.targetConnectedPlayer);
+	result = true;
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyPvPAction(LobbyPvPAction & pack)
+{
+	result = true;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbyPvPAction(LobbyPvPAction & pack)
+{
+	std::vector<FactionID> allowedTowns;
+
+	for (auto const & factionID : LIBRARY->townh->getDefaultAllowed())
+		if(std::find(pack.bannedTowns.begin(), pack.bannedTowns.end(), factionID) == pack.bannedTowns.end())
+			allowedTowns.push_back(factionID);
+
+	std::vector<FactionID> randomFaction1;
+	std::sample(allowedTowns.begin(), allowedTowns.end(), std::back_inserter(randomFaction1), 1, std::mt19937{std::random_device{}()});
+	std::vector<FactionID> randomFaction2;
+	std::sample(allowedTowns.begin(), allowedTowns.end(), std::back_inserter(randomFaction2), 1, std::mt19937{std::random_device{}()});
+
+	MetaString txt;
+
+	switch(pack.action) {
+		case LobbyPvPAction::COIN:
+			txt.appendTextID("vcmi.lobby.pvp.coin.hover");
+			txt.appendRawString(" - " + std::to_string(CRandomGenerator::getDefault().nextInt(1)));
+			srv.announceTxt(txt);
+			break;
+		case LobbyPvPAction::RANDOM_TOWN:
+			if(!allowedTowns.size())
+				break;
+			txt.appendTextID("core.overview.3");
+			txt.appendRawString(" - ");
+			txt.appendTextID(LIBRARY->townh->getById(randomFaction1[0])->getNameTextID());
+			srv.announceTxt(txt);
+			break;
+		case LobbyPvPAction::RANDOM_TOWN_VS:
+			if(!allowedTowns.size())
+				break;
+			txt.appendTextID("core.overview.3");
+			txt.appendRawString(" - ");
+			txt.appendTextID(LIBRARY->townh->getById(randomFaction1[0])->getNameTextID());
+			txt.appendRawString(" ");
+			txt.appendTextID("vcmi.lobby.pvp.versus");
+			txt.appendRawString(" ");
+			txt.appendTextID(LIBRARY->townh->getById(randomFaction2[0])->getNameTextID());
+			srv.announceTxt(txt);
+			break;
+	}
+	result = true;
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyDelete(LobbyDelete & pack)
+{
+	result = srv.isClientHost(connection->connectionID);
+
+	// list shown after deletion is the last one requested
+	if(!srv.lastScenarioListRequest)
+	{
+		logNetwork->error("Rejecting deletion of files before any list was requested");
+		result = false;
+	}
+
+	for(const auto & file : pack.files)
+	{
+		const auto type = file.getType();
+		if(type != EResType::SAVEGAME && type != EResType::DIRECTORY && type != EResType::MAP)
+		{
+			logNetwork->error("Rejecting deletion of '%s' of type %d", file.getOriginalName(), static_cast<int>(type));
+			result = false;
+		}
+	}
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyRequestScenarioList(LobbyRequestScenarioList & pack)
+{
+	result = srv.isClientHost(connection->connectionID);
+
+	const bool validLoadMode = pack.loadMode == ELoadMode::SINGLE || pack.loadMode == ELoadMode::MULTI || pack.loadMode == ELoadMode::CAMPAIGN || pack.loadMode == ELoadMode::TUTORIAL;
+	const bool validType = pack.type == ScenarioListEntry::EType::MAP || pack.type == ScenarioListEntry::EType::CAMPAIGN || (pack.type == ScenarioListEntry::EType::SAVE && validLoadMode);
+	if(!validType)
+	{
+		logNetwork->error("Rejecting scenario list request with invalid type %d or load mode %d", static_cast<int>(pack.type), static_cast<int>(pack.loadMode));
+		result = false;
+	}
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbySetBattleOnlyModeStartInfo(LobbySetBattleOnlyModeStartInfo & pack)
+{
+	result = true;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbySetBattleOnlyModeStartInfo(LobbySetBattleOnlyModeStartInfo & pack)
+{
+	srv.battleOnlyModeStartInfo = pack.startInfo;
+	result = true;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbyRequestScenarioList(LobbyRequestScenarioList & pack)
+{
+	const ScenarioListBuilder builder(pack.type, pack.loadMode);
+	LobbyScenarioList reply;
+	if(pack.selectLast && pack.type == ScenarioListEntry::EType::MAP)
+		reply.list = builder.buildForFile(LastScenarios::getMap(), reply.selectedFile);
+	else if(pack.selectLast && pack.type == ScenarioListEntry::EType::CAMPAIGN)
+		reply.list = builder.buildForFile(LastScenarios::getCampaign(), reply.selectedFile);
+	else if(pack.selectLast)
+		reply.list = builder.buildForSave(LastScenarios::getSave(pack.loadMode), reply.selectedFile);
+	else
+		reply.list = builder.build(pack.folder);
+	connection->sendPack(reply);
+
+	srv.lastScenarioListRequest = pack;
+	srv.lastScenarioListRequest->folder = reply.list.folder;
+	srv.lastScenarioListRequest->selectLast = false;
+	result = false;
+}
+
+void ClientPermissionsCheckerNetPackVisitor::visitLobbyRequestScenarioInfo(LobbyRequestScenarioInfo & pack)
+{
+	result = srv.isClientHost(connection->connectionID);
+
+	if(pack.selection.type != ScenarioSelection::EType::SAVE || !boost::algorithm::istarts_with(pack.selection.fileURI, "Saves/"))
+	{
+		logNetwork->error("Rejecting scenario info request for '%s' of type %d", pack.selection.fileURI, static_cast<int>(pack.selection.type));
+		result = false;
+	}
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbyRequestScenarioInfo(LobbyRequestScenarioInfo & pack)
+{
+	LobbyScenarioInfo reply;
+	reply.selection = pack.selection;
+	try
+	{
+		auto mapInfo = std::make_shared<CMapInfo>();
+		mapInfo->saveInit(ResourcePath(pack.selection.fileURI, EResType::SAVEGAME));
+		reply.mapInfo = mapInfo;
+	}
+	catch(const std::exception & e)
+	{
+		// list entry is built from metadata, so the rest of the file may still be invalid
+		logGlobal->error("Failed to load %s: %s", pack.selection.fileURI, e.what());
+		reply.error = e.what();
+	}
+	connection->sendPack(reply);
+	result = false;
+}
+
+static void deleteFile(const ResourcePath & res)
+{
+	if(res.getType() == EResType::SAVEGAME || res.getType() == EResType::MAP)
+	{
+		auto name = CResourceHandler::get()->getResourceName(res);
+		if (!name)
+		{
+			logGlobal->error("Failed to find resource with name '%s'", res.getOriginalName());
+			return;
+		}
+
+		boost::system::error_code ec;
+		auto file = boost::filesystem::canonical(*name, ec);
+		const auto directory = res.getType() == EResType::SAVEGAME ? VCMIDirs::get().userSavePath() : VCMIDirs::get().userDataPath() / "Maps" / "RandomMaps";
+
+		if (ec)
+		{
+			logGlobal->error("Failed to delete file '%s'. Reason: %s", res.getOriginalName(), ec.message());
+		}
+		else if (!isInsideDirectory(file, directory))
+		{
+			logGlobal->error("Refusing to delete file '%s' outside of directory '%s'", res.getOriginalName(), directory.string());
+		}
+		else
+		{
+			boost::filesystem::remove(file);
+			if(boost::filesystem::is_empty(file.parent_path()))
+				boost::filesystem::remove(file.parent_path());
+		}
+	}
+	else if(res.getType() == EResType::DIRECTORY)
+	{
+		auto name = CResourceHandler::get()->getResourceName(res);
+		if (!name)
+		{
+			logGlobal->error("Failed to find folder with name '%s'", res.getOriginalName());
+			return;
+		}
+
+		boost::system::error_code ec;
+		auto folder = boost::filesystem::canonical(*name, ec);
+		if (ec)
+		{
+			logGlobal->error("Failed to delete folder '%s'. Reason: %s", res.getOriginalName(), ec.message());
+		}
+		else if (!isInsideDirectory(folder, VCMIDirs::get().userSavePath()))
+		{
+			logGlobal->error("Refusing to delete folder '%s' outside of directory '%s'", res.getOriginalName(), VCMIDirs::get().userSavePath().string());
+		}
+		else
+		{
+			boost::filesystem::remove_all(folder);
+		}
+	}
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbyDelete(LobbyDelete & pack)
+{
+	for(const auto & file : pack.files)
+		deleteFile(file);
+
+	LobbyScenarioList reply;
+	reply.list = ScenarioListBuilder(srv.lastScenarioListRequest->type, srv.lastScenarioListRequest->loadMode).build(srv.lastScenarioListRequest->folder);
+	connection->sendPack(reply);
+	result = false;
 }

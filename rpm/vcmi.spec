@@ -33,6 +33,7 @@ BuildRequires:		zlib-devel
 BuildRequires:		ffmpeg-devel
 BuildRequires:		ffmpeg-libs
 BuildRequires:		qt5-qtbase-devel
+BuildRequires:		libcurl-devel
 
 %description
 VCMI is an open-source project aiming to reimplement HoMM3 game engine, giving it new and extended possibilities.
@@ -54,14 +55,11 @@ make DESTDIR=%{buildroot} install
 %{_bindir}/vcmiserver
 %{_bindir}/vcmibuilder
 %{_bindir}/vcmilauncher
-%{_libdir}/%{name}/*
+%{_libdir}/libvcmi.so
 
 %{_datadir}/%{name}/*
 %{_datadir}/applications/*
 %{_datadir}/icons/*
-
-%post
-%{__ln_s} -f %{_libdir}/%{name}/libvcmi.so %{_libdir}/libvcmi.so
 
 %changelog
 

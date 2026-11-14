@@ -15,23 +15,19 @@
 
 #include "../ISpellMechanics.h"
 
-#include "../../serializer/JsonSerializeFormat.h"
+#include "../../GameLibrary.h"
+#include "../../json/JsonBonus.h"
+#include "../../json/JsonNode.h"
+#include "../../modding/LibraryLoadContext.h"
+#include "../../modding/IdentifierStorage.h"
+#include "../../scripting/ScriptService.h"
+#include "../../texts/TextIdentifier.h"
 
 
 namespace spells
 {
 namespace effects
 {
-
-Effects::Effects() = default;
-
-Effects::~Effects() = default;
-
-void Effects::add(const std::string & name, std::shared_ptr<Effect> effect, const int level)
-{
-	effect->name = name;
-	data.at(level)[name] = effect;
-}
 
 bool Effects::applicable(Problem & problem, const Mechanics * m) const
 {
@@ -44,7 +40,7 @@ bool Effects::applicable(Problem & problem, const Mechanics * m) const
 
 	auto callback = [&](const Effect * e, bool & stop)
 	{
-		if(e->applicable(problem, m))
+		if(e->applicableGeneral(problem, m))
 		{
 			oneEffectApplicable = true;
 		}
@@ -74,9 +70,9 @@ bool Effects::applicable(Problem & problem, const Mechanics * m, const Target & 
 		if(e->indirect)
 			return;
 
-		EffectTarget target = e->transformTarget(m, aimPoint, spellTarget);
+		Target target = e->transformTarget(m, aimPoint, spellTarget);
 
-		if(e->applicable(problem, m, target))
+		if(e->applicableTarget(problem, m, target))
 		{
 			oneEffectApplicable = true;
 		}
@@ -95,7 +91,7 @@ bool Effects::applicable(Problem & problem, const Mechanics * m, const Target & 
 void Effects::forEachEffect(const int level, const std::function<void(const Effect *, bool &)> & callback) const
 {
 	bool stop = false;
-	for(auto one : data.at(level))
+	for(const auto& one : data.at(level))
 	{
 		callback(one.second.get(), stop);
 		if(stop)
@@ -114,13 +110,13 @@ Effects::EffectsToApply Effects::prepare(const Mechanics * m, const Target & aim
 		//todo: find a better way to handle such special cases
 
 		if(m->getSpellIndex() == SpellID::RESURRECTION && e->name == "cure")
-			applyThis = (m->caster->getCasterUnitId() >= 0);
+			applyThis = (m->caster->getHeroCaster() == nullptr);
 		else
 			applyThis = !e->indirect;
 
 		if(applyThis)
 		{
-			EffectTarget target = e->transformTarget(m, aimPoint, spellTarget);
+			Target target = e->transformTarget(m, aimPoint, spellTarget);
 			effectsToApply.push_back(std::make_pair(e, target));
 		}
 	};
@@ -130,28 +126,52 @@ Effects::EffectsToApply Effects::prepare(const Mechanics * m, const Target & aim
 	return effectsToApply;
 }
 
-void Effects::serializeJson(const Registry * registry, JsonSerializeFormat & handler, const int level)
+Effects::EffectsMap Effects::loadJson(LibraryLoadContext & context, const JsonNode & effectMap, const std::string & spellScope, const std::string & spellIdentifier)
 {
-	assert(!handler.saving);
+	EffectsMap result;
 
-	const JsonNode & effectMap = handler.getCurrent();
-
-	for(auto & p : effectMap.Struct())
+	for(const auto & [name, raw] : effectMap.Struct())
 	{
-		const std::string & name = p.first;
+		auto identifier = context.lib.identifiers()->getIdentifier("script", raw["type"]);
 
-		auto guard = handler.enterStruct(name);
-
-		std::string type;
-		handler.serializeString("type", type);
-
-		auto effect = Effect::create(registry, type);
-		if(effect)
+		if(!identifier.has_value())
 		{
-			effect->serializeJson(handler);
-			add(name, effect, level);
+			logMod->error("Spell '%s:%s' uses unknown script '%s' as effect '%s'!", spellScope, spellIdentifier, raw["type"].String(), name);
+			continue;
 		}
+
+		ScriptID effectID(*identifier);
+
+		if(context.lib.scriptTypes()->getById(effectID).kind != ScriptKind::SPELL_EFFECT)
+		{
+			logMod->error("Spell '%s:%s' uses script '%s' as effect '%s', but that script is not a spell effect!", spellScope, spellIdentifier, raw["type"].String(), name);
+			continue;
+		}
+
+		JsonNode data = raw;
+		context.lib.scriptTypes()->prepareParameters(effectID, data, context, TextIdentifier("spell", spellScope, spellIdentifier, name));
+
+		// effects build their bonuses only when the spell is cast, so this is the only chance to report
+		// bonuses that are broken or outdated while the mod loads. Spell effects are loaded after all
+		// identifiers are registered, so the parsed bonus is complete before it is discarded
+		if(data["bonus"].isStruct())
+			for(const auto & bonusNode : data["bonus"].Struct())
+				JsonUtils::parseBonus(bonusNode.second, context);
+
+		auto effect = context.lib.scriptTypes()->createSpellEffect(effectID);
+
+		if(!effect)
+			continue; // reported by the handler
+
+		effect->name = name;
+		effect->spellScope = spellScope;
+		effect->spellIdentifier = spellIdentifier;
+		effect->init(std::move(data));
+
+		result.try_emplace(name, std::move(effect));
 	}
+
+	return result;
 }
 
 }

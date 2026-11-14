@@ -9,23 +9,29 @@
  */
 #pragma once
 
-#ifdef USE_SYSTEM_MINIZIP
+#if __has_include(<minizip-ng/unzip.h>)
+#include <minizip-ng/unzip.h>
+#include <minizip-ng/zip.h>
+#include <minizip-ng/ioapi.h>
+#else
 #include <minizip/unzip.h>
 #include <minizip/zip.h>
 #include <minizip/ioapi.h>
-#else
-#include "../minizip/unzip.h"
-#include "../minizip/zip.h"
-#include "../minizip/ioapi.h"
 #endif
+
+// system zlib on old Androids isn't capable of using _64 functions: https://github.com/madler/zlib/pull/436
+#if defined(__ANDROID_API__) && (__ANDROID_API__ < 24)
+#define MINIZIP_NEEDS_32BIT_FUNCS 1
+#endif
+
 class CInputStream;
 class CInputOutputStream;
 class CMemoryBuffer;
 
-class DLL_LINKAGE CIOApi
+class CIOApi
 {
 public:
-	virtual ~CIOApi(){};
+	virtual ~CIOApi() = default;
 
 	virtual zlib_filefunc64_def getApiStructure() = 0;
 };
@@ -35,18 +41,18 @@ public:
 class DLL_LINKAGE CDefaultIOApi: public CIOApi
 {
 public:
-	CDefaultIOApi();
-	~CDefaultIOApi();
-
 	zlib_filefunc64_def getApiStructure() override;
+#if MINIZIP_NEEDS_32BIT_FUNCS
+	zlib_filefunc_def getApiStructure32();
+#endif
 };
 
 ///redirects all file IO to single stream
-class DLL_LINKAGE CProxyIOApi: public CIOApi
+class CProxyIOApi: public CIOApi
 {
 public:
 	CProxyIOApi(CInputOutputStream * buffer);
-	~CProxyIOApi();
+	~CProxyIOApi() override;
 
 	zlib_filefunc64_def getApiStructure() override;
 private:
@@ -64,11 +70,11 @@ private:
 };
 
 ///redirects all file IO to single stream read-only
-class DLL_LINKAGE CProxyROIOApi: public CIOApi
+class CProxyROIOApi: public CIOApi
 {
 public:
 	CProxyROIOApi(CInputStream * buffer);
-	~CProxyROIOApi();
+	~CProxyROIOApi() override;
 
 	zlib_filefunc64_def getApiStructure() override;
 private:

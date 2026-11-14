@@ -10,15 +10,7 @@
 			{ "skill" : "archery", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"archery" : {
-					"subtype" : "skill.archery",
-					"type" : "SECONDARY_SKILL_PREMY",
-					"updater" : "TIMES_HERO_LEVEL",
-					"val" : 5,
-					"valueType" : "PERCENT_TO_BASE"
-				}
-			}
+			"secondary" : "archery"
 		}
 	},
 	"valeska":
@@ -61,12 +53,19 @@
 		],
 		"specialty" : {
 			"bonuses" : {
-				"navigation" : {
-					"subtype" : "skill.navigation",
-					"type" : "SECONDARY_SKILL_PREMY",
-					"updater" : "TIMES_HERO_LEVEL",
-					"val" : 5,
-					"valueType" : "PERCENT_TO_BASE"
+				"navigationSpecialty" : {
+					"type" : "MOVEMENT",
+					"subtype" : "heroMovementSea",
+					"updater" : {
+						"type" : "GROWS_WITH_LEVEL",
+						"valPer20" : 1500,
+						"stepSize" : 1
+					},
+					"limiters" : {
+						"type" : "HAS_ANOTHER_BONUS_LIMITER",
+						"bonusSourceType" : "SECONDARY_SKILL",
+						"bonusSourceID" : "navigation"
+					}
 				}
 			}
 		}
@@ -76,22 +75,13 @@
 		"index": 4,
 		"class" : "knight",
 		"female": false,
-		"special" : true, // Lord Haart in his living form. Disabled in H3 expansions
 		"skills":
 		[
 			{ "skill" : "leadership", "level": "basic" },
 			{ "skill" : "estates", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"estates" : {
-					"subtype" : "skill.estates",
-					"type" : "SECONDARY_SKILL_PREMY",
-					"updater" : "TIMES_HERO_LEVEL",
-					"val" : 5,
-					"valueType" : "PERCENT_TO_BASE"
-				}
-			}
+			"secondary" : "estates"
 		}
 	},
 	"sorsha":
@@ -119,7 +109,8 @@
 			{ "skill" : "artillery", "level": "basic" }
 		],
 		"specialty" : {
-			"creature" : "ballista"
+			"creature" : "ballista",
+			"creatureLevel" : 5
 		}
 	},
 	"tyris":
@@ -148,15 +139,7 @@
 			{ "skill" : "firstAid", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"firstAid" : {
-					"subtype" : "skill.firstAid",
-					"type" : "SECONDARY_SKILL_PREMY",
-					"updater" : "TIMES_HERO_LEVEL",
-					"val" : 5,
-					"valueType" : "PERCENT_TO_BASE"
-				}
-			}
+			"secondary" : "firstAid"
 		}
 	},
 	"adela":
@@ -173,10 +156,15 @@
 		"specialty" : {
 			"bonuses" : {
 				"bless" : {
-					"addInfo" : 0,
-					"subtype" : "spell.bless",
-					"type" : "SPECIAL_BLESS_DAMAGE",
-					"updater" : "TIMES_HERO_LEVEL",
+					"type" : "GENERAL_DAMAGE_PREMY",
+					"limiters" : [
+						{
+							"type" : "HAS_ANOTHER_BONUS_LIMITER",
+							"bonusSourceType" : "SPELL_EFFECT",
+							"bonusSourceID" : "bless"
+						}
+					],
+					"updater" : "TIMES_HERO_LEVEL_DIVIDE_STACK_LEVEL",
 					"val" : 3
 				}
 			}
@@ -194,13 +182,7 @@
 			{ "skill" : "estates", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"weakness" : {
-					"addInfo" : 0,
-					"subtype" : "spell.weakness",
-					"type" : "SPECIAL_PECULIAR_ENCHANT"
-				}
-			}
+			"spellFixedAdditive" : "weakness"
 		}
 	},
 	"adelaide":
@@ -214,14 +196,7 @@
 			{ "skill" : "wisdom", "level": "advanced" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"frostRing" : {
-					"subtype" : "spell.frostRing",
-					"type" : "SPECIAL_SPELL_LEV",
-					"updater" : "TIMES_HERO_LEVEL",
-					"val" : 3
-				}
-			}
+			"spellScalingPercentage" : "frostRing"
 		}
 	},
 	"ingham":
@@ -251,15 +226,7 @@
 			{ "skill" : "eagleEye", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"eagleEye" : {
-					"subtype" : "skill.eagleEye",
-					"type" : "SECONDARY_SKILL_PREMY",
-					"updater" : "TIMES_HERO_LEVEL",
-					"val" : 5,
-					"valueType" : "PERCENT_TO_BASE"
-				}
-			}
+			"secondary" : "eagleEye"
 		}
 	},
 	"loynis":
@@ -274,13 +241,7 @@
 			{ "skill" : "learning", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"prayer" : {
-					"addInfo" : 0,
-					"subtype" : "spell.prayer",
-					"type" : "SPECIAL_PECULIAR_ENCHANT"
-				}
-			}
+			"spellFixedAdditive" : "prayer"
 		}
 	},
 	"caitlin":
@@ -297,7 +258,7 @@
 		"specialty" : {
 			"bonuses" : {
 				"gold" : {
-					"subtype" : "resource.gold",
+					"subtype" : "gold",
 					"type" : "GENERATE_RESOURCE",
 					"val" : 350
 				}

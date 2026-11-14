@@ -10,105 +10,10 @@
 			}
 		},
 		"types" : {
-			"prison" : { "index" : 0, "aiValue" : 5000 }
-		}
-	},
-
-	"altarOfSacrifice" : {
-		"index" :2,
-		"handler" : "market",
-		"base" : {
-			"sounds" : {
-				"visit" : ["MYSTERY"]
-			}
-		},
-		"types" : {
-			"object" : {
+			"prison" : {
 				"index" : 0,
-				"aiValue" : 100,
-				"rmg" : {
-					"zoneLimit"	: 1,
-					"value"		: 100,
-					"rarity"	: 20
-				}
-			}
-		}
-	},
-	"tradingPost" : {
-		"index" :221,
-		"handler" : "market",
-		"base" : {
-			"sounds" : {
-				"ambient" : ["LOOPMARK"],
-				"visit" : ["STORE"]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 100,
-				"rmg" : {
-					"zoneLimit"	: 1,
-					"value"		: 100,
-					"rarity"	: 100
-				}
-			}
-		}
-	},
-	"tradingPostDUPLICATE"		: {
-		"index" :99,
-		"handler" : "market",
-		"base" : {
-			"sounds" : {
-				"ambient" : ["LOOPMARK"],
-				"visit" : ["STORE"]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 100,
-				"rmg" : {
-					"zoneLimit"	: 1,
-					"value"		: 100,
-					"rarity"	: 100
-				}
-			}
-		}
-	},
-	"freelancersGuild" : {
-		"index" :213,
-		"handler" : "market",
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 100,
-				"rmg" : {
-					"zoneLimit"	: 1,
-					"value"		: 100,
-					"rarity"	: 100
-				}
-			}
-		}
-	},
-
-	"blackMarket" : {
-		"index" :7,
-		"handler" : "blackMarket",
-		"base" : {
-			"sounds" : {
-				"ambient" : ["LOOPMARK"],
-				"visit" : ["MYSTERY"]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 8000,
-				"rmg" : {
-					"value"		: 8000,
-					"rarity"	: 20
-				}
+				"aiValue" : 5000,
+				"removable": true
 			}
 		}
 	},
@@ -126,6 +31,7 @@
 			"object" : {
 				"index" : 0,
 				"aiValue" : 10000,
+				"removable": true,
 				"templates" : {
 					"normal" : { "animation" : "ava0128.def", "visitableFrom" : [ "+++", "+-+", "+++" ], "mask" : [ "VV", "VA"] }
 				},
@@ -140,70 +46,7 @@
 		"types" : {
 			"object" : {
 				"index" : 0,
-				"rmg" : {
-				}
-			}
-		}
-	},
-
-	"redwoodObservatory" : {
-		"index" :58,
-		"handler" : "observatory",
-		"base" : {
-			"sounds" : {
-				"visit" : ["LIGHTHOUSE"]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 750,
-				"templates" :
-				{
-					"base" : { "animation" : "avxredw.def", "visitableFrom" : [ "---", "+++", "+++" ], "mask" : [ "VV", "VV", "VA"], "allowedTerrains":["grass", "swamp", "dirt", "sand", "lava", "rough"] },
-					"snow" : { "animation" : "avxreds0.def", "visitableFrom" : [ "---", "+++", "+++" ], "mask" : [ "VV", "VV", "VA"], "allowedTerrains":["snow"] }
-				},
-				"rmg" : {
-					"zoneLimit"	: 1,
-					"value"		: 750,
-					"rarity"	: 100
-				}
-			}
-		}
-	},
-	"pillarOfFire" : {
-		"index" :60,
-		"handler" : "observatory",
-		"base" : {
-			"sounds" : {
-				"ambient" : ["LOOPFIRE"],
-				"visit" : ["LIGHTHOUSE"]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 750,
-				"rmg" : {
-					"zoneLimit"	: 1,
-					"value"		: 750,
-					"rarity"	: 100
-				}
-			}
-		}
-	},
-	"coverOfDarkness" : {
-		"index" :15,
-		"handler" : "observatory",
-		"base" : {
-			"sounds" : {
-				"visit" : ["LIGHTHOUSE"]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 100,
+				"removable": true,
 				"rmg" : {
 				}
 			}
@@ -215,7 +58,7 @@
 		"handler" : "whirlpool",
 		"base" : {
 			"sounds" : {
-				"ambient" : ["LOOPWHIRL"],
+				"ambient" : ["LOOPWHIR"],
 				"visit" : ["DANGER"]
 			}
 		},
@@ -238,8 +81,8 @@
 		},
 		"types" : {
 			"object" : {
-				"index" : 0 },
-			"objectWoG" : { "index" : 1 } // WoG object? Present on VCMI Test 2011b
+				"index" : 0 
+			}
 		}
 	},
 
@@ -270,7 +113,8 @@
 			"sounds" : {
 				"ambient" : ["LOOPFACT"],
 				"visit" : ["MILITARY"]
-			}
+			},
+			"creatures": [ ["ballista"], ["firstAidTent"], ["ammoCart"] ]
 		},
 		"types" : {
 			"object" : {
@@ -281,69 +125,6 @@
 					"value"		: 1500,
 					"rarity"	: 50
 				}
-			}
-		}
-	},
-	"shrineOfMagicLevel1" : {//incantation
-		"index" :88,
-		"handler" : "shrine",
-		"base" : {
-			"sounds" : {
-				"ambient" : ["LOOPSHRIN"],
-				"visit" : ["TEMPLE"]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 500,
-				"rmg" : {
-					"value"		: 500,
-					"rarity"	: 100
-				}
-			}
-		}
-	},
-	"shrineOfMagicLevel2" : {//gesture
-		"index" :89,
-		"handler" : "shrine",
-		"base" : {
-			"sounds" : {
-				"ambient" : ["LOOPSHRIN"],
-				"visit" : ["TEMPLE"]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 2000,
-				"rmg" : {
-					"value"		: 2000,
-					"rarity"	: 100
-				}
-			}
-		}
-	},
-	"shrineOfMagicLevel3" : {//thinking
-		"index" :90,
-		"handler" : "shrine",
-		"base" : {
-			"sounds" : {
-				"ambient" : ["LOOPSHRIN"],
-				"visit" : ["TEMPLE"]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 3000,
-				"rmg" : {
-					"value"		: 3000,
-					"rarity"	: 100
-				}
-			},
-			"object1":{ //WoG?
-				"index" :1
 			}
 		}
 	},
@@ -381,23 +162,6 @@
 			}
 		}
 	},
-	"lighthouse" : {
-		"index" :42,
-		"handler" : "lighthouse",
-		"base" : {
-			"sounds" : {
-				"visit" : ["LIGHTHOUSE"]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 500,
-				"rmg" : {
-				}
-			}
-		}
-	},
 	"obelisk" : {
 		"index" :57,
 		"handler" : "obelisk",
@@ -430,27 +194,8 @@
 			"object" : {
 				"index" : 0,
 				"aiValue" : 0,
+				"removable": true,
 				"rmg" : {
-				}
-			}
-		}
-	},
-	"scholar" : {
-		"index" :81,
-		"handler" : "scholar",
-		"base" : {
-			"sounds" : {
-				"visit" : ["GAZEBO"],
-				"removal" : [ "PICKUP01", "PICKUP02", "PICKUP03", "PICKUP04", "PICKUP05", "PICKUP06", "PICKUP07" ]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 1500,
-				"rmg" : {
-					"value"		: 1500,
-					"rarity"	: 100
 				}
 			}
 		}
@@ -469,7 +214,8 @@
 				"index" : 0,
 				"aiValue" : 1000,
 				"rmg" : {
-				}
+				},
+				"boat" : "boatCastle"
 			}
 		}
 	},
@@ -504,6 +250,7 @@
 				"index" : 0,
 				"aiValue" : 100,
 				"rmg" : {
+					"zoneLimit"	: 1,
 					"mapLimit"	: 32,
 					"value"		: 100,
 					"rarity"	: 20
@@ -527,55 +274,13 @@
 				"templates" :
 				{
 					"green" : { "animation" : "avxdent.def", "visitableFrom" : [ "---", "+++", "+++" ], "mask" : [ "VV", "BA"], "allowedTerrains":["grass", "swamp", "dirt"] },
-					"brown" : { "animation" : "avxdend0.def", "visitableFrom" : [ "---", "+++", "+++" ], "mask" : [ "VV", "BA"], "allowedTerrains":["sand", "lava", "rough", "snow", "subterra"] },
+					"brown" : { "animation" : "avxdend0.def", "visitableFrom" : [ "---", "+++", "+++" ], "mask" : [ "VV", "BA"], "allowedTerrains":["sand", "lava", "rough", "snow", "subterra"] }
 				},
 				"rmg" : {
 					"value"		: 100,
 					"rarity"	: 100,
 					"zoneLimit"	: 1
 				}
-			}
-		}
-	},
-	"university" : {
-		"index" :104,
-		"handler" : "university",
-		"base" : {
-			"sounds" : {
-				"visit" : ["GAZEBO"]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 2500,
-				"rmg" : {
-					"value"		: 2500,
-					"rarity"	: 20
-				}
-			}
-		}
-	},
-	"witchHut" : {
-		"index" :113,
-		"handler" : "witch",
-		"base" : {
-			"sounds" : {
-				"visit" : ["GAZEBO"]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 1500,
-				"rmg" : {
-					"zoneLimit"	: 3,
-					"value"		: 1500,
-					"rarity"	: 80
-				}
-			},
-			"object1" : { //WoG?
-				"index" : 1
 			}
 		}
 	},
@@ -592,33 +297,12 @@
 			"object" : {
 				"index" : 0,
 				"aiValue" : 10000,
+				"removable": true,
 				"rmg" : {
 				}
 			}
 		}
 	},
-	"magicWell" : {
-		"index" :49,
-		"handler" : "magicWell",
-		"base" : {
-			"sounds" : {
-				"visit" : ["FAERIE"]
-			}
-		},
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"aiValue" : 250,
-				"rmg" : {
-					"zoneLimit" : 1,
-					"value"		: 250,
-					"rarity"	: 100
-				}
-			},
-			"objectWoG" : { "index" : 1} // WoG object? Present on VCMI_Test 2011b
-		}
-	},
-
 	/// Random objects
 	"randomTown"					: { "index" :77,  "handler": "randomTown", "types" : { "object" : { "index" : 0} }  },
 	"randomHero" : {
@@ -647,19 +331,6 @@
 	},
 	"randomDwelling"				: { "index" :216, "handler": "randomDwelling", "types" : { "object" : { "index" : 0} }  },
 
-	"randomResource" : {
-		"index" :76,
-		"handler": "randomResource",
-		"types" : {
-			"object" : {
-				"index" : 0,
-				"templates" : {
-					"normal" : { "animation" : "AVTrndm0", "visitableFrom" : [ "+++", "+-+", "+++" ], "mask" : [ "VV", "VA"] }
-				}
-			}
-		}
-	},
-
 	"randomArtifact" : {
 		"index" :65,
 		"handler": "randomArtifact",
@@ -678,6 +349,7 @@
 		"types" : {
 			"object" : {
 				"index" : 0,
+				"removable": true,
 				"rmg" : {
 					"value"		: 2000,
 					"rarity"	: 150
@@ -694,6 +366,7 @@
 		"types" : {
 			"object" : {
 				"index" : 0,
+				"removable": true,
 				"rmg" : {
 					"value"		: 5000,
 					"rarity"	: 150
@@ -710,6 +383,7 @@
 		"types" : {
 			"object" : {
 				"index" : 0,
+				"removable": true,
 				"rmg" : {
 					"value"		: 10000,
 					"rarity"	: 150
@@ -726,6 +400,7 @@
 		"types" : {
 			"object" : {
 				"index" : 0,
+				"removable": true,
 				"rmg" : {
 					"value"		: 20000,
 					"rarity"	: 150
@@ -755,6 +430,7 @@
 		"types" : {
 			"object" : {
 				"index" : 0,
+				"removable": true,
 				"templates" : {
 					"normal" : { "animation" : "AVWmon1", "visitableFrom" : [ "+++", "+-+", "+++" ], "mask" : [ "VV", "VA"] }
 				}
@@ -767,6 +443,7 @@
 		"types" : {
 			"object" : {
 				"index" : 0,
+				"removable": true,
 				"templates" : {
 					"normal" : { "animation" : "AVWmon2", "visitableFrom" : [ "+++", "+-+", "+++" ], "mask" : [ "VV", "VA"] }
 				}
@@ -779,6 +456,7 @@
 		"types" : {
 			"object" : {
 				"index" : 0,
+				"removable": true,
 				"templates" : {
 					"normal" : { "animation" : "AVWmon3", "visitableFrom" : [ "+++", "+-+", "+++" ], "mask" : [ "VV", "VA"] }
 				}
@@ -791,6 +469,7 @@
 		"types" : {
 			"object" : {
 				"index" : 0,
+				"removable": true,
 				"templates" : {
 					"normal" : { "animation" : "AVWmon4", "visitableFrom" : [ "+++", "+-+", "+++" ], "mask" : [ "VV", "VA"] }
 				}
@@ -815,6 +494,7 @@
 		"types" : {
 			"object" : {
 				"index" : 0,
+				"removable": true,
 				"templates" : {
 					"normal" : { "animation" : "AVWmon6", "visitableFrom" : [ "+++", "+-+", "+++" ], "mask" : [ "VV", "VA"] }
 				}
@@ -827,6 +507,7 @@
 		"types" : {
 			"object" : {
 				"index" : 0,
+				"removable": true,
 				"templates" : {
 					"normal" : { "animation" : "AVWmon7", "visitableFrom" : [ "+++", "+-+", "+++" ], "mask" : [ "VV", "VA"] }
 				}
@@ -837,7 +518,7 @@
 	/// Classes without dedicated object
 	"hillFort" : {
 		"index" :35,
-		"handler": "generic",
+		"handler": "hillFort",
 		"base" : {
 			"sounds" : {
 				"ambient" : ["LOOPSWAR"],
@@ -848,11 +529,20 @@
 			"object" : {
 				"index" : 0,
 				"aiValue" : 7000,
+				// should be @core.xtrainfo.14
+				"description" : "",
 				"rmg" : {
 					"zoneLimit"	: 1,
 					"value"		: 7000,
 					"rarity"	: 20
-				}
+				},
+				"upgradeCostFactor" : [
+					0,  // level 1
+					25,
+					50,
+					75,
+					100 // level 5+
+				]
 			}
 		}
 	},
@@ -863,7 +553,35 @@
 			"object" : {
 				"index" : 0,
 				"aiValue" : 0,
+				"removable": true,
 				"rmg" : {
+				}
+			}
+		}
+	},
+	"marketOfTime" : { // Unused/not implemented H3 object present on some RoE maps
+		"index" :50,
+		"handler": "generic",
+		"types" : {
+			"object" : {
+				"index" : 0,
+				"aiValue" : 0,
+				"rmg" : {
+				},
+				"templates" : {
+					"normal" : {
+						"animation" : "AVXMKTT0",
+						"editorAnimation" : "AVXMKTT0",
+						"visitableFrom" : [
+							"---",
+							"--+",
+							"+++"
+						],
+						"mask" : [
+							"VV",
+							"BV"
+						]
+					}
 				}
 			}
 		}
@@ -872,6 +590,7 @@
 		"index" :95,
 		"handler": "generic",
 		"base" : {
+			"blockVisit": true,
 			"sounds" : {
 				"ambient" : ["LOOPTAV"],
 				"visit" : ["STORE"]
@@ -914,7 +633,7 @@
 	/// Passive objects, terrain overlays
 	"cursedGround" : {
 		"index" : 21,
-		"handler": "generic",
+		"handler": "terrain",
 		"base" : {
 			"sounds" : {
 				"ambient" : ["LOOPCURS"]
@@ -922,13 +641,14 @@
 		},
 		"types" : {
 			"object" : {
-				"index" : 0
+				"index" : 0,
+				"battleground": "cursed_ground"
 			}
 		}
 	},
-	"magicPlains"	: {
+	"magicPlains" : {
 		"index" : 46,
-		"handler" : "generic",
+		"handler" : "terrain",
 		"base" : {
 			"sounds" : {
 				"ambient" : ["LOOPMAGI"]
@@ -936,18 +656,23 @@
 		},
 		"types" : {
 			"object" : {
-				"index" : 0
+				"index" : 0,
+				"battleground": "magic_plains"
 			}
 		}
 	},
-	"swampFoliage" : { "index" :211, "handler": "generic", "types" : { "object" : { "index" : 0} } },
-	"cloverField"	: { "index" :222, "handler": "generic", "types" : { "object" : { "index" : 0} } },
+	"cloverField" : {
+		"index" :222, 
+		"handler": "terrain", 
+		"types" : { "object" : { "index" : 0, "battleground": "clover_field" } }
+	},
 	"cursedGroundDUPLICATE"	: {
 		"index" : 223,
-		"handler" : "generic",
+		"handler" : "terrain",
 		"types" : {
 			"object" : {
-				"index" : 0
+				"index" : 0,
+				"battleground": "cursed_ground"
 			}
 		},
 		"base" : {
@@ -956,15 +681,39 @@
 			}
 		}
 	},
-	"evilFog"	: { "index" :224, "handler": "generic", "types" : { "object" : { "index" : 0} } },
-	"favorableWinds" : { "index" :225, "handler": "generic", "types" : { "object" : { "index" : 0} } },
-	"fieryFields"	: { "index" :226, "handler": "generic", "types" : { "object" : { "index" : 0} } },
-	"holyGround" : { "index" :227, "handler": "generic", "types" : { "object" : { "index" : 0} } },
-	"lucidPools" : { "index" :228, "handler": "generic", "types" : { "object" : { "index" : 0} } },
-	"magicClouds"	: { "index" :229, "handler": "generic", "types" : { "object" : { "index" : 0} } },
+	"evilFog" : {
+		"index" :224,
+		"handler": "terrain",
+		"types" : { "object" : { "index" : 0, "battleground": "evil_fog" } }
+	},
+	"favorableWinds" : {
+		"index" :225,
+		"handler": "terrain",
+		"types" : { "object" : { "index" : 0, "battleground": "ship" } }
+	},
+	"fieryFields": {
+		"index" :226,
+		"handler": "terrain",
+		"types" : { "object" : { "index" : 0, "battleground": "fiery_fields" } }
+	},
+	"holyGround" : {
+		"index" :227,
+		"handler": "terrain",
+		"types" : { "object" : { "index" : 0, "battleground": "holy_ground" } }
+	},
+	"lucidPools" : {
+		"index" :228,
+		"handler": "terrain",
+		"types" : { "object" : { "index" : 0, "battleground": "lucid_pools" } }
+	},
+	"magicClouds" : {
+		"index" :229,
+		"handler": "terrain",
+		"types" : { "object" : { "index" : 0, "battleground": "magic_clouds" } }
+	},
 	"magicPlainsDUPLICATE" : {
 		"index" : 230,
-		"handler": "generic",
+		"handler": "terrain",
 		"base" : {
 			"sounds" : {
 				"ambient" : ["LOOPMAGI"]
@@ -972,11 +721,16 @@
 		},
 		"types" : {
 			"object" : {
-				"index" : 0
+				"index" : 0,
+				"battleground": "magic_plains"
 			}
 		}
 	},
-	"rocklands"	: { "index" :231, "handler": "generic", "types" : { "object" : { "index" : 0} } },
+	"rocklands"	: {
+		"index" :231,
+		"handler": "terrain",
+		"types" : { "object" : { "index" : 0, "battleground": "rocklands" } }
+	},
 
 	/// Decorations
 	"cactus"						: { "index" :116, "handler": "static", "types" : { "object" : { "index" : 0} } },
@@ -1029,9 +783,16 @@
 	"grassHills"					: { "index" :208, "handler": "static", "types" : { "object" : { "index" : 0} } },
 	"roughHills"					: { "index" :209, "handler": "static", "types" : { "object" : { "index" : 0} } },
 	"subterraneanRocks"				: { "index" :210, "handler": "static", "types" : { "object" : { "index" : 0} } },
-
-	//These are WoG objects? They are not available in H3
-	"frozenLakeDUPLICATE"			: { "index" :172, "handler": "static", "types" : { "object" : { "index" : 0} } },
-	"oakTreesDUPLICATE"				: { "index" :186, "handler": "static", "types" : { "object" : { "index" : 0} } },
-	"plant"							: { "index" :189, "handler": "static", "types" : { "object" : { "index" : 0} } }
+	"swampFoliage" 					: { "index" :211, "handler": "static", "types" : { "object" : { "index" : 0} } },
+	
+	/// special object to handle invalid / unknown objects on some user-made maps
+	"nothing" : {
+		"index" : 0,
+		"handler": "generic",
+		"types" : {
+			"nothing" : {
+				"index" : 0
+			}
+		}
+	}
 }

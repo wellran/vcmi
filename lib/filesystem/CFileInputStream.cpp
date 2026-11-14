@@ -10,13 +10,16 @@
 #include "StdInc.h"
 #include "CFileInputStream.h"
 
+#include "../ExceptionsCommon.h"
+#include "../texts/TextOperations.h"
+
 CFileInputStream::CFileInputStream(const boost::filesystem::path & file, si64 start, si64 size)
   : dataStart{start},
 	dataSize{size},
-	fileStream{file, std::ios::in | std::ios::binary}
+	fileStream{file.c_str(), std::ios::in | std::ios::binary}
 {
 	if (fileStream.fail())
-		throw std::runtime_error("File " + file.string() + " isn't available.");
+		throw DataLoadingException("Failed to open file '" + TextOperations::filesystemPathToUtf8(file) + "'. Reason: " + strerror(errno) );
 
 	if (dataSize == 0)
 	{

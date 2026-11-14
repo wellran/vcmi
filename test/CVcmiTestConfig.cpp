@@ -11,39 +11,19 @@
 #include "StdInc.h"
 #include "CVcmiTestConfig.h"
 
-#include "../lib/CConsoleHandler.h"
-#include "../lib/logging/CBasicLogConfigurator.h"
-#include "../lib/VCMIDirs.h"
-#include "../lib/VCMI_Lib.h"
-#include "../lib/logging/CLogger.h"
-#include "../lib/CConfigHandler.h"
-#include "../lib/filesystem/Filesystem.h"
-#include "../lib/filesystem/CFilesystemLoader.h"
-#include "../lib/filesystem/AdapterLoaders.h"
+#include "../lib/GameLibrary.h"
 
 void CVcmiTestConfig::SetUp()
 {
-	console = new CConsoleHandler();
-	preinitDLL(console, true);
-	settings.init();
-	loadDLLClasses(true);
-
-	/* TEST_DATA_DIR may be wrong, if yes below test don't run,
-	find your test data folder in your build and change TEST_DATA_DIR for it*/
-	const std::string TEST_DATA_DIR = "test/testdata/";
-	auto path = boost::filesystem::current_path();
-	path+= "/" + TEST_DATA_DIR;
-	if(boost::filesystem::exists(path)){
-		auto loader = new CFilesystemLoader("test/", TEST_DATA_DIR);
-		dynamic_cast<CFilesystemList*>(CResourceHandler::get())->addLoader(loader, false);
-
-		loader = new CFilesystemLoader("scripts/test/erm/", TEST_DATA_DIR+"erm/");
-		dynamic_cast<CFilesystemList*>(CResourceHandler::get())->addLoader(loader, false);
-
-		loader = new CFilesystemLoader("scripts/test/lua/", TEST_DATA_DIR+"lua/");
-		dynamic_cast<CFilesystemList*>(CResourceHandler::get())->addLoader(loader, false);
-
-	}
+	// useTestPreset activates the core+vcmi+vcmi-test preset (config/testModSettings.json),
+	// so tests are independent of the developer's active mods and never overwrite the real
+	// modSettings.json. The vcmi-test mod supplies all fixtures and flips on the HOTA map
+	// format needed by TinyH3MBuilder.
+	initializeBaseFilesystem(false, /*useTestPreset*/ true);
+	auto library = std::make_unique<GameLibrary>();
+	library->initializeFilesystem(/*useTestPreset*/ true);
+	library->initializeLibrary();
+	setGameLibrary(std::move(library));
 }
 
 void CVcmiTestConfig::TearDown()

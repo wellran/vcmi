@@ -12,9 +12,10 @@
 #include <vcmi/Skill.h>
 #include <vcmi/SkillService.h>
 
-#include "../lib/HeroBonus.h"
+#include "bonuses/Bonus.h"
 #include "GameConstants.h"
 #include "IHandlerBase.h"
+#include "json/JsonNode.h"
 
 class JsonSerializeFormat;
 
@@ -23,100 +24,80 @@ class DLL_LINKAGE CSkill : public Skill
 public:
 	struct LevelInfo
 	{
-		std::string description; //descriptions of spell for skill level
 		std::string iconSmall;
 		std::string iconMedium;
 		std::string iconLarge;
+		std::string scenarioBonus;
 		std::vector<std::shared_ptr<Bonus>> effects;
-
-		LevelInfo();
-		~LevelInfo();
-
-		template <typename Handler> void serialize(Handler & h, const int version)
-		{
-			h & description;
-			if(version >= 785)
-			{
-				h & iconSmall;
-				h & iconMedium;
-				h & iconLarge;
-			}
-			h & effects;
-		}
 	};
 
 private:
 	std::vector<LevelInfo> levels; // bonuses provided by basic, advanced and expert level
 	void addNewBonus(const std::shared_ptr<Bonus> & b, int level);
+	int32_t getIconIndex() const override;
+
+	SecondarySkill id;
+	std::string modScope;
+	std::string identifier;
 
 public:
-	CSkill(SecondarySkill id = SecondarySkill::DEFAULT, std::string identifier = "default");
-	~CSkill();
+	CSkill(const SecondarySkill & id = SecondarySkill::NONE, std::string identifier = "default");
+	~CSkill() = default;
+
+	enum class Obligatory : ui8
+	{
+		MAJOR = 0,
+		MINOR = 1,
+	};
 
 	int32_t getIndex() const override;
-	int32_t getIconIndex() const override;
-	const std::string & getName() const override;
-	const std::string & getJsonKey() const override;
+	int32_t getIconIndex(uint8_t skillMasterLevel) const;
+	std::string getJsonKey() const override;
+	std::string getModScope() const override;
 	void registerIcons(const IconRegistar & cb) const override;
 	SecondarySkill getId() const override;
+
+	std::string getNameTextID() const override;
+	std::string getNameTranslated() const override;
+
+	std::string getDescriptionTextID(int level) const override;
+	std::string getDescriptionTranslated(int level) const override;
 
 	const LevelInfo & at(int level) const;
 	LevelInfo & at(int level);
 
 	std::string toString() const;
+	bool isWisdom() const;
+	bool isSpellSchool() const;
+	bool isSpecial() const;
+	bool isOnlyOnWaterMap() const;
+	bool grantsLevelUp() const;
+	bool hasTag(const std::string & tag) const;
 
-	SecondarySkill id;
-	std::string identifier;
-	std::string name; //as displayed in GUI
 	std::array<si32, 2> gainChance; // gainChance[0/1] = default gain chance on level-up for might/magic heroes
+	int offerCooldown = 0;
 
-	void updateFrom(const JsonNode & data);
-	void serializeJson(JsonSerializeFormat & handler);
-
-	template <typename Handler> void serialize(Handler & h, const int version)
-	{
-		h & id;
-		h & identifier;
-		h & name;
-		if(version >= 785)
-		{
-			h & gainChance;
-		}
-		h & levels;
-	}
+	/// Bonuses that should be given to hero that specializes in this skill, parsed separately for each hero
+	std::vector<JsonNode> specialtyTargetBonuses;
 
 	friend class CSkillHandler;
 	friend DLL_LINKAGE std::ostream & operator<<(std::ostream & out, const CSkill & skill);
 	friend DLL_LINKAGE std::ostream & operator<<(std::ostream & out, const CSkill::LevelInfo & info);
+private:
+	std::vector<std::string> tags;
 };
 
 class DLL_LINKAGE CSkillHandler: public CHandlerBase<SecondarySkill, Skill, CSkill, SkillService>
 {
 public:
-	CSkillHandler();
-	virtual ~CSkillHandler();
-
 	///IHandler base
-	std::vector<JsonNode> loadLegacyData(size_t dataSize) override;
-	void afterLoadFinalization() override;
+	std::vector<JsonNode> loadLegacyData(LibraryLoadContext & context) override;
+	void afterLoadFinalization(LibraryLoadContext & context) override;
 	void beforeValidate(JsonNode & object) override;
 
-	std::vector<bool> getDefaultAllowed() const override;
-
-	const std::string & skillInfo(int skill, int level) const;
-	const std::string & skillName(int skill) const;
-
-	///json serialization helpers
-	static si32 decodeSkill(const std::string & identifier);
-	static std::string encodeSkill(const si32 index);
-	static std::string encodeSkillWithType(const si32 index);
-
-	template <typename Handler> void serialize(Handler & h, const int version)
-	{
-		h & objects;
-	}
+	std::set<SecondarySkill> getDefaultAllowed() const;
 
 protected:
 	const std::vector<std::string> & getTypeNames() const override;
-	CSkill * loadFromJson(const std::string & scope, const JsonNode & json, const std::string & identifier, size_t index) override;
+	std::shared_ptr<CSkill> loadFromJson(LibraryLoadContext & context, const std::string & scope, const JsonNode & json, const std::string & identifier, size_t index) override;
 };

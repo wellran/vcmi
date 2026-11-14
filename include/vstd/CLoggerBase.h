@@ -56,6 +56,7 @@ public:
 
 	virtual void log(ELogLevel::ELogLevel level, const std::string & message) const = 0;
 	virtual void log(ELogLevel::ELogLevel level, const boost::format & fmt) const = 0;
+	virtual ELogLevel::ELogLevel getEffectiveLevel() const = 0;
 
 	/// Returns true if a debug/trace log message will be logged, false if not.
 	/// Useful if performance is important and concatenating the log message is a expensive task.
@@ -65,16 +66,19 @@ public:
 	template<typename T, typename ... Args>
 	void log(ELogLevel::ELogLevel level, const std::string & format, T t, Args ... args) const
 	{
-		try
+		if (getEffectiveLevel() <= level)
 		{
-			boost::format fmt(format);
-			makeFormat(fmt, t, args...);
-			log(level, fmt);
-		}
-		catch(...)
-		{
-			log(ELogLevel::ERROR, "Log formatting failed, format was:");
-			log(ELogLevel::ERROR, format);
+			try
+			{
+				boost::format fmt(format);
+				makeFormat(fmt, t, args...);
+				log(level, fmt);
+			}
+			catch(...)
+			{
+				log(ELogLevel::ERROR, "Log formatting failed, format was:");
+				log(ELogLevel::ERROR, format);
+			}
 		}
 	}
 
@@ -170,10 +174,10 @@ private:
 /// Macros for tracing the control flow of the application conveniently. If the LOG_TRACE macro is used it should be
 /// the first statement in the function. Logging traces via this macro have almost no impact when the trace is disabled.
 ///
-#define RAII_TRACE(logger, onEntry, onLeave)			\
-	std::unique_ptr<vstd::CTraceLogger> ctl00;						\
-	if(logger->isTraceEnabled())						\
-		ctl00 = make_unique<vstd::CTraceLogger>(logger, onEntry, onLeave);
+#define RAII_TRACE(logger, onEntry, onLeave)								\
+	std::unique_ptr<vstd::CTraceLogger> ctl00 = logger->isTraceEnabled() ?	\
+	std::make_unique<vstd::CTraceLogger>(logger, onEntry, onLeave) :		\
+    std::unique_ptr<vstd::CTraceLogger>()
 
 #define LOG_TRACE(logger) RAII_TRACE(logger,								\
 		boost::str(boost::format("Entering %s.") % BOOST_CURRENT_FUNCTION),	\
@@ -191,3 +195,5 @@ extern DLL_LINKAGE vstd::CLoggerBase * logNetwork;
 extern DLL_LINKAGE vstd::CLoggerBase * logAi;
 extern DLL_LINKAGE vstd::CLoggerBase * logAnim;
 extern DLL_LINKAGE vstd::CLoggerBase * logMod;
+extern DLL_LINKAGE vstd::CLoggerBase * logRng;
+extern DLL_LINKAGE vstd::CLoggerBase * logScript;

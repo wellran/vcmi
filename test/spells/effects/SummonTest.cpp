@@ -14,6 +14,7 @@
 #include <vstd/RNG.h>
 
 #include "../../../lib/CCreatureHandler.h"
+#include "../../../lib/json/JsonNode.h"
 
 namespace test
 {
@@ -23,6 +24,7 @@ using namespace ::testing;
 
 static const CreatureID creature1(CreatureID::AIR_ELEMENTAL);
 static const CreatureID creature2(CreatureID::FIRE_ELEMENTAL);
+static const int summonSpellPower = 100; // enough to summon at least 1 unit
 
 class SummonTest : public TestWithParam<::testing::tuple<CreatureID, bool, bool>>, public EffectFixture
 {
@@ -33,6 +35,7 @@ public:
 	bool summonSameUnit;
 
 	const battle::Unit * otherSummonedUnit;
+	StrictMock<CreatureMock> otherSummonedType;
 
 	SummonTest()
 		: EffectFixture("core:summon"),
@@ -50,8 +53,10 @@ public:
 		EXPECT_CALL(unit, isValidTarget(Eq(false))).WillRepeatedly(Return(true));
 		EXPECT_CALL(unit, getPosition()).WillRepeatedly(Return(BattleHex(5,5)));
 		EXPECT_CALL(unit, doubleWide()).WillRepeatedly(Return(false));
-		EXPECT_CALL(unit, unitSide()).Times(AnyNumber());
+		EXPECT_CALL(unit, unitSide()).WillRepeatedly(Return(BattleSide::ATTACKER));
 		EXPECT_CALL(unit, unitSlot()).WillRepeatedly(Return(SlotID::SUMMONED_SLOT_PLACEHOLDER));
+		EXPECT_CALL(unit, isHypnotized()).WillRepeatedly(Return(false));
+		EXPECT_CALL(*battleFake, getSidePlayer(BattleSide::ATTACKER)).WillRepeatedly(Return(PlayerColor(5)));
 
 		if(expectAlive)
 			EXPECT_CALL(unit, alive()).WillRepeatedly(Return(true));
@@ -72,8 +77,8 @@ protected:
 
 		toSummon = creature1;
 
-		JsonNode options(JsonNode::JsonType::DATA_STRUCT);
-		options["id"].String() = "airElemental";
+		JsonNode options;
+		options["id"].String() = "core:airElemental";
 		options["exclusive"].Bool() = exclusive;
 		options["summonSameUnit"].Bool() = summonSameUnit;
 
@@ -96,9 +101,24 @@ TEST_P(SummonTest, Applicable)
 	else
 		EXPECT_CALL(*battleFake, getUnitsIf(_)).Times(0);
 
-	EXPECT_CALL(mechanicsMock, getCasterColor()).WillRepeatedly(Return(PlayerColor(5)));
+	if (otherSummoned != toSummon)
+	{
+		EXPECT_CALL(creatureServiceMock, getById(otherSummoned)).WillRepeatedly(Return(&otherSummonedType));
+		EXPECT_CALL(creatureServiceMock, getByIndex(otherSummoned.getNum())).WillRepeatedly(Return(&otherSummonedType));
+		EXPECT_CALL(creatureServiceMock, getByName("core:fireElemental")).WillRepeatedly(Return(&otherSummonedType));
+		EXPECT_CALL(otherSummonedType, getJsonKey()).WillRepeatedly(Return("core:fireElemental"));
+	}
 
-	EXPECT_EQ(expectedApplicable, subject->applicable(problemMock, &mechanicsMock));
+	EXPECT_CALL(creatureServiceMock, getByName("core:airElemental")).WillRepeatedly(Return(&creatureStub));
+	EXPECT_CALL(creatureStub, getId()).WillRepeatedly(Return(toSummon));
+	EXPECT_CALL(creatureStub, getJsonKey()).WillRepeatedly(Return("core:airElemental"));
+	EXPECT_CALL(creatureStub, isDoubleWide()).WillRepeatedly(Return(false));
+	EXPECT_CALL(mechanicsMock, getCasterColor()).WillRepeatedly(Return(PlayerColor(5)));
+	EXPECT_CALL(mechanicsMock, getEffectPower()).WillRepeatedly(Return(summonSpellPower));
+	EXPECT_CALL(mechanicsMock, calculateRawEffectValue(0, summonSpellPower)).WillRepeatedly(Return(summonSpellPower));
+	EXPECT_CALL(mechanicsMock, applySpecificSpellBonus(summonSpellPower)).WillRepeatedly(Return(summonSpellPower));
+
+	EXPECT_EQ(expectedApplicable, subject->applicableGeneral(problemMock, &mechanicsMock));
 }
 
 TEST_P(SummonTest, Transform)
@@ -109,11 +129,18 @@ TEST_P(SummonTest, Transform)
 	battleFake->setupEmptyBattlefield();
 	EXPECT_CALL(*battleFake, getUnitsIf(_)).Times(AtLeast(1));
 
+	EXPECT_CALL(creatureServiceMock, getByName(_)).WillRepeatedly(Return(&creatureStub));
+	EXPECT_CALL(creatureStub, getId()).WillRepeatedly(Return(toSummon));
+	EXPECT_CALL(creatureStub, getJsonKey()).WillRepeatedly(Return("core:airElemental"));
+	EXPECT_CALL(creatureStub, isDoubleWide()).WillRepeatedly(Return(false));
 	EXPECT_CALL(mechanicsMock, getCasterColor()).WillRepeatedly(Return(PlayerColor(5)));
+	EXPECT_CALL(mechanicsMock, getEffectPower()).WillRepeatedly(Return(summonSpellPower));
+	EXPECT_CALL(mechanicsMock, calculateRawEffectValue(0, summonSpellPower)).WillRepeatedly(Return(summonSpellPower));
+	EXPECT_CALL(mechanicsMock, applySpecificSpellBonus(summonSpellPower)).WillRepeatedly(Return(summonSpellPower));
 
-	EffectTarget transformed = subject->transformTarget(&mechanicsMock, Target(), Target());
+	Target transformed = subject->transformTarget(&mechanicsMock, Target(), Target());
 
-	EffectTarget expected;
+	Target expected;
 
 	if(otherSummoned == toSummon && summonSameUnit)
 	{
@@ -127,7 +154,7 @@ TEST_P(SummonTest, Transform)
 	EXPECT_THAT(transformed, ContainerEq(expected));
 }
 
-INSTANTIATE_TEST_CASE_P
+INSTANTIATE_TEST_SUITE_P
 (
 	ByConfig,
 	SummonTest,
@@ -163,11 +190,15 @@ public:
 	{
 	}
 
-	void setDefaultExpectaions()
+	void setDefaultExpectations()
 	{
 		EXPECT_CALL(mechanicsMock, creatures()).Times(AnyNumber());
 		EXPECT_CALL(creatureServiceMock, getById(Eq(toSummon))).WillRepeatedly(Return(&toSummonType));
+		EXPECT_CALL(creatureServiceMock, getByIndex(Eq(toSummon.getNum()))).WillRepeatedly(Return(&toSummonType));
+		EXPECT_CALL(creatureServiceMock, getByName(_)).WillRepeatedly(Return(&toSummonType));
+		EXPECT_CALL(toSummonType, getId()).WillRepeatedly(Return(toSummon));
 		EXPECT_CALL(toSummonType, getMaxHealth()).WillRepeatedly(Return(unitHealth));
+		EXPECT_CALL(toSummonType, getJsonKey()).WillRepeatedly(Return("core:airElemental"));
 
 		expectAmountCalculation();
 	}
@@ -201,8 +232,8 @@ protected:
 		permanent = ::testing::get<0>(GetParam());
 		summonByHealth = ::testing::get<1>(GetParam());
 
-		JsonNode options(JsonNode::JsonType::DATA_STRUCT);
-		options["id"].String() = "airElemental";
+		JsonNode options;
+		options["id"].String() = "core:airElemental";
 		options["permanent"].Bool() = permanent;
 		options["summonByHealth"].Bool() = summonByHealth;
 
@@ -220,13 +251,13 @@ protected:
 
 TEST_P(SummonApplyTest, SpawnsNewUnit)
 {
-	setDefaultExpectaions();
+	setDefaultExpectations();
 
 	EXPECT_CALL(*battleFake, nextUnitId()).WillOnce(Return(unitId));
 	EXPECT_CALL(*battleFake, addUnit(Eq(unitId), _)).WillOnce(Invoke(this, &SummonApplyTest::onUnitAdded));
-	EXPECT_CALL(serverMock, apply(Matcher<BattleUnitsChanged *>(_))).Times(1);
+	EXPECT_CALL(serverMock, apply(Matcher<BattleUnitsChanged &>(_))).Times(1);
 
-	EffectTarget target;
+	Target target;
 	target.emplace_back(unitPosition);
 
 	subject->apply(&serverMock, &mechanicsMock, target);
@@ -241,36 +272,36 @@ TEST_P(SummonApplyTest, SpawnsNewUnit)
 
 TEST_P(SummonApplyTest, UpdatesOldUnit)
 {
-	setDefaultExpectaions();
+	setDefaultExpectations();
 
 	acquired = std::make_shared<battle::UnitFake>();
-	acquired->addNewBonus(std::make_shared<Bonus>(Bonus::PERMANENT, Bonus::STACK_HEALTH, Bonus::CREATURE_ABILITY, unitHealth, 0));
+	acquired->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::STACK_HEALTH, BonusSource::CREATURE_ABILITY, unitHealth, BonusSourceID()));
 	acquired->redirectBonusesToFake();
 	acquired->expectAnyBonusSystemCall();
 
 	auto & unit = unitsFake.add(BattleSide::ATTACKER);
-	unit.addNewBonus(std::make_shared<Bonus>(Bonus::PERMANENT, Bonus::STACK_HEALTH, Bonus::CREATURE_ABILITY, unitHealth, 0));
+	unit.addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::STACK_HEALTH, BonusSource::CREATURE_ABILITY, unitHealth, BonusSourceID()));
 
 	{
 		EXPECT_CALL(unit, acquire()).WillOnce(Return(acquired));
 		EXPECT_CALL(*acquired, heal(Eq(unitTotalHealth), Eq(EHealLevel::OVERHEAL), Eq(permanent ? EHealPower::PERMANENT : EHealPower::ONE_BATTLE)));
-		EXPECT_CALL(*acquired, save(_));
-		EXPECT_CALL(*battleFake, setUnitState(Eq(unitId), _, _));
+		EXPECT_CALL(*acquired, save());
+		EXPECT_CALL(*battleFake, updateUnit(Eq(unitId), _, _));
 	}
 
 	EXPECT_CALL(unit, unitId()).WillOnce(Return(unitId));
 
-	EXPECT_CALL(serverMock, apply(Matcher<BattleUnitsChanged *>(_))).Times(1);
+	EXPECT_CALL(serverMock, apply(Matcher<BattleUnitsChanged &>(_))).Times(1);
 
 	unitsFake.setDefaultBonusExpectations();
 
-	EffectTarget target;
+	Target target;
 	target.emplace_back(&unit, BattleHex());
 
 	subject->apply(&serverMock, &mechanicsMock, target);
 }
 
-INSTANTIATE_TEST_CASE_P
+INSTANTIATE_TEST_SUITE_P
 (
 	ByConfig,
 	SummonApplyTest,

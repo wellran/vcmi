@@ -11,6 +11,8 @@
 
 #include "TargetConditionItemFixture.h"
 
+#include "../../../lib/GameLibrary.h"
+
 namespace test
 {
 using namespace ::spells;
@@ -27,18 +29,18 @@ public:
 		isPositive = ::testing::get<0>(GetParam());
 		hasBonus = ::testing::get<1>(GetParam());
 
-		EXPECT_CALL(unitMock, getAllBonuses(_, _, _, _)).Times(AtLeast(0));
+		EXPECT_CALL(unitMock, getAllBonuses(_, _)).Times(AtLeast(0));
 		EXPECT_CALL(unitMock, getTreeVersion()).Times(AtLeast(0));
 		EXPECT_CALL(mechanicsMock, isPositiveSpell()).WillRepeatedly(Return(isPositive));
 		if(hasBonus)
-			unitBonuses.addNewBonus(std::make_shared<Bonus>(Bonus::ONE_BATTLE, Bonus::RECEPTIVE, Bonus::OTHER, 0, 0));
+			unitBonuses.addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::RECEPTIVE, BonusSource::OTHER, 0, BonusSourceID()));
 	}
 
 protected:
 	void SetUp() override
 	{
 		TargetConditionItemTest::SetUp();
-		subject = TargetConditionItemFactory::getDefault()->createReceptiveFeature();
+		subject = TargetConditionItemFactory::create(*LIBRARY->identifiers())->createReceptiveFeature();
 		GTEST_ASSERT_NE(subject, nullptr);
 	}
 };
@@ -50,7 +52,7 @@ TEST_P(ReceptiveFeatureConditionTest, isReceptive)
 	EXPECT_EQ(isPositive && hasBonus, subject->isReceptive(&mechanicsMock, &unitMock));
 }
 
-INSTANTIATE_TEST_CASE_P
+INSTANTIATE_TEST_SUITE_P
 (
 	ByFlags,
 	ReceptiveFeatureConditionTest,

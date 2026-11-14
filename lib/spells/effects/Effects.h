@@ -13,25 +13,24 @@
 #include "Effect.h"
 #include "../../GameConstants.h"
 
+class LibraryLoadContext;
+
 namespace spells
 {
 namespace effects
 {
 
-class DLL_LINKAGE Effects
+class Effects
 {
 public:
-	using EffectsToApply = std::vector<std::pair<const Effect *, EffectTarget>>;
+	using EffectsToApply = std::vector<std::pair<const Effect *, Target>>;
 
 	using EffectsMap = std::map<std::string, std::shared_ptr<Effect>>;
 	using EffectData = std::array<EffectsMap, GameConstants::SPELL_SCHOOL_LEVELS>;
 
 	EffectData data;
 
-	Effects();
-	virtual ~Effects();
-
-	void add(const std::string & name, std::shared_ptr<Effect> effect, const int level);
+	virtual ~Effects() = default;
 
 	bool applicable(Problem & problem, const Mechanics * m) const;
 	bool applicable(Problem & problem, const Mechanics * m, const Target & aimPoint, const Target & spellTarget) const;
@@ -40,7 +39,8 @@ public:
 
 	EffectsToApply prepare(const Mechanics * m, const Target & aimPoint, const Target & spellTarget) const;
 
-	void serializeJson(const Registry * registry, JsonSerializeFormat & handler, const int level);
+	/// Builds the effects map for a single spell level from its JSON config.
+	static EffectsMap loadJson(LibraryLoadContext & context, const JsonNode & effectMap, const std::string & spellScope, const std::string & spellIdentifier);
 };
 
 

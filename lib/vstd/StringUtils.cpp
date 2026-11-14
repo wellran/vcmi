@@ -1,17 +1,26 @@
+/*
+ * StringUtils.cpp, part of VCMI engine
+ *
+ * Authors: listed in file AUTHORS in main folder
+ *
+ * License: GNU General Public License v2.0 or later
+ * Full text of license available in license.txt file, in main folder
+ *
+ */
 #include "StdInc.h"
 #include <vstd/StringUtils.h>
 
 namespace vstd
 {
 
-	DLL_LINKAGE std::vector<std::string> split(std::string s, std::string separators)
+	DLL_LINKAGE std::vector<std::string> split(std::string s, const std::string& separators)
 	{
 		std::vector<std::string> result;
 		boost::split(result, s, boost::is_any_of(separators));
 		return result;
 	}
 
-	DLL_LINKAGE std::pair<std::string, std::string> splitStringToPair(std::string input, char separator)
+	DLL_LINKAGE std::pair<std::string, std::string> splitStringToPair(const std::string& input, char separator)
 	{
 		std::pair<std::string, std::string> ret;
 		size_t splitPos = input.find(separator);

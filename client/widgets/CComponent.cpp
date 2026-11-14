@@ -10,71 +10,115 @@
 #include "StdInc.h"
 #include "CComponent.h"
 
-#include <vcmi/spells/Service.h>
-#include <vcmi/spells/Spell.h>
+#include "Images.h"
 
-#include "../gui/CGuiHandler.h"
-#include "../gui/CCursorHandler.h"
+#include "../GameEngine.h"
+#include "../GameInstance.h"
+#include "../gui/CursorHandler.h"
+#include "../gui/TextAlignment.h"
+#include "../gui/Shortcut.h"
+#include "render/Canvas.h"
+#include "render/IFont.h"
+#include "render/IRenderHandler.h"
+#include "render/Graphics.h"
+#include "../windows/CMessage.h"
+#include "../windows/InfoWindows.h"
+#include "TextControls.h"
 
-#include "../CMessage.h"
-#include "../CGameInfo.h"
-#include "../widgets/Images.h"
-#include "../widgets/CArtifactHolder.h"
-#include "../windows/CAdvmapInterface.h"
-
-#include "../../lib/CArtHandler.h"
-#include "../../lib/CTownHandler.h"
+#include "../../lib/entities/artifact/ArtifactUtils.h"
+#include "../../lib/entities/artifact/CArtHandler.h"
+#include "../../lib/entities/building/CBuilding.h"
+#include "../../lib/entities/faction/CFaction.h"
+#include "../../lib/entities/faction/CTown.h"
+#include "../../lib/entities/faction/CTownHandler.h"
+#include "../../lib/networkPacks/Component.h"
 #include "../../lib/CCreatureHandler.h"
 #include "../../lib/CSkillHandler.h"
-#include "../../lib/CGeneralTextHandler.h"
-#include "../../lib/NetPacksBase.h"
+#include "../../lib/texts/CGeneralTextHandler.h"
+#include "../../lib/GameLibrary.h"
 
-CComponent::CComponent(Etype Type, int Subtype, int Val, ESize imageSize)
-	: perDay(false)
+#include <vcmi/spells/Service.h>
+#include <vcmi/spells/Spell.h>
+#include <vcmi/HeroTypeService.h>
+#include <vcmi/HeroType.h>
+
+CComponent::CComponent(ComponentType Type, ComponentSubType Subtype, std::optional<int32_t> Val, ESize imageSize, EFonts font)
 {
-	init(Type, Subtype, Val, imageSize);
+	init(Type, Subtype, Val, imageSize, font, "");
 }
 
-CComponent::CComponent(const Component & c, ESize imageSize)
-	: perDay(false)
+CComponent::CComponent(ComponentType Type, ComponentSubType Subtype, const std::string & Val, ESize imageSize, EFonts font)
 {
-	if(c.id == Component::RESOURCE && c.when==-1)
-		perDay = true;
-
-	init((Etype)c.id, c.subtype, c.val, imageSize);
+	init(Type, Subtype, std::nullopt, imageSize, font, Val);
 }
 
-void CComponent::init(Etype Type, int Subtype, int Val, ESize imageSize)
+CComponent::CComponent(const Component & c, ESize imageSize, EFonts font)
 {
-	OBJECT_CONSTRUCTION_CAPTURING(255-DISPOSE);
+	init(c.type, c.subType, c.value, imageSize, font, "");
+}
 
-	addUsedEvents(RCLICK);
+void CComponent::init(ComponentType Type, ComponentSubType Subtype, std::optional<int32_t> Val, ESize imageSize, EFonts fnt, const std::string & ValText)
+{
+	OBJECT_CONSTRUCTION;
 
-	compType = Type;
-	subtype = Subtype;
-	val = Val;
+	addUsedEvents(SHOW_POPUP);
+
+	data.type = Type;
+	data.subType = Subtype;
+	data.value = Val;
+
+	customSubtitle = ValText;
 	size = imageSize;
+	font = fnt;
+	newLine = false;
 
-	assert(compType < typeInvalid);
 	assert(size < sizeInvalid);
 
-	setSurface(getFileName()[size], (int)getIndex());
+	setSurface(getFileName()[size], static_cast<int>(getIndex()));
 
 	pos.w = image->pos.w;
 	pos.h = image->pos.h;
 
-	EFonts font = FONT_SMALL;
 	if (imageSize < small)
-		font = FONT_TINY; //other sizes?
+		font = FONT_TINY; //for tiny images - tiny font
 
 	pos.h += 4; //distance between text and image
 
-	std::vector<std::string> textLines = CMessage::breakText(getSubtitle(), std::max<int>(80, pos.w), font);
+	// WARNING: too low values will lead to bad line-breaks in CPlayerOptionTooltipBox - check right-click on starting town in pregame
+	int max = 80;
+	if (size < large)
+		max = 72;
+	if (size < medium)
+		max = 60;
+	if (size < small)
+		max = 55;
+
+	if(Type == ComponentType::RESOURCE && !ValText.empty())
+		max = 80;
+
+	const auto & fontPtr = ENGINE->renderHandler().loadFont(font);
+	{
+		std::string s = getSubtitle();
+
+		// remove color markup: "{color|"
+		s = std::regex_replace(s, std::regex("\\{[^|}]*\\|"), "");
+		// remove closing braces "}"
+		s.erase(std::remove(s.begin(), s.end(), '}'), s.end());
+
+		size_t longestWordLen = 0;
+		for(std::istringstream iss(s); iss >> s; )
+			longestWordLen = std::max(longestWordLen, fontPtr->getStringWidth(s));
+
+		max = std::min<int>(max, longestWordLen + 8);
+	}
+
+	std::vector<std::string> textLines = CMessage::breakText(getSubtitle(), std::max<int>(max, pos.w), font);
+
+	const int height = static_cast<int>(fontPtr->getLineHeight());
+
 	for(auto & line : textLines)
 	{
-		int height = static_cast<int>(graphics->fonts[font]->getLineHeight());
-		auto label = std::make_shared<CLabel>(pos.w/2, pos.h + height/2, font, CENTER, Colors::WHITE, line);
-
+		auto label = std::make_shared<CLabel>(pos.w/2, pos.h + height/2, font, ETextAlignment::CENTER, Colors::WHITE, line);
 		pos.h += height;
 		if(label->pos.w > pos.w)
 		{
@@ -85,169 +129,270 @@ void CComponent::init(Etype Type, int Subtype, int Val, ESize imageSize)
 	}
 }
 
-const std::vector<std::string> CComponent::getFileName()
+std::vector<AnimationPath> CComponent::getFileName() const
 {
-	static const std::string  primSkillsArr [] = {"PSKIL32",        "PSKIL32",        "PSKIL42",        "PSKILL"};
-	static const std::string  secSkillsArr [] =  {"SECSK32",        "SECSK32",        "SECSKILL",       "SECSK82"};
-	static const std::string  resourceArr [] =   {"SMALRES",        "RESOURCE",       "RESOUR82",       "RESOUR82"};
-	static const std::string  creatureArr [] =   {"CPRSMALL",       "CPRSMALL",       "TWCRPORT",       "TWCRPORT"};
-	static const std::string  artifactArr[]  =   {"Artifact",       "Artifact",       "Artifact",       "Artifact"};
-	static const std::string  spellsArr [] =     {"SpellInt",       "SpellInt",       "SPELLSCR",       "SPELLSCR"};
-	static const std::string  moraleArr [] =     {"IMRL22",         "IMRL30",         "IMRL42",         "imrl82"};
-	static const std::string  luckArr [] =       {"ILCK22",         "ILCK30",         "ILCK42",         "ilck82"};
-	static const std::string  heroArr [] =       {"PortraitsSmall", "PortraitsSmall", "PortraitsLarge", "PortraitsLarge"};
-	static const std::string  flagArr [] =       {"CREST58",        "CREST58",        "CREST58",        "CREST58"};
+	static const std::array<std::string, 4>  primSkillsArr = {"PSKIL32",        "PSKIL32",        "PSKIL42",        "PSKILL"};
+	static const std::array<std::string, 4>  secSkillsArr =  {"SECSK32",        "SECSK32",        "SECSKILL",       "SECSK82"};
+	static const std::array<std::string, 4>  resourceArr =   {"SMALRES",        "RESOURCE",       "RESOURCE",       "RESOUR82"};
+	static const std::array<std::string, 4>  creatureArr =   {"CPRSMALL",       "CPRSMALL",       "TWCRPORT",       "TWCRPORT"};
+	static const std::array<std::string, 4>  artifactArr =   {"Artifact",       "Artifact",       "Artifact",       "Artifact"};
+	static const std::array<std::string, 4>  spellsArr =     {"SpellInt",       "SpellInt",       "SPELLSCR",       "SPELLSCR"};
+	static const std::array<std::string, 4>  moraleArr =     {"IMRL22",         "IMRL30",         "IMRL42",         "imrl82"};
+	static const std::array<std::string, 4>  luckArr =       {"ILCK22",         "ILCK30",         "ILCK42",         "ilck82"};
+	static const std::array<std::string, 4>  heroArr =       {"PortraitsSmall", "PortraitsSmall", "PortraitsSmall", "PortraitsLarge"};
+	static const std::array<std::string, 4>  flagArr =       {"CREST58",        "CREST58",        "CREST58",        "CREST58"};
 
-	auto gen = [](const std::string * arr)
+	auto gen = [](const std::array<std::string, 4> & arr) -> std::vector<AnimationPath>
 	{
-		return std::vector<std::string>(arr, arr + 4);
+		return { AnimationPath::builtin(arr[0]), AnimationPath::builtin(arr[1]), AnimationPath::builtin(arr[2]), AnimationPath::builtin(arr[3]) };
 	};
 
-	switch(compType)
+	switch(data.type)
 	{
-	case primskill:  return gen(primSkillsArr);
-	case secskill:   return gen(secSkillsArr);
-	case resource:   return gen(resourceArr);
-	case creature:   return gen(creatureArr);
-	case artifact:   return gen(artifactArr);
-	case experience: return gen(primSkillsArr);
-	case spell:      return gen(spellsArr);
-	case morale:     return gen(moraleArr);
-	case luck:       return gen(luckArr);
-	case building:   return std::vector<std::string>(4, (*CGI->townh)[subtype]->town->clientInfo.buildingsIcons);
-	case hero:       return gen(heroArr);
-	case flag:       return gen(flagArr);
+		case ComponentType::PRIM_SKILL:
+		case ComponentType::EXPERIENCE:
+		case ComponentType::MANA:
+		case ComponentType::LEVEL:
+			return gen(primSkillsArr);
+		case ComponentType::NONE:
+		case ComponentType::SEC_SKILL:
+			return gen(secSkillsArr);
+		case ComponentType::RESOURCE:
+		case ComponentType::RESOURCE_PER_DAY:
+			return gen(resourceArr);
+		case ComponentType::CREATURE:
+			return gen(creatureArr);
+		case ComponentType::ARTIFACT:
+			return gen(artifactArr);
+		case ComponentType::SPELL_SCROLL:
+		case ComponentType::SPELL:
+			return gen(spellsArr);
+		case ComponentType::MORALE:
+			return gen(moraleArr);
+		case ComponentType::LUCK:
+			return gen(luckArr);
+		case ComponentType::BUILDING:
+			return std::vector<AnimationPath>(4, (*LIBRARY->townh)[data.subType.as<BuildingTypeUniqueID>().getFaction()]->getTown()->clientInfo.buildingsIcons);
+		case ComponentType::HERO_PORTRAIT:
+			return gen(heroArr);
+		case ComponentType::FLAG:
+			return gen(flagArr);
+		default:
+			assert(0);
+			return {};
 	}
-	assert(0);
-	return std::vector<std::string>();
 }
 
-size_t CComponent::getIndex()
+size_t CComponent::getIndex() const
 {
-	switch(compType)
+	switch(data.type)
 	{
-	case primskill:  return subtype;
-	case secskill:   return subtype*3 + 3 + val - 1;
-	case resource:   return subtype;
-	case creature:   return CGI->creatures()->getByIndex(subtype)->getIconIndex();
-	case artifact:   return CGI->artifacts()->getByIndex(subtype)->getIconIndex();
-	case experience: return 4;
-	case spell:      return subtype;
-	case morale:     return val+3;
-	case luck:       return val+3;
-	case building:   return val;
-	case hero:       return subtype;
-	case flag:       return subtype;
+		case ComponentType::NONE:
+			return 0;
+		case ComponentType::PRIM_SKILL:
+			return data.subType.getNum();
+		case ComponentType::EXPERIENCE:
+		case ComponentType::LEVEL:
+			return 4; // for whatever reason, in H3 experience icon is located in primary skills icons
+		case ComponentType::MANA:
+			return 5; // for whatever reason, in H3 mana points icon is located in primary skills icons
+		case ComponentType::SEC_SKILL:
+			return data.subType.getNum() * 3 + 3 + data.value.value_or(1) - 1;
+		case ComponentType::RESOURCE:
+		case ComponentType::RESOURCE_PER_DAY:
+			return data.subType.getNum();
+		case ComponentType::CREATURE:
+			return LIBRARY->creatures()->getById(data.subType.as<CreatureID>())->getIconIndex();
+		case ComponentType::ARTIFACT:
+			return LIBRARY->artifacts()->getById(data.subType.as<ArtifactID>())->getIconIndex();
+		case ComponentType::SPELL_SCROLL:
+		case ComponentType::SPELL:
+			return (size < medium) ? data.subType.getNum() + 1 : data.subType.getNum();
+		case ComponentType::MORALE:
+			return std::clamp(data.value.value_or(0) + 3, 0, 6);
+		case ComponentType::LUCK:
+			return std::clamp(data.value.value_or(0) + 3, 0, 6);
+		case ComponentType::BUILDING:
+			return data.subType.as<BuildingTypeUniqueID>().getBuilding().getNum();
+		case ComponentType::HERO_PORTRAIT:
+			return LIBRARY->heroTypes()->getById(data.subType.as<HeroTypeID>())->getIconIndex();
+		case ComponentType::FLAG:
+			return data.subType.getNum();
+		default:
+			assert(0);
+			return 0;
 	}
-	assert(0);
-	return 0;
 }
 
-std::string CComponent::getDescription()
+std::string CComponent::getDescription() const
 {
-	switch(compType)
+	switch(data.type)
 	{
-	case primskill:  return (subtype < 4)? CGI->generaltexth->arraytxt[2+subtype] //Primary skill
-										 : CGI->generaltexth->allTexts[149]; //mana
-	case secskill:   return CGI->skillh->skillInfo(subtype, val);
-	case resource:   return CGI->generaltexth->allTexts[242];
-	case creature:   return "";
-	case artifact:
-	{
-		std::unique_ptr<CArtifactInstance> art;
-		if (subtype != ArtifactID::SPELL_SCROLL)
+		case ComponentType::PRIM_SKILL:
+			return GAME->translator().translate("core.arraytxt", 2+data.subType.getNum());
+		case ComponentType::EXPERIENCE:
+		case ComponentType::LEVEL:
+			return LIBRARY->generaltexth->allTexts[241];
+		case ComponentType::MANA:
+			return LIBRARY->generaltexth->allTexts[149];
+		case ComponentType::SEC_SKILL:
+			return LIBRARY->skillh->getByIndex(data.subType.getNum())->getDescriptionTranslated(data.value.value_or(1));
+		case ComponentType::RESOURCE:
+		case ComponentType::RESOURCE_PER_DAY:
+			return LIBRARY->generaltexth->allTexts[242];
+		case ComponentType::NONE:
+		case ComponentType::CREATURE:
+			return "";
+		case ComponentType::ARTIFACT:
+			return LIBRARY->artifacts()->getById(data.subType.as<ArtifactID>())->getDescriptionTranslated();
+		case ComponentType::SPELL_SCROLL:
 		{
-			art.reset(CArtifactInstance::createNewArtifactInstance(subtype));
+			auto description = ArtifactID(ArtifactID::SPELL_SCROLL).toEntity(LIBRARY)->getDescriptionTranslated();
+			ArtifactUtils::insertScrrollSpellName(description, data.subType.as<SpellID>());
+			return description;
 		}
-		else
+		case ComponentType::SPELL:
+			return LIBRARY->spells()->getById(data.subType.as<SpellID>())->getDescriptionTranslated(std::max(0, data.value.value_or(0)));
+		case ComponentType::MORALE:
+			return GAME->translator().translate("core.heroscrn", 4 - (data.value.value_or(0)>0) + (data.value.value_or(0)<0));
+		case ComponentType::LUCK:
+			return GAME->translator().translate("core.heroscrn", 7 - (data.value.value_or(0)>0) + (data.value.value_or(0)<0));
+		case ComponentType::BUILDING:
 		{
-			art.reset(CArtifactInstance::createScroll(SpellID(val)));
+			auto index = data.subType.as<BuildingTypeUniqueID>();
+			return (*LIBRARY->townh)[index.getFaction()]->getTown()->buildings.at(index.getBuilding())->getDescriptionTranslated();
 		}
-		return art->getEffectiveDescription();
+		case ComponentType::HERO_PORTRAIT:
+			return "";
+		case ComponentType::FLAG:
+			return "";
+		default:
+			assert(0);
+			return "";
 	}
-	case experience: return CGI->generaltexth->allTexts[241];
-	case spell:      return SpellID(subtype).toSpell(CGI->spells())->getLevelDescription(val);
-	case morale:     return CGI->generaltexth->heroscrn[ 4 - (val>0) + (val<0)];
-	case luck:       return CGI->generaltexth->heroscrn[ 7 - (val>0) + (val<0)];
-	case building:   return (*CGI->townh)[subtype]->town->buildings[BuildingID(val)]->Description();
-	case hero:       return "";
-	case flag:       return "";
-	}
-	assert(0);
-	return "";
 }
 
-std::string CComponent::getSubtitle()
+std::string CComponent::getSubtitle() const
 {
-	if(!perDay)
-		return getSubtitleInternal();
+	if (!customSubtitle.empty())
+		return customSubtitle;
 
-	std::string ret = CGI->generaltexth->allTexts[3];
-	boost::replace_first(ret, "%d", getSubtitleInternal());
-	return ret;
-}
-
-std::string CComponent::getSubtitleInternal()
-{
-	//FIXME: some of these are horrible (e.g creature)
-	switch(compType)
+	switch(data.type)
 	{
-	case primskill:  return boost::str(boost::format("%+d %s") % val % (subtype < 4 ? CGI->generaltexth->primarySkillNames[subtype] : CGI->generaltexth->allTexts[387]));
-	case secskill:   return CGI->generaltexth->levels[val-1] + "\n" + CGI->skillh->skillName(subtype);
-	case resource:   return boost::lexical_cast<std::string>(val);
-	case creature:   return (val? boost::lexical_cast<std::string>(val) + " " : "") + CGI->creh->objects[subtype]->*(val != 1 ? &CCreature::namePl : &CCreature::nameSing);
-	case artifact:   return CGI->artifacts()->getByIndex(subtype)->getName();
-	case experience:
-		{
-			if(subtype == 1) //+1 level - tree of knowledge
+		case ComponentType::PRIM_SKILL:
+			if (data.value)
 			{
-				std::string level = CGI->generaltexth->allTexts[442];
-				boost::replace_first(level, "1", boost::lexical_cast<std::string>(val));
-				return level;
+				MetaString subtitle = MetaString::createFromRawString("%+d %s");
+				subtitle.replacePositiveNumber(*data.value);
+				subtitle.replaceTextID("core.priskill", data.subType.getNum());
+				return subtitle.toString(&GAME->translator());
 			}
 			else
-			{
-				return boost::lexical_cast<std::string>(val); //amount of experience OR level required for seer hut;
-			}
-		}
-	case spell:      return CGI->spells()->getByIndex(subtype)->getName();
-	case morale:     return "";
-	case luck:       return "";
-	case building:
+				return GAME->translator().translate("core.priskill", data.subType.getNum());
+		case ComponentType::EXPERIENCE:
+			return std::to_string(data.value.value_or(0));
+		case ComponentType::LEVEL:
 		{
-			auto building = (*CGI->townh)[subtype]->town->buildings[BuildingID(val)];
-			if(!building)
-			{
-				logGlobal->error("Town of faction %s has no building #%d", (*CGI->townh)[subtype]->town->faction->name, val);
-				return (boost::format("Missing building #%d") % val).str();
-			}
-			return building->Name();
+			// H3 text has no placeholder - the literal '1' in "+1 Level" is the value to substitute
+			MetaString level = MetaString::createFromTextID("core.genrltxt.442");
+			level.replaceTokenNumber("1", data.value.value_or(0));
+			return level.toString(&GAME->translator());
 		}
-	case hero:       return "";
-	case flag:       return CGI->generaltexth->capColors[subtype];
+		case ComponentType::MANA:
+		{
+			MetaString subtitle = MetaString::createFromRawString("%+d %s");
+			subtitle.replacePositiveNumber(data.value.value_or(0));
+			subtitle.replaceTextID("core.genrltxt.387"); // Spell Points
+			return subtitle.toString(&GAME->translator());
+		}
+		case ComponentType::SEC_SKILL:
+			if (data.value)
+				return GAME->translator().translate("core.skilllev", data.value.value_or(1)-1) + "\n" + LIBRARY->skillh->getById(data.subType.as<SecondarySkill>())->getNameTranslated();
+			else
+				return LIBRARY->skillh->getById(data.subType.as<SecondarySkill>())->getNameTranslated();
+		case ComponentType::RESOURCE:
+			return data.value ? std::to_string(*data.value) : "";
+		case ComponentType::RESOURCE_PER_DAY:
+		{
+			MetaString subtitle = MetaString::createFromTextID("core.genrltxt.3"); // %d/day
+			subtitle.replaceNumber(data.value.value_or(0));
+			return subtitle.toString(&GAME->translator());
+		}
+		case ComponentType::CREATURE:
+		{
+			auto creature = LIBRARY->creh->getById(data.subType.as<CreatureID>());
+			if(data.value)
+				return std::to_string(*data.value) + " " + (*data.value > 1 ? creature->getNamePluralTranslated() : creature->getNameSingularTranslated());
+			else
+				return creature->getNamePluralTranslated();
+		}
+		case ComponentType::ARTIFACT:
+			return LIBRARY->artifacts()->getById(data.subType.as<ArtifactID>())->getNameTranslated();
+		case ComponentType::SPELL_SCROLL:
+		case ComponentType::SPELL:
+			if (data.value.value_or(0) < 0)
+				return "{#A9A9A9|" + LIBRARY->spells()->getById(data.subType.as<SpellID>())->getNameTranslated() + "}";
+			else
+				return LIBRARY->spells()->getById(data.subType.as<SpellID>())->getNameTranslated();
+		case ComponentType::MORALE:
+		case ComponentType::LUCK:
+		{
+			MetaString subtitle = MetaString::createFromRawString("%s %+d");
+			subtitle.replaceTextID(data.type == ComponentType::MORALE ? "core.genrltxt.384" : "core.genrltxt.385"); // Morale / Luck
+			subtitle.replacePositiveNumber(data.value.value_or(0));
+			return subtitle.toString(&GAME->translator());
+		}
+		case ComponentType::NONE:
+		case ComponentType::HERO_PORTRAIT:
+			return "";
+		case ComponentType::BUILDING:
+			{
+				auto index = data.subType.as<BuildingTypeUniqueID>();
+				const auto * town = (*LIBRARY->townh)[index.getFaction()]->getTown();
+				const auto building = town->buildings.find(index.getBuilding());
+				if(building == town->buildings.end())
+				{
+					logGlobal->error("Town of faction %s has no building #%d", town->getFaction()->getNameTranslated(), index.getBuilding().getNum());
+					return (boost::format("Missing building #%d") % index.getBuilding().getNum()).str();
+				}
+				return building->second->getNameTranslated();
+			}
+		case ComponentType::FLAG:
+			return GAME->translator().translate("vcmi.capitalColors", data.subType.as<PlayerColor>().getNum());
+		default:
+			assert(0);
+			return "";
 	}
-	logGlobal->error("Invalid CComponent type: %d", (int)compType);
-	return "";
 }
 
-void CComponent::setSurface(std::string defName, int imgPos)
+void CComponent::setSurface(const AnimationPath & defName, int imgPos)
 {
-	OBJECT_CONSTRUCTION_CUSTOM_CAPTURING(255-DISPOSE);
+	OBJECT_CONSTRUCTION;
 	image = std::make_shared<CAnimImage>(defName, imgPos);
 }
 
-void CComponent::clickRight(tribool down, bool previousState)
+void CComponent::showPopupWindow(const Point & cursorPosition)
 {
 	if(!getDescription().empty())
-		adventureInt->handleRightClick(getDescription(), down);
+		CRClickPopup::createAndPush(getDescription());
 }
 
-void CSelectableComponent::clickLeft(tribool down, bool previousState)
+void CSelectableComponent::clickPressed(const Point & cursorPosition)
 {
-	if (down)
+	if(onSelect)
+		onSelect();
+}
+
+void CSelectableComponent::clickDouble(const Point & cursorPosition)
+{
+	if (!selected)
 	{
-		if(onSelect)
-			onSelect();
+		clickPressed(cursorPosition);
+	}
+	else
+	{
+		if (onChoose)
+			onChoose();
 	}
 }
 
@@ -259,16 +404,16 @@ void CSelectableComponent::init()
 CSelectableComponent::CSelectableComponent(const Component &c, std::function<void()> OnSelect):
 	CComponent(c),onSelect(OnSelect)
 {
-	type |= REDRAW_PARENT;
-	addUsedEvents(LCLICK | KEYBOARD);
+	setRedrawParent(true);
+	addUsedEvents(LCLICK | DOUBLECLICK | KEYBOARD);
 	init();
 }
 
-CSelectableComponent::CSelectableComponent(Etype Type, int Sub, int Val, ESize imageSize, std::function<void()> OnSelect):
+CSelectableComponent::CSelectableComponent(ComponentType Type, ComponentSubType Sub, int Val, ESize imageSize, std::function<void()> OnSelect):
 	CComponent(Type,Sub,Val, imageSize),onSelect(OnSelect)
 {
-	type |= REDRAW_PARENT;
-	addUsedEvents(LCLICK | KEYBOARD);
+	setRedrawParent(true);
+	addUsedEvents(LCLICK | DOUBLECLICK | KEYBOARD);
 	init();
 }
 
@@ -281,12 +426,12 @@ void CSelectableComponent::select(bool on)
 	}
 }
 
-void CSelectableComponent::showAll(SDL_Surface * to)
+void CSelectableComponent::showAll(Canvas & to)
 {
 	CComponent::showAll(to);
 	if(selected)
 	{
-		CSDL_Ext::drawBorder(to, Rect::around(image->pos), int3(239,215,123));
+		to.drawBorder(Rect::createAround(image->pos, 1), Colors::BRIGHT_YELLOW);
 	}
 }
 
@@ -324,9 +469,6 @@ Point CComponentBox::getOrTextPos(CComponent *left, CComponent *right)
 
 int CComponentBox::getDistance(CComponent *left, CComponent *right)
 {
-	static const int betweenImagesMin = 20;
-	static const int betweenSubtitlesMin = 10;
-
 	int leftSubtitle  = ( left->pos.w -  left->image->pos.w) / 2;
 	int rightSubtitle = (right->pos.w - right->image->pos.w) / 2;
 	int subtitlesOffset = leftSubtitle + rightSubtitle;
@@ -336,9 +478,7 @@ int CComponentBox::getDistance(CComponent *left, CComponent *right)
 
 void CComponentBox::placeComponents(bool selectable)
 {
-	static const int betweenRows = 22;
-
-	OBJECT_CONSTRUCTION_CAPTURING(255-DISPOSE);
+	OBJECT_CONSTRUCTION;
 	if (components.empty())
 		return;
 
@@ -372,7 +512,8 @@ void CComponentBox::placeComponents(bool selectable)
 
 		//start next row
 		if ((pos.w != 0 && rows.back().width + comp->pos.w + distance > pos.w) // row is full
-			|| rows.back().comps >= 4) // no more than 4 comps per row
+			|| rows.back().comps >= componentsInRow
+			|| (prevComp && prevComp->newLine))
 		{
 			prevComp = nullptr;
 			rows.push_back (RowData (0,0,0));
@@ -422,7 +563,7 @@ void CComponentBox::placeComponents(bool selectable)
 				{
 					Point orPos = Point(currentX - freeSpace, currentY) + getOrTextPos(prevComp.get(), iter->get());
 
-					orLabels.push_back(std::make_shared<CLabel>(orPos.x, orPos.y, FONT_MEDIUM, CENTER, Colors::WHITE, CGI->generaltexth->allTexts[4]));
+					orLabels.push_back(std::make_shared<CLabel>(orPos.x, orPos.y, FONT_MEDIUM, ETextAlignment::CENTER, Colors::WHITE, LIBRARY->generaltexth->allTexts[4]));
 				}
 				currentX += getDistance(prevComp.get(), iter->get());
 			}
@@ -438,28 +579,47 @@ void CComponentBox::placeComponents(bool selectable)
 }
 
 CComponentBox::CComponentBox(std::vector<std::shared_ptr<CComponent>> _components, Rect position):
-	components(_components)
+	CComponentBox(_components, position, defaultBetweenImagesMin, defaultBetweenSubtitlesMin, defaultBetweenRows, defaultComponentsInRow)
 {
-	type |= REDRAW_PARENT;
-	pos = position + pos;
+}
+
+CComponentBox::CComponentBox(std::vector<std::shared_ptr<CComponent>> _components, Rect position, int betweenImagesMin, int betweenSubtitlesMin, int betweenRows, int componentsInRow):
+	components(_components),
+	betweenImagesMin(betweenImagesMin),
+	betweenSubtitlesMin(betweenSubtitlesMin),
+	betweenRows(betweenRows),
+	componentsInRow(componentsInRow)
+{
+	setRedrawParent(true);
+	pos = position + pos.topLeft();
 	placeComponents(false);
 }
 
 CComponentBox::CComponentBox(std::vector<std::shared_ptr<CSelectableComponent>> _components, Rect position, std::function<void(int newID)> _onSelect):
-	components(_components.begin(), _components.end()),
-	onSelect(_onSelect)
+	CComponentBox(_components, position, _onSelect, defaultBetweenImagesMin, defaultBetweenSubtitlesMin, defaultBetweenRows, defaultComponentsInRow)
 {
-	type |= REDRAW_PARENT;
-	pos = position + pos;
+}
+
+CComponentBox::CComponentBox(std::vector<std::shared_ptr<CSelectableComponent>> _components, Rect position, std::function<void(int newID)> _onSelect, int betweenImagesMin, int betweenSubtitlesMin, int betweenRows, int componentsInRow):
+	components(_components.begin(), _components.end()),
+	onSelect(_onSelect),
+	betweenImagesMin(betweenImagesMin),
+	betweenSubtitlesMin(betweenSubtitlesMin),
+	betweenRows(betweenRows),
+	componentsInRow(componentsInRow)
+{
+	setRedrawParent(true);
+	pos = position + pos.topLeft();
 	placeComponents(true);
 
 	assert(!components.empty());
 
-	int key = SDLK_1;
+	auto key = EShortcut::SELECT_INDEX_1;
 	for(auto & comp : _components)
 	{
 		comp->onSelect = std::bind(&CComponentBox::selectionChanged, this, comp);
-		comp->assignedKeys.insert(key++);
+		comp->assignedKey = key;
+		key = vstd::next(key, 1);
 	}
 	selectionChanged(_components.front());
 }

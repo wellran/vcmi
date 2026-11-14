@@ -9,8 +9,11 @@
  */
 #pragma once
 
-#include "../widgets/CArtifactHolder.h"
-#include "../widgets/CGarrisonInt.h"
+#include "CWindowWithArtifacts.h"
+
+#include "../../lib/mapObjectConstructors/CommonConstructors.h"
+
+class CGObjectInstance;
 
 class CButton;
 class CAnimImage;
@@ -27,6 +30,9 @@ class MoraleLuckBox;
 class CListBox;
 class CTabbedInt;
 class CGStatusBar;
+class CGarrisonInt;
+class CMultiLineLabel;
+class LRClickableAreaWText;
 
 class CKingdHeroList;
 class CKingdTownList;
@@ -73,11 +79,8 @@ public:
 	InfoBox(Point position, InfoPos Pos, InfoSize Size, std::shared_ptr<IInfoBoxData> Data);
 	~InfoBox();
 
-	void clickRight(tribool down, bool previousState) override;
-	void clickLeft(tribool down, bool previousState) override;
-
-	//Update object if data may have changed
-	//void update();
+	void showPopupWindow(const Point & cursorPosition) override;
+	void clickPressed(const Point & cursorPosition) override;
 };
 
 class IInfoBoxData
@@ -101,7 +104,7 @@ public:
 	//methods that generate values for displaying
 	virtual std::string getValueText()=0;
 	virtual std::string getNameText()=0;
-	virtual std::string getImageName(InfoBox::InfoSize size)=0;
+	virtual AnimationPath getImageName(InfoBox::InfoSize size)=0;
 	virtual std::string getHoverText()=0;
 	virtual size_t getImageIndex()=0;
 
@@ -122,7 +125,7 @@ public:
 
 	std::string getValueText() override;
 	std::string getNameText() override;
-	std::string getImageName(InfoBox::InfoSize size) override;
+	AnimationPath getImageName(InfoBox::InfoSize size) override;
 	std::string getHoverText() override;
 	size_t getImageIndex() override;
 
@@ -164,15 +167,15 @@ class InfoBoxCustom : public IInfoBoxData
 public:
 	std::string valueText;
 	std::string nameText;
-	std::string imageName;
+	AnimationPath imageName;
 	std::string hoverText;
 	size_t imageIndex;
 
-	InfoBoxCustom(std::string ValueText, std::string NameText, std::string ImageName, size_t ImageIndex, std::string HoverText="");
+	InfoBoxCustom(std::string ValueText, std::string NameText, const AnimationPath & ImageName, size_t ImageIndex, std::string HoverText="");
 
 	std::string getValueText() override;
 	std::string getNameText() override;
-	std::string getImageName(InfoBox::InfoSize size) override;
+	AnimationPath getImageName(InfoBox::InfoSize size) override;
 	std::string getHoverText() override;
 	size_t getImageIndex() override;
 
@@ -192,18 +195,19 @@ public:
 
 	std::string getValueText() override;
 	std::string getNameText() override;
-	std::string getImageName(InfoBox::InfoSize size) override;
+	AnimationPath getImageName(InfoBox::InfoSize size) override;
 	std::string getHoverText() override;
 	size_t getImageIndex() override;
 };
 
 /// Class which holds all parts of kingdom overview window
-class CKingdomInterface : public CWindowObject, public CGarrisonHolder, public CArtifactHolder
+class CKingdomInterface : public IGarrisonHolder, public CWindowWithArtifacts, public ITownHolder
 {
 private:
 	struct OwnedObjectInfo
 	{
 		int imageID;
+		AnimationPath imagePath;
 		ui32 count;
 		std::string hoverText;
 		OwnedObjectInfo():
@@ -228,6 +232,7 @@ private:
 	std::shared_ptr<CButton> dwellBottom;
 
 	std::array<std::shared_ptr<InfoBox>, 7> minesBox;
+	std::shared_ptr<CSlider> minesSlider;
 
 	std::shared_ptr<CHoverableArea> incomeArea;
 	std::shared_ptr<CLabel> incomeAmount;
@@ -237,10 +242,12 @@ private:
 
 	void activateTab(size_t which);
 
+	std::shared_ptr<MineInstanceConstructor> getMineHandler(const GameResID & res);
+
 	//Internal functions used during construction
 	void generateButtons();
 	void generateObjectsList(const std::vector<const CGObjectInstance * > &ownedObjects);
-	void generateMinesList(const std::vector<const CGObjectInstance * > &ownedObjects);
+	void generateMinesList(const std::vector<const CGObjectInstance * > &ownedObjects, int line);
 
 	std::shared_ptr<CIntObject> createOwnedObject(size_t index);
 	std::shared_ptr<CIntObject> createMainTab(size_t index);
@@ -249,15 +256,14 @@ public:
 	CKingdomInterface();
 
 	void townChanged(const CGTownInstance *town);
+	void heroRemoved();
 	void updateGarrisons() override;
-	void artifactRemoved(const ArtifactLocation &artLoc) override;
-	void artifactMoved(const ArtifactLocation &artLoc, const ArtifactLocation &destLoc) override;
-	void artifactDisassembled(const ArtifactLocation &artLoc) override;
-	void artifactAssembled(const ArtifactLocation &artLoc) override;
+	bool holdsGarrison(const CArmedInstance * army) override;
+	void buildChanged() override;
 };
 
 /// List item with town
-class CTownItem : public CIntObject, public CGarrisonHolder
+class CTownItem : public CIntObject, public IGarrisonHolder
 {
 	std::shared_ptr<CAnimImage> background;
 	std::shared_ptr<CAnimImage> picture;
@@ -272,7 +278,15 @@ class CTownItem : public CIntObject, public CGarrisonHolder
 	std::vector<std::shared_ptr<CCreaInfo>> available;
 	std::vector<std::shared_ptr<CCreaInfo>> growth;
 
+	std::shared_ptr<CMultiLineLabel> labelCreatureAvailable;
+	std::shared_ptr<CMultiLineLabel> labelCreatureGrowth;
+
 	std::shared_ptr<LRClickableAreaOpenTown> openTown;
+
+	std::shared_ptr<CButton> fastTownHall;
+	std::shared_ptr<CButton> fastArmyPurchase;
+	std::shared_ptr<LRClickableArea> fastMarket;
+	std::shared_ptr<LRClickableArea> fastTown;
 
 public:
 	const CGTownInstance * town;
@@ -280,11 +294,12 @@ public:
 	CTownItem(const CGTownInstance * Town);
 
 	void updateGarrisons() override;
+	bool holdsGarrison(const CArmedInstance * army) override;
 	void update();
 };
 
 /// List item with hero
-class CHeroItem : public CIntObject, public CGarrisonHolder
+class CHeroItem : public CIntObject, public IGarrisonHolder
 {
 	const CGHeroInstance * hero;
 
@@ -299,6 +314,8 @@ class CHeroItem : public CIntObject, public CGarrisonHolder
 
 	std::shared_ptr<CToggleGroup> artButtons;
 	std::vector<std::shared_ptr<InfoBox>> heroInfo;
+	std::shared_ptr<CMultiLineLabel> heroInfoFull;
+	std::shared_ptr<LRClickableAreaWText> heroInfoFullArea;
 	std::shared_ptr<MoraleLuckBox> morale;
 	std::shared_ptr<MoraleLuckBox> luck;
 
@@ -309,15 +326,18 @@ class CHeroItem : public CIntObject, public CGarrisonHolder
 	std::shared_ptr<CIntObject> onTabSelected(size_t index);
 
 public:
-	std::shared_ptr<CArtifactsOfHero> heroArts;
+	std::shared_ptr<CArtifactsOfHeroKingdom> heroArts;
 
 	void updateGarrisons() override;
+	bool holdsGarrison(const CArmedInstance * army) override;
+
+	void redraw() override;
 
 	CHeroItem(const CGHeroInstance * hero);
 };
 
 /// Tab with all hero-specific data
-class CKingdHeroList : public CIntObject, public CGarrisonHolder, public CWindowWithArtifacts
+class CKingdHeroList : public CIntObject, public IGarrisonHolder
 {
 private:
 	std::shared_ptr<CListBox> heroes;
@@ -325,15 +345,16 @@ private:
 	std::shared_ptr<CLabel> heroLabel;
 	std::shared_ptr<CLabel> skillsLabel;
 
-	std::shared_ptr<CIntObject> createHeroItem(size_t index);
 public:
-	CKingdHeroList(size_t maxSize);
+	using CreateHeroItemFunctor = std::function<void(const CWindowWithArtifacts::CArtifactsOfHeroPtr)>;
 
+	CKingdHeroList(size_t maxSize, const CreateHeroItemFunctor & onCreateHeroItemCallback);
 	void updateGarrisons() override;
+	bool holdsGarrison(const CArmedInstance * army) override;
 };
 
 /// Tab with all town-specific data
-class CKingdTownList : public CIntObject, public CGarrisonHolder
+class CKingdTownList : public CIntObject, public IGarrisonHolder
 {
 private:
 	std::shared_ptr<CListBox> towns;
@@ -348,4 +369,5 @@ public:
 
 	void townChanged(const CGTownInstance * town);
 	void updateGarrisons() override;
+	bool holdsGarrison(const CArmedInstance * army) override;
 };

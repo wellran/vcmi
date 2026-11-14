@@ -17,9 +17,8 @@
 #include "mock_battle_Unit.h"
 #include "mock_scripting_Pool.h"
 
-#include "../../lib/JsonNode.h"
-#include "../../lib/NetPacksBase.h"
 #include "../../lib/battle/CBattleInfoCallback.h"
+#include "../../lib/gameState/GameStatePackVisitor.h"
 
 namespace test
 {
@@ -52,7 +51,7 @@ class UnitsFake
 public:
 	std::vector<std::shared_ptr<UnitFake>> allUnits;
 
-	UnitFake & add(ui8 side);
+	UnitFake & add(BattleSide side);
 
 	battle::Units getUnitsIf(battle::UnitFilter predicate) const;
 
@@ -61,22 +60,33 @@ public:
 
 class BattleFake : public CBattleInfoCallback, public BattleStateMock
 {
-	std::shared_ptr<scripting::PoolMock> pool;
 public:
-	BattleFake(std::shared_ptr<scripting::PoolMock> pool_);
+	BattleFake();
 	virtual ~BattleFake();
 
 	void setUp();
 
 	void setupEmptyBattlefield();
 
-	scripting::Pool * getContextPool() const override;
+	void setupNativeStacks(const TStacks & stacks, TerrainId terrain);
 
 	template <typename T>
-	void accept(T * pack)
+	void accept(T & pack)
 	{
-		pack->applyBattle(this);
+		BattleStatePackVisitor visitor(*this);
+		pack.visit(visitor);
 	}
+
+	const IBattleInfo * getBattle() const override
+	{
+		return this;
+	}
+
+	std::optional<PlayerColor> getPlayerID() const override
+	{
+		return std::nullopt;
+	}
+
 
 protected:
 

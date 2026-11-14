@@ -11,54 +11,66 @@
 #include "CEmptyAI.h"
 
 #include "../../lib/CRandomGenerator.h"
+#include "../../lib/CStack.h"
+#include "../../lib/battle/BattleAction.h"
+#include "../../lib/battle/CPlayerBattleCallback.h"
+#include "../../lib/callback/CCallback.h"
 
-void CEmptyAI::saveGame(BinarySerializer & h, const int version)
-{
-}
-
-void CEmptyAI::loadGame(BinaryDeserializer & h, const int version)
-{
-}
-
-void CEmptyAI::init(std::shared_ptr<Environment> ENV, std::shared_ptr<CCallback> CB)
+void CEmptyAI::initGameInterface(std::shared_ptr<Environment> ENV, std::shared_ptr<CCallback> CB)
 {
 	cb = CB;
 	env = ENV;
 	human=false;
-	playerID = *cb->getMyColor();
+	playerID = cb->getPlayerID().value();
 }
 
-void CEmptyAI::yourTurn()
+void CEmptyAI::yourTurn(QuestionID questionID)
 {
+	cb->selectionMade(0, questionID);
 	cb->endTurn();
 }
 
-void CEmptyAI::heroGotLevel(const CGHeroInstance *hero, PrimarySkill::PrimarySkill pskill, std::vector<SecondarySkill> &skills, QueryID queryID)
+void CEmptyAI::activeStack(const BattleID & battleID, const CStack * stack)
 {
-	cb->selectionMade(CRandomGenerator::getDefault().nextInt((int)skills.size() - 1), queryID);
+	cb->battleMakeUnitAction(battleID, BattleAction::makeDefend(stack));
 }
 
-void CEmptyAI::commanderGotLevel(const CCommanderInstance * commander, std::vector<ui32> skills, QueryID queryID)
+void CEmptyAI::yourTacticPhase(const BattleID & battleID, int distance)
 {
-	cb->selectionMade(CRandomGenerator::getDefault().nextInt((int)skills.size() - 1), queryID);
+	cb->battleMakeTacticAction(battleID, BattleAction::makeEndOFTacticPhase(cb->getBattle(battleID)->battleGetTacticsSide()));
 }
 
-void CEmptyAI::showBlockingDialog(const std::string &text, const std::vector<Component> &components, QueryID askID, const int soundID, bool selection, bool cancel)
+void CEmptyAI::heroGotLevel(const CGHeroInstance *hero, PrimarySkill pskill, const std::vector<SecondarySkill> &skills, bool moreLevelsFollow, QuestionID questionID)
 {
-	cb->selectionMade(0, askID);
+	cb->selectionMade(CRandomGenerator::getDefault().nextInt((int)skills.size() - 1), questionID);
 }
 
-void CEmptyAI::showTeleportDialog(TeleportChannelID channel, TTeleportExitsList exits, bool impassable, QueryID askID)
+void CEmptyAI::commanderGotLevel(const CCommanderInstance * commander, std::vector<ui32> skills, bool moreLevelsFollow, QuestionID questionID)
 {
-	cb->selectionMade(0, askID);
+	cb->selectionMade(CRandomGenerator::getDefault().nextInt((int)skills.size() - 1), questionID);
 }
 
-void CEmptyAI::showGarrisonDialog(const CArmedInstance *up, const CGHeroInstance *down, bool removableUnits, QueryID queryID)
+void CEmptyAI::showBlockingDialog(const std::string &text, const std::vector<Component> &components, QuestionID questionID, const int soundID, bool selection, bool cancel, bool safeToAutoaccept)
 {
-	cb->selectionMade(0, queryID);
+	cb->selectionMade(0, questionID);
 }
 
-void CEmptyAI::showMapObjectSelectDialog(QueryID askID, const Component & icon, const MetaString & title, const MetaString & description, const std::vector<ObjectInstanceID> & objects)
+void CEmptyAI::showTeleportDialog(const CGHeroInstance * hero, TeleportChannelID channel, TTeleportExitsList exits, bool impassable, QuestionID questionID)
 {
-	cb->selectionMade(0, askID);
+	cb->selectionMade(0, questionID);
+}
+
+void CEmptyAI::showGarrisonDialog(const CArmedInstance * up, const CGHeroInstance * down, QuestionID questionID, const MetaString & customTitle)
+{
+	cb->selectionMade(0, questionID);
+}
+
+void CEmptyAI::showMapObjectSelectDialog(QuestionID questionID, const Component & icon, const MetaString & title, const MetaString & description, const std::vector<ObjectInstanceID> & objects)
+{
+	cb->sendQuestionAnswer(std::nullopt, questionID);
+}
+
+std::optional<BattleAction> CEmptyAI::makeSurrenderRetreatDecision(const BattleID & battleID, const BattleStateInfoForRetreat & battleState)
+{
+	return std::nullopt;
 }

@@ -9,8 +9,8 @@
  */
 #include "StdInc.h"
 
-#include "../../lib/JsonNode.h"
-#include "../../lib/filesystem/ResourceID.h"
+#include "../../lib/json/JsonNode.h"
+#include "../../lib/filesystem/ResourcePath.h"
 
 #include "../../lib/rmg/CRmgTemplate.h"
 
@@ -34,12 +34,13 @@ protected:
 
 	void testLoadSave(const std::string & id, const JsonNode & config)
 	{
-		std::shared_ptr<CRmgTemplate> subject = std::make_shared<CRmgTemplate>();
+		auto subject = std::make_shared<CRmgTemplate>();
 		subject->setId(id);
 
 		{
-			JsonDeserializer handler(nullptr, config);
-			subject->serializeJson(handler);
+			InstantIdentifierResolver resolver(*LIBRARY->identifiers());
+			JsonDeserializer handler(nullptr, resolver, config);
+			subject->serializeJson(handler, *LIBRARY->objtypeh);
 		}
 
 		EXPECT_FALSE(subject->getName().empty());
@@ -71,7 +72,7 @@ protected:
 
 				const auto otherZone = subject->getZones().at(otherZoneId);
 				GTEST_ASSERT_NE(otherZone, nullptr);
-				EXPECT_THAT(thisZone->getTreasureInfo(), ContainerEq(otherZone->getTreasureInfo()));;
+				EXPECT_THAT(thisZone->getTreasureInfo(), ContainerEq(otherZone->getTreasureInfo()));
 			}
 		}
 
@@ -91,7 +92,7 @@ protected:
 
 		{
 			JsonSerializer handler(nullptr, actual);
-			subject->serializeJson(handler);
+			subject->serializeJson(handler, *LIBRARY->objtypeh);
 		}
 
 		JsonComparer cmp(false);
@@ -104,7 +105,7 @@ protected:
 TEST_F(CRmgTemplateTest, SerializeCycle)
 {
 	const std::string testFilePath = TEST_DATA_PATH + "1.json";
-	ResourceID testFileRes(testFilePath);
+	JsonPath testFileRes = JsonPath::builtin(testFilePath);
 	JsonNode testData(testFileRes);
 
 	ASSERT_FALSE((testData.Struct().empty()));

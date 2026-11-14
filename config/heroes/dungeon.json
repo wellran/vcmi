@@ -2,7 +2,7 @@
 	"lorelei":
 	{
 		"index": 80,
-		"class" : "warlock",
+		"class" : "overlord",
 		"female": true,
 		"skills":
 		[
@@ -16,7 +16,7 @@
 	"arlach":
 	{
 		"index": 81,
-		"class" : "warlock",
+		"class" : "overlord",
 		"female": false,
 		"skills":
 		[
@@ -24,13 +24,14 @@
 			{ "skill" : "offence", "level": "basic" }
 		],
 		"specialty" : {
-			"creature" : "ballista"
+			"creature" : "ballista",
+			"creatureLevel" : 5
 		}
 	},
 	"dace":
 	{
 		"index": 82,
-		"class" : "warlock",
+		"class" : "overlord",
 		"female": false,
 		"skills":
 		[
@@ -44,7 +45,7 @@
 	"ajit":
 	{
 		"index": 83,
-		"class" : "warlock",
+		"class" : "overlord",
 		"female": false,
 		"skills":
 		[
@@ -58,7 +59,7 @@
 	"damacon":
 	{
 		"index": 84,
-		"class" : "warlock",
+		"class" : "overlord",
 		"female": false,
 		"skills":
 		[
@@ -67,7 +68,7 @@
 		"specialty" : {
 			"bonuses" : {
 				"gold" : {
-					"subtype" : "resource.gold",
+					"subtype" : "gold",
 					"type" : "GENERATE_RESOURCE",
 					"val" : 350
 				}
@@ -77,7 +78,7 @@
 	"gunnar":
 	{
 		"index": 85,
-		"class" : "warlock",
+		"class" : "overlord",
 		"female": false,
 		"skills":
 		[
@@ -85,21 +86,13 @@
 			{ "skill" : "tactics", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"logistics" : {
-					"subtype" : "skill.logistics",
-					"type" : "SECONDARY_SKILL_PREMY",
-					"updater" : "TIMES_HERO_LEVEL",
-					"val" : 5,
-					"valueType" : "PERCENT_TO_BASE"
-				}
-			}
+			"secondary" : "logistics"
 		}
 	},
 	"synca":
 	{
 		"index": 86,
-		"class" : "warlock",
+		"class" : "overlord",
 		"female": true,
 		"skills":
 		[
@@ -113,7 +106,7 @@
 	"shakti":
 	{
 		"index": 87,
-		"class" : "warlock",
+		"class" : "overlord",
 		"female": false,
 		"skills":
 		[
@@ -127,7 +120,7 @@
 	"alamar":
 	{
 		"index": 88,
-		"class" : "overlord",
+		"class" : "warlock",
 		"spellbook": [ "resurrection" ],
 		"female": false,
 		"skills":
@@ -136,20 +129,13 @@
 			{ "skill" : "scholar", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"resurrection" : {
-					"subtype" : "spell.resurrection",
-					"type" : "SPECIAL_SPELL_LEV",
-					"updater" : "TIMES_HERO_LEVEL",
-					"val" : 3
-				}
-			}
+			"spellScalingPercentage" : "resurrection"
 		}
 	},
 	"jaegar":
 	{
 		"index": 89,
-		"class" : "overlord",
+		"class" : "warlock",
 		"female": false,
 		"spellbook": [ "shield" ],
 		"skills":
@@ -158,13 +144,12 @@
 			{ "skill" : "mysticism", "level": "basic" }
 		],
 		"specialty" : {
+			"secondary" : "mysticism",
 			"bonuses" : {
-				"mysticism" : {
-					"subtype" : "skill.mysticism",
-					"type" : "SECONDARY_SKILL_PREMY",
-					"updater" : "TIMES_HERO_LEVEL",
-					"val" : 5,
-					"valueType" : "PERCENT_TO_BASE"
+				"mysticismExtra" : {
+					"type" : "MANA_REGENERATION",
+					"val" : 1,
+					"valueType" : "ADDITIVE_VALUE"
 				}
 			}
 		}
@@ -172,7 +157,7 @@
 	"malekith":
 	{
 		"index": 90,
-		"class" : "overlord",
+		"class" : "warlock",
 		"female": false,
 		"spellbook": [ "bloodlust" ],
 		"skills":
@@ -181,42 +166,27 @@
 			{ "skill" : "sorcery", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"sorcery" : {
-					"subtype" : "skill.sorcery",
-					"type" : "SECONDARY_SKILL_PREMY",
-					"updater" : "TIMES_HERO_LEVEL",
-					"val" : 5,
-					"valueType" : "PERCENT_TO_BASE"
-				}
-			}
+			"secondary" : "sorcery"
 		}
 	},
 	"jeddite":
 	{
 		"index": 91,
-		"class" : "overlord",
-		"female": true,
+		"class" : "warlock",
+		"female": false,
 		"spellbook": [ "resurrection" ],
 		"skills":
 		[
 			{ "skill" : "wisdom", "level": "advanced" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"resurrection" : {
-					"subtype" : "spell.resurrection",
-					"type" : "SPECIAL_SPELL_LEV",
-					"updater" : "TIMES_HERO_LEVEL",
-					"val" : 3
-				}
-			}
+			"spellScalingPercentage" : "resurrection"
 		}
 	},
 	"geon":
 	{
 		"index": 92,
-		"class" : "overlord",
+		"class" : "warlock",
 		"female": false,
 		"spellbook": [ "slow" ],
 		"skills":
@@ -225,21 +195,13 @@
 			{ "skill" : "eagleEye", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"eagleEye" : {
-					"subtype" : "skill.eagleEye",
-					"type" : "SECONDARY_SKILL_PREMY",
-					"updater" : "TIMES_HERO_LEVEL",
-					"val" : 5,
-					"valueType" : "PERCENT_TO_BASE"
-				}
-			}
+			"secondary" : "eagleEye"
 		}
 	},
 	"deemer":
 	{
 		"index": 93,
-		"class" : "overlord",
+		"class" : "warlock",
 		"female": false,
 		"spellbook": [ "meteorShower" ],
 		"skills":
@@ -248,20 +210,13 @@
 			{ "skill" : "scouting", "level": "advanced" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"meteorShower" : {
-					"subtype" : "spell.meteorShower",
-					"type" : "SPECIAL_SPELL_LEV",
-					"updater" : "TIMES_HERO_LEVEL",
-					"val" : 3
-				}
-			}
+			"spellScalingPercentage" : "meteorShower"
 		}
 	},
 	"sephinroth":
 	{
 		"index": 94,
-		"class" : "overlord",
+		"class" : "warlock",
 		"female": true,
 		"spellbook": [ "protectAir" ],
 		"skills":
@@ -272,7 +227,7 @@
 		"specialty" : {
 			"bonuses" : {
 				"crystal" : {
-					"subtype" : "resource.crystal",
+					"subtype" : "crystal",
 					"type" : "GENERATE_RESOURCE",
 					"val" : 1
 				}
@@ -282,7 +237,7 @@
 	"darkstorn":
 	{
 		"index": 95,
-		"class" : "overlord",
+		"class" : "warlock",
 		"female": false,
 		"spellbook": [ "stoneSkin" ],
 		"skills":
@@ -291,13 +246,7 @@
 			{ "skill" : "learning", "level": "basic" }
 		],
 		"specialty" : {
-			"bonuses" : {
-				"stoneSkin" : {
-					"addInfo" : 0,
-					"subtype" : "spell.stoneSkin",
-					"type" : "SPECIAL_PECULIAR_ENCHANT"
-				}
-			}
+			"spellFixedAdditive" : "stoneSkin"
 		}
 	}
 }

@@ -9,51 +9,73 @@
  */
 #include "StdInc.h"
 #include "CBattleInfoEssentials.h"
+
 #include "../CStack.h"
 #include "BattleInfo.h"
-#include "../NetPacks.h"
+#include "CObstacleInstance.h"
+#include "GameLibrary.h"
+#include "IGameSettings.h"
+
+#include "../callback/CallbackDefines.h"
+#include "../constants/EntityIdentifiers.h"
+#include "../entities/building/TownFortifications.h"
+#include "../gameState/InfoAboutArmy.h"
 #include "../mapObjects/CGTownInstance.h"
 
-ETerrainType CBattleInfoEssentials::battleTerrainType() const
+bool CBattleInfoEssentials::duringBattle() const
 {
-	RETURN_IF_NOT_BATTLE(ETerrainType::WRONG);
+	return getBattle() != nullptr;
+}
+
+TerrainId CBattleInfoEssentials::battleTerrainType() const
+{
+	THROW_IF_NOT_BATTLE();
 	return getBattle()->getTerrainType();
 }
 
-BFieldType CBattleInfoEssentials::battleGetBattlefieldType() const
+BattleField CBattleInfoEssentials::battleGetBattlefieldType() const
 {
-	RETURN_IF_NOT_BATTLE(BFieldType::NONE);
+	THROW_IF_NOT_BATTLE();
 	return getBattle()->getBattlefieldType();
 }
 
-int32_t CBattleInfoEssentials::battleGetEnchanterCounter(ui8 side) const
+int32_t CBattleInfoEssentials::battleGetEnchanterCounter(BattleSide side) const
 {
-	RETURN_IF_NOT_BATTLE(0);
+	THROW_IF_NOT_BATTLE();
 	return getBattle()->getEnchanterCounter(side);
 }
 
-std::vector<std::shared_ptr<const CObstacleInstance>> CBattleInfoEssentials::battleGetAllObstacles(boost::optional<BattlePerspective::BattlePerspective> perspective) const
+int32_t CBattleInfoEssentials::nextObstacleId() const
+{
+	int32_t maxId = -1;
+	for (const auto & obstacle : getBattle()->getAllObstacles())
+	{
+		if (obstacle->uniqueID > maxId)
+			maxId = obstacle->uniqueID;
+	}
+	return maxId + 1;
+}
+
+std::vector<std::shared_ptr<const CObstacleInstance>> CBattleInfoEssentials::battleGetAllObstacles(std::optional<BattleSide> perspective) const
 {
 	std::vector<std::shared_ptr<const CObstacleInstance> > ret;
-	RETURN_IF_NOT_BATTLE(ret);
+	THROW_IF_NOT_BATTLE();
 
 	if(!perspective)
 	{
 		//if no particular perspective request, use default one
-		perspective = boost::make_optional(battleGetMySide());
+		perspective = std::make_optional(battleGetMySide());
 	}
 	else
 	{
-		if(!!player && *perspective != battleGetMySide())
-		{
-			logGlobal->error("Unauthorized obstacles access attempt!");
-			return ret;
-		}
+		// all-knowing view is allowed, since spells such as Remove Obstacle can target obstacles hidden from caster
+		if(!!getPlayerID() && *perspective != battleGetMySide() && *perspective != BattleSide::ALL_KNOWING)
+			THROW_INVALID_CALL();
 	}
 
-	for(auto obstacle : getBattle()->getAllObstacles())
+	for(const auto & obstacle : getBattle()->getAllObstacles())
 	{
-		if(battleIsObstacleVisibleForSide(*(obstacle.get()), *perspective))
+		if(battleIsObstacleVisibleForSide(*(obstacle), *perspective))
 			ret.push_back(obstacle);
 	}
 
@@ -64,7 +86,7 @@ std::shared_ptr<const CObstacleInstance> CBattleInfoEssentials::battleGetObstacl
 {
 	std::shared_ptr<const CObstacleInstance> ret;
 
-	RETURN_IF_NOT_BATTLE(std::shared_ptr<const CObstacleInstance>());
+	THROW_IF_NOT_BATTLE();
 
 	for(auto obstacle : getBattle()->getAllObstacles())
 	{
@@ -72,23 +94,22 @@ std::shared_ptr<const CObstacleInstance> CBattleInfoEssentials::battleGetObstacl
 			return obstacle;
 	}
 
-	logGlobal->error("Invalid obstacle ID %d", ID);
-	return std::shared_ptr<const CObstacleInstance>();
+	THROW_INVALID_CALL();
 }
 
-bool CBattleInfoEssentials::battleIsObstacleVisibleForSide(const CObstacleInstance & coi, BattlePerspective::BattlePerspective side) const
+bool CBattleInfoEssentials::battleIsObstacleVisibleForSide(const CObstacleInstance & coi, BattleSide side) const
 {
-	RETURN_IF_NOT_BATTLE(false);
-	return side == BattlePerspective::ALL_KNOWING || coi.visibleForSide(side, battleHasNativeStack(side));
+	THROW_IF_NOT_BATTLE();
+	return side == BattleSide::ALL_KNOWING || coi.visibleForSide(side, battleHasNativeStack(side));
 }
 
-bool CBattleInfoEssentials::battleHasNativeStack(ui8 side) const
+bool CBattleInfoEssentials::battleHasNativeStack(BattleSide side) const
 {
-	RETURN_IF_NOT_BATTLE(false);
+	THROW_IF_NOT_BATTLE();
 
-	for(const CStack * s : battleGetAllStacks())
+	for(const auto * s : battleGetAllStacks())
 	{
-		if(s->side == side && s->getCreature()->isItNativeTerrain(getBattle()->getTerrainType()))
+		if(s->unitSide() == side && s->isNativeTerrain(getBattle()->getTerrainType()))
 			return true;
 	}
 
@@ -103,21 +124,29 @@ TStacks CBattleInfoEssentials::battleGetAllStacks(bool includeTurrets) const
 	});
 }
 
-TStacks CBattleInfoEssentials::battleGetStacksIf(TStackFilter predicate) const
+battle::Units CBattleInfoEssentials::battleGetAllUnits(bool includeTurrets) const
 {
-	RETURN_IF_NOT_BATTLE(TStacks());
-	return getBattle()->getStacksIf(predicate);
+	return battleGetUnitsIf([includeTurrets](const battle::Unit * unit)
+	{
+		return !unit->isGhost() && (includeTurrets || !unit->isTurret());
+	});
 }
 
-battle::Units CBattleInfoEssentials::battleGetUnitsIf(battle::UnitFilter predicate)  const
+TStacks CBattleInfoEssentials::battleGetStacksIf(const TStackFilter & predicate) const
 {
-	RETURN_IF_NOT_BATTLE(battle::Units());
+	THROW_IF_NOT_BATTLE();
+	return getBattle()->getStacksIf(std::move(predicate));
+}
+
+battle::Units CBattleInfoEssentials::battleGetUnitsIf(const battle::UnitFilter & predicate)  const
+{
+	THROW_IF_NOT_BATTLE();
 	return getBattle()->getUnitsIf(predicate);
 }
 
 const battle::Unit * CBattleInfoEssentials::battleGetUnitByID(uint32_t ID) const
 {
-	RETURN_IF_NOT_BATTLE(nullptr);
+	THROW_IF_NOT_BATTLE();
 
 	//TODO: consider using map ID -> Unit
 
@@ -134,7 +163,7 @@ const battle::Unit * CBattleInfoEssentials::battleGetUnitByID(uint32_t ID) const
 
 const battle::Unit * CBattleInfoEssentials::battleActiveUnit() const
 {
-	RETURN_IF_NOT_BATTLE(nullptr);
+	THROW_IF_NOT_BATTLE();
 	auto id = getBattle()->getActiveStackID();
 	if(id >= 0)
 		return battleGetUnitByID(static_cast<uint32_t>(id));
@@ -149,32 +178,53 @@ uint32_t CBattleInfoEssentials::battleNextUnitId() const
 
 const CGTownInstance * CBattleInfoEssentials::battleGetDefendedTown() const
 {
-	RETURN_IF_NOT_BATTLE(nullptr);
+	THROW_IF_NOT_BATTLE();
 
 	return getBattle()->getDefendedTown();
 }
 
-BattlePerspective::BattlePerspective CBattleInfoEssentials::battleGetMySide() const
+bool CBattleInfoEssentials::hasFortifications() const
 {
-	RETURN_IF_NOT_BATTLE(BattlePerspective::INVALID);
-	if(!player || player.get().isSpectator())
-		return BattlePerspective::ALL_KNOWING;
-	if(*player == getBattle()->getSidePlayer(BattleSide::ATTACKER))
-		return BattlePerspective::LEFT_SIDE;
-	if(*player == getBattle()->getSidePlayer(BattleSide::DEFENDER))
-		return BattlePerspective::RIGHT_SIDE;
+	const auto * town = battleGetDefendedTown();
+	return town != nullptr && town->fortificationsLevel().wallsHealth > 0;
+}
 
-	logGlobal->error("Cannot find player %s in battle!", player->getStr());
-	return BattlePerspective::INVALID;
+bool CBattleInfoEssentials::hasMoat() const
+{
+	return battleGetFortifications().hasMoat;
+}
+
+BattleHex CBattleInfoEssentials::getTowerShooterHex(EWallPart part) const
+{
+	switch(part)
+	{
+		case EWallPart::KEEP:         return BattleHex(BattleHex::CASTLE_CENTRAL_TOWER);
+		case EWallPart::BOTTOM_TOWER: return BattleHex(BattleHex::CASTLE_BOTTOM_TOWER);
+		case EWallPart::UPPER_TOWER:  return BattleHex(BattleHex::CASTLE_UPPER_TOWER);
+		default:                      return BattleHex(BattleHex::INVALID);
+	}
+}
+
+BattleSide CBattleInfoEssentials::battleGetMySide() const
+{
+	THROW_IF_NOT_BATTLE();
+	if(!getPlayerID() || getPlayerID().value().isSpectator())
+		return BattleSide::ALL_KNOWING;
+	if(getPlayerID().value() == getBattle()->getSidePlayer(BattleSide::ATTACKER))
+		return BattleSide::LEFT_SIDE;
+	if(getPlayerID().value() == getBattle()->getSidePlayer(BattleSide::DEFENDER))
+		return BattleSide::RIGHT_SIDE;
+
+	THROW_INVALID_CALL();
 }
 
 const CStack* CBattleInfoEssentials::battleGetStackByID(int ID, bool onlyAlive) const
 {
-	RETURN_IF_NOT_BATTLE(nullptr);
+	THROW_IF_NOT_BATTLE();
 
 	auto stacks = battleGetStacksIf([=](const CStack * s)
 	{
-		return s->ID == ID && (!onlyAlive || s->alive());
+		return s->unitId() == ID && (!onlyAlive || s->alive());
 	});
 
 	if(stacks.empty())
@@ -183,131 +233,135 @@ const CStack* CBattleInfoEssentials::battleGetStackByID(int ID, bool onlyAlive) 
 		return stacks[0];
 }
 
-bool CBattleInfoEssentials::battleDoWeKnowAbout(ui8 side) const
+bool CBattleInfoEssentials::battleDoWeKnowAbout(BattleSide side) const
 {
-	RETURN_IF_NOT_BATTLE(false);
+	THROW_IF_NOT_BATTLE();
 	auto p = battleGetMySide();
-	return p == BattlePerspective::ALL_KNOWING || p == side;
+	return p == BattleSide::ALL_KNOWING || p == side;
 }
 
 si8 CBattleInfoEssentials::battleTacticDist() const
 {
-	RETURN_IF_NOT_BATTLE(0);
+	THROW_IF_NOT_BATTLE();
 	return getBattle()->getTacticDist();
 }
 
-si8 CBattleInfoEssentials::battleGetTacticsSide() const
+BattleSide CBattleInfoEssentials::battleGetTacticsSide() const
 {
-	RETURN_IF_NOT_BATTLE(-1);
+	THROW_IF_NOT_BATTLE();
 	return getBattle()->getTacticsSide();
 }
 
-const CGHeroInstance * CBattleInfoEssentials::battleGetFightingHero(ui8 side) const
+int32_t CBattleInfoEssentials::battleGetRound() const
 {
-	RETURN_IF_NOT_BATTLE(nullptr);
-	if(side > 1)
-	{
-		logGlobal->error("FIXME: %s wrong argument!", __FUNCTION__);
-		return nullptr;
-	}
+	THROW_IF_NOT_BATTLE();
+	return getBattle()->getRound();
+}
+
+const CGHeroInstance * CBattleInfoEssentials::battleGetFightingHero(BattleSide side) const
+{
+	THROW_IF_NOT_BATTLE();
+	if(side != BattleSide::DEFENDER && side != BattleSide::ATTACKER)
+		THROW_INVALID_CALL();
 
 	if(!battleDoWeKnowAbout(side))
-	{
-		logGlobal->error("FIXME: %s access check ", __FUNCTION__);
-		return nullptr;
-	}
+		THROW_INVALID_CALL();
 
 	return getBattle()->getSideHero(side);
 }
 
-const CArmedInstance * CBattleInfoEssentials::battleGetArmyObject(ui8 side) const
+const CArmedInstance * CBattleInfoEssentials::battleGetArmyObject(BattleSide side) const
 {
-	RETURN_IF_NOT_BATTLE(nullptr);
-	if(side > 1)
-	{
-		logGlobal->error("FIXME: %s wrong argument!", __FUNCTION__);
-		return nullptr;
-	}
+	THROW_IF_NOT_BATTLE();
+	if(side != BattleSide::DEFENDER && side != BattleSide::ATTACKER)
+		THROW_INVALID_CALL();
+
 	if(!battleDoWeKnowAbout(side))
-	{
-		logGlobal->error("FIXME: %s access check!", __FUNCTION__);
-		return nullptr;
-	}
+		THROW_INVALID_CALL();
+
 	return getBattle()->getSideArmy(side);
 }
 
-InfoAboutHero CBattleInfoEssentials::battleGetHeroInfo(ui8 side) const
+InfoAboutHero CBattleInfoEssentials::battleGetHeroInfo(BattleSide side) const
 {
-	auto hero = getBattle()->getSideHero(side);
+	THROW_IF_NOT_BATTLE();
+	const auto * hero = getBattle()->getSideHero(side);
 	if(!hero)
 	{
 		return InfoAboutHero();
 	}
-	InfoAboutHero::EInfoLevel infoLevel = battleDoWeKnowAbout(side) ? InfoAboutHero::EInfoLevel::DETAILED : InfoAboutHero::EInfoLevel::BASIC;
-	return InfoAboutHero(hero, infoLevel);
+	//stats of both heroes are visible to everyone in battle
+	return InfoAboutHero(hero, InfoAboutHero::EInfoLevel::INBATTLE);
 }
 
-uint32_t CBattleInfoEssentials::battleCastSpells(ui8 side) const
+int32_t CBattleInfoEssentials::battleCastSpells(BattleSide side) const
 {
-	RETURN_IF_NOT_BATTLE(-1);
+	THROW_IF_NOT_BATTLE();
 	return getBattle()->getCastSpells(side);
 }
 
-const IBonusBearer * CBattleInfoEssentials::getBattleNode() const
+const IBonusBearer * CBattleInfoEssentials::getBonusBearer() const
 {
-	return getBattle()->asBearer();
+	return getBattle()->getBonusBearer();
 }
 
-bool CBattleInfoEssentials::battleCanFlee(PlayerColor player) const
+int CBattleInfoEssentials::battleGetRetreatPermission(BattleSide side, BonusType permission) const
 {
-	RETURN_IF_NOT_BATTLE(false);
-	const auto side = playerToSide(player);
-	if(!side)
-		return false;
+	const CGHeroInstance * myHero = battleGetFightingHero(side);
+	const bool enemyHasHero = battleHasHero(otherSide(side));
+	int result = 0;
 
-	const CGHeroInstance *myHero = battleGetFightingHero(side.get());
+	//blockers such as shackles of war have nobody to enforce them if enemy army has no hero
+	for(const auto & bonus : *myHero->getBonusesOfType(permission))
+		if(enemyHasHero || bonus->val > 0)
+			result += bonus->val;
 
-	//current player have no hero
-	if(!myHero)
-		return false;
+	//we are besieged defender, town buildings decide - village hall locks us in, escape tunnel provides a way out
+	if(side == BattleSide::DEFENDER && battleGetDefendedTown() != nullptr)
+		result += battleGetDefendedTown()->valOfBonuses(permission);
 
-	//eg. one of heroes is wearing shakles of war
-	if(myHero->hasBonusOfType(Bonus::BATTLE_NO_FLEEING))
-		return false;
+	//cannot leave after casting spell in X first turns as attacker
+	if(getBattle()->getRound() <= LIBRARY->engineSettings()->getInteger(EGameSettings::COMBAT_NO_SPELL_HIT_AND_RUN_ROUNDS)
+		&& side == BattleSide::ATTACKER && enemyHasHero && getBattle()->getCastSpells(side) >= 1)
+		result -= GameConstants::BATTLE_RETREAT_RESTRICTION;
 
-	//we are besieged defender
-	if(side.get() == BattleSide::DEFENDER && battleGetSiegeLevel())
-	{
-		auto town = battleGetDefendedTown();
-		if(!town->hasBuilt(BuildingSubID::ESCAPE_TUNNEL))
-			return false;
-	}
-
-	return true;
+	return result;
 }
 
-BattleSideOpt CBattleInfoEssentials::playerToSide(PlayerColor player) const
+bool CBattleInfoEssentials::battleCanFlee(const PlayerColor & player) const
 {
-	RETURN_IF_NOT_BATTLE(boost::none);
+	THROW_IF_NOT_BATTLE();
+	const BattleSide side = playerToSide(player);
+	if(side == BattleSide::NONE)
+		return false;
+
+	//current player has no hero
+	if(!battleGetFightingHero(side))
+		return false;
+
+	return battleGetRetreatPermission(side, BonusType::BATTLE_CAN_FLEE) >= 0;
+}
+
+BattleSide CBattleInfoEssentials::playerToSide(const PlayerColor & player) const
+{
+	THROW_IF_NOT_BATTLE();
 
 	if(getBattle()->getSidePlayer(BattleSide::ATTACKER) == player)
-		return BattleSideOpt(BattleSide::ATTACKER);
+		return BattleSide::ATTACKER;
 
 	if(getBattle()->getSidePlayer(BattleSide::DEFENDER) == player)
-		return BattleSideOpt(BattleSide::DEFENDER);
+		return BattleSide::DEFENDER;
 
-	logGlobal->warn("Cannot find side for player %s", player.getStr());
-
-	return boost::none;
+	THROW_INVALID_CALL();
 }
 
-PlayerColor CBattleInfoEssentials::sideToPlayer(ui8 side) const
+PlayerColor CBattleInfoEssentials::sideToPlayer(BattleSide side) const
 {
-	RETURN_IF_NOT_BATTLE(PlayerColor::CANNOT_DETERMINE);
-    return getBattle()->getSidePlayer(side);
+	THROW_IF_NOT_BATTLE();
+	return getBattle()->getSidePlayer(side);
 }
 
-ui8 CBattleInfoEssentials::otherSide(ui8 side) const
+BattleSide CBattleInfoEssentials::otherSide(BattleSide side)
 {
 	if(side == BattleSide::ATTACKER)
 		return BattleSide::DEFENDER;
@@ -315,57 +369,67 @@ ui8 CBattleInfoEssentials::otherSide(ui8 side) const
 		return BattleSide::ATTACKER;
 }
 
-PlayerColor CBattleInfoEssentials::otherPlayer(PlayerColor player) const
+PlayerColor CBattleInfoEssentials::otherPlayer(const PlayerColor & player) const
 {
-	RETURN_IF_NOT_BATTLE(PlayerColor::CANNOT_DETERMINE);
+	THROW_IF_NOT_BATTLE();
 
 	auto side = playerToSide(player);
-    if(!side)
+	if(side == BattleSide::NONE)
 		return PlayerColor::CANNOT_DETERMINE;
 
-	return getBattle()->getSidePlayer(otherSide(side.get()));
+	return getBattle()->getSidePlayer(otherSide(side));
 }
 
-bool CBattleInfoEssentials::playerHasAccessToHeroInfo(PlayerColor player, const CGHeroInstance * h) const
+bool CBattleInfoEssentials::playerHasAccessToHeroInfo(const PlayerColor & player, const CGHeroInstance * h) const
 {
-	RETURN_IF_NOT_BATTLE(false);
+	THROW_IF_NOT_BATTLE();
 	const auto side = playerToSide(player);
-	if(side)
+	if(side != BattleSide::NONE)
 	{
-		auto opponentSide = otherSide(side.get());
+		auto opponentSide = otherSide(side);
 		if(getBattle()->getSideHero(opponentSide) == h)
 			return true;
 	}
 	return false;
 }
 
-ui8 CBattleInfoEssentials::battleGetSiegeLevel() const
+TownFortifications CBattleInfoEssentials::battleGetFortifications() const
 {
-	RETURN_IF_NOT_BATTLE(CGTownInstance::NONE);
-	return getBattle()->getDefendedTown() ? getBattle()->getDefendedTown()->fortLevel() : CGTownInstance::NONE;
+	THROW_IF_NOT_BATTLE();
+	return getBattle()->getDefendedTown() ? getBattle()->getDefendedTown()->fortificationsLevel() : TownFortifications();
 }
 
-bool CBattleInfoEssentials::battleCanSurrender(PlayerColor player) const
+bool CBattleInfoEssentials::battleCanSurrender(const PlayerColor & player) const
 {
-	RETURN_IF_NOT_BATTLE(false);
+	THROW_IF_NOT_BATTLE();
 	const auto side = playerToSide(player);
-	if(!side)
+	if(side == BattleSide::NONE)
 		return false;
-	bool iAmSiegeDefender = (side.get() == BattleSide::DEFENDER && battleGetSiegeLevel());
-	//conditions like for fleeing (except escape tunnel presence) + enemy must have a hero
-	return battleCanFlee(player) && !iAmSiegeDefender && battleHasHero(otherSide(side.get()));
+
+	//current player has no hero
+	if(!battleGetFightingHero(side))
+		return false;
+
+	int permission = battleGetRetreatPermission(side, BonusType::BATTLE_CAN_SURRENDER);
+
+	//enemy must have a hero to negotiate the surrender with
+	if(!battleHasHero(otherSide(side)))
+		permission -= GameConstants::BATTLE_RETREAT_RESTRICTION;
+
+	//hero that is not allowed to retreat can not surrender either
+	return permission >= 0 && battleCanFlee(player);
 }
 
-bool CBattleInfoEssentials::battleHasHero(ui8 side) const
+bool CBattleInfoEssentials::battleHasHero(BattleSide side) const
 {
-	RETURN_IF_NOT_BATTLE(false);
+	THROW_IF_NOT_BATTLE();
 	return getBattle()->getSideHero(side) != nullptr;
 }
 
-si8 CBattleInfoEssentials::battleGetWallState(int partOfWall) const
+EWallState CBattleInfoEssentials::battleGetWallState(EWallPart partOfWall) const
 {
-	RETURN_IF_NOT_BATTLE(EWallState::NONE);
-	if(battleGetSiegeLevel() == CGTownInstance::NONE)
+	THROW_IF_NOT_BATTLE();
+	if(battleGetFortifications().wallsHealth == 0)
 		return EWallState::NONE;
 
 	return getBattle()->getWallState(partOfWall);
@@ -373,23 +437,29 @@ si8 CBattleInfoEssentials::battleGetWallState(int partOfWall) const
 
 EGateState CBattleInfoEssentials::battleGetGateState() const
 {
-	RETURN_IF_NOT_BATTLE(EGateState::NONE);
-	if(battleGetSiegeLevel() == CGTownInstance::NONE)
+	THROW_IF_NOT_BATTLE();
+	if(battleGetFortifications().wallsHealth == 0)
 		return EGateState::NONE;
 
 	return getBattle()->getGateState();
 }
 
+bool CBattleInfoEssentials::battleIsGatePassable() const
+{
+	THROW_IF_NOT_BATTLE();
+	if(battleGetFortifications().wallsHealth == 0)
+		return true;
+
+	return battleGetGateState() == EGateState::OPENED || battleGetGateState() == EGateState::DESTROYED; 
+}
+
 PlayerColor CBattleInfoEssentials::battleGetOwner(const battle::Unit * unit) const
 {
-	RETURN_IF_NOT_BATTLE(PlayerColor::CANNOT_DETERMINE);
+	THROW_IF_NOT_BATTLE();
 
 	PlayerColor initialOwner = getBattle()->getSidePlayer(unit->unitSide());
 
-	static CSelector selector = Selector::type()(Bonus::HYPNOTIZED);
-	static std::string cachingString = "type_103s-1";
-
-	if(unit->hasBonus(selector, cachingString))
+	if(unit->isHypnotized())
 		return otherPlayer(initialOwner);
 	else
 		return initialOwner;
@@ -397,29 +467,27 @@ PlayerColor CBattleInfoEssentials::battleGetOwner(const battle::Unit * unit) con
 
 const CGHeroInstance * CBattleInfoEssentials::battleGetOwnerHero(const battle::Unit * unit) const
 {
-	RETURN_IF_NOT_BATTLE(nullptr);
+	THROW_IF_NOT_BATTLE();
 	const auto side = playerToSide(battleGetOwner(unit));
-	if(!side)
+	if(side == BattleSide::NONE)
 		return nullptr;
-	return getBattle()->getSideHero(side.get());
+	return getBattle()->getSideHero(side);
 }
 
-bool CBattleInfoEssentials::battleMatchOwner(const battle::Unit * attacker, const battle::Unit * defender, const boost::logic::tribool positivness) const
+bool CBattleInfoEssentials::battleMatchOwner(const battle::Unit * attacker, const battle::Unit * defender, const bool sameOwner) const
 {
-	RETURN_IF_NOT_BATTLE(false);
-	if(boost::logic::indeterminate(positivness))
-		return true;
-	else if(attacker->unitId() == defender->unitId())
-		return (bool)positivness;
+	THROW_IF_NOT_BATTLE();
+	if(attacker->unitId() == defender->unitId())
+		return sameOwner;
 	else
-		return battleMatchOwner(battleGetOwner(attacker), defender, positivness);
+		return battleMatchOwner(battleGetOwner(attacker), defender, sameOwner);
 }
 
-bool CBattleInfoEssentials::battleMatchOwner(const PlayerColor & attacker, const battle::Unit * defender, const boost::logic::tribool positivness) const
+bool CBattleInfoEssentials::battleMatchOwner(const PlayerColor & attacker, const battle::Unit * defender, const bool sameOwner) const
 {
-	RETURN_IF_NOT_BATTLE(false);
+	THROW_IF_NOT_BATTLE();
 
 	PlayerColor initialOwner = getBattle()->getSidePlayer(defender->unitSide());
 
-	return boost::logic::indeterminate(positivness) || (attacker == initialOwner) == (bool)positivness;
+	return (attacker == initialOwner) == sameOwner;
 }

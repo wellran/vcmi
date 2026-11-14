@@ -11,7 +11,6 @@
 #pragma once
 
 #include "CMapService.h"
-#include "../JsonNode.h"
 
 #include "../filesystem/CZipSaver.h"
 #include "../filesystem/CZipLoader.h"
@@ -24,6 +23,9 @@ struct TerrainTile;
 struct PlayerInfo;
 class CGObjectInstance;
 class AObjectTypeHandler;
+class TerrainType;
+class RoadType;
+class RiverType;
 
 class JsonSerializeFormat;
 class JsonDeserializer;
@@ -37,6 +39,11 @@ public:
 
 	static const std::string HEADER_FILE_NAME;
 	static const std::string OBJECTS_FILE_NAME;
+	static const std::string SCRIPT_FILE_NAME;
+	static const std::string TERRAIN_FILE_NAMES[2];
+
+	/// Removes "map.<mapName>." prefix from translation keys
+	static std::string removeMapNamePrefix(const std::string & fullIdentifier);
 
 	int fileVersionMajor;
 	int fileVersionMinor;
@@ -52,10 +59,18 @@ protected:
 	 * (when loading map and mapHeader point to the same object)
 	 */
 	CMapHeader * mapHeader;
+	
+	std::string mapName; ///< name of the map file (for translations, same as H3M)
 
 	CMapFormatJson();
 
-	void serializeAllowedFactions(JsonSerializeFormat & handler, std::set<TFaction> & value);
+	static TerrainId getTerrainByCode(const std::string & code);
+	static RiverId getRiverByCode(const std::string & code);
+	static RoadId getRoadByCode(const std::string & code);
+
+	void fixStringsTextIDInJson(JsonNode & node, const std::string & mapPrefix, bool remove) const;
+
+	void serializeAllowedFactions(JsonSerializeFormat & handler, std::set<FactionID> & value) const;
 
 	///common part of header saving/loading
 	void serializeHeader(JsonSerializeFormat & handler);
@@ -86,12 +101,12 @@ protected:
 	/**
 	 * Reads one of triggered events
 	 */
-	void readTriggeredEvent(TriggeredEvent & event, const JsonNode & source);
+	void readTriggeredEvent(TriggeredEvent & event, const JsonNode & source) const;
 
 	/**
 	 * Writes one of triggered events
 	 */
-	void writeTriggeredEvent(const TriggeredEvent & event, JsonNode & dest);
+	void writeTriggeredEvent(const TriggeredEvent & event, JsonNode & dest) const;
 
 	void writeDisposedHeroes(JsonSerializeFormat & handler);
 
@@ -100,6 +115,8 @@ protected:
 	void serializePredefinedHeroes(JsonSerializeFormat & handler);
 
 	void serializeRumors(JsonSerializeFormat & handler);
+	
+	void serializeTimedEvents(JsonSerializeFormat & handler);
 
 	///common part of map attributes saving/loading
 	void serializeOptions(JsonSerializeFormat & handler);
@@ -115,7 +132,7 @@ protected:
 	void writeOptions(JsonSerializer & handler);
 };
 
-class DLL_LINKAGE CMapPatcher : public CMapFormatJson, public IMapPatcher
+class CMapPatcher : public CMapFormatJson, public IMapPatcher
 {
 public:
 	/**
@@ -123,7 +140,7 @@ public:
 	 *
 	 * @param stream. A stream containing the map data.
 	 */
-	CMapPatcher(JsonNode stream);
+	CMapPatcher(const JsonNode & stream);
 
 public: //IMapPatcher
 	/**
@@ -141,22 +158,23 @@ private:
 	JsonNode input;
 };
 
-class DLL_LINKAGE CMapLoaderJson : public CMapFormatJson, public IMapLoader
+class CMapLoaderJson : public CMapFormatJson, public IMapLoader
 {
 public:
 	/**
 	 * Constructor.
 	 *
 	 * @param stream a stream containing the map data
+	 * @param mapName name of the map file (for external translations)
 	 */
-	CMapLoaderJson(CInputStream * stream);
+	CMapLoaderJson(CInputStream * stream, const std::string & mapName = "");
 
 	/**
 	 * Loads the VCMI/Json map file.
 	 *
 	 * @return a unique ptr of the loaded map class
 	 */
-	std::unique_ptr<CMap> loadMap() override;
+	std::unique_ptr<CMap> loadMap(IGameInfoCallback * cb) override;
 
 	/**
 	 * Loads the VCMI/Json map header.
@@ -165,11 +183,17 @@ public:
 	 */
 	std::unique_ptr<CMapHeader> loadMapHeader() override;
 
+	/**
+	 * Set whether map loading is performed by map editor (affects TextID handling)
+	 */
+	void setRunningInMapEditor(bool val);
+
 	struct MapObjectLoader
 	{
 		MapObjectLoader(CMapLoaderJson * _owner, JsonMap::value_type & json);
+		MapObjectLoader(CMapLoaderJson * _owner, JsonVector::value_type & json);
 		CMapLoaderJson * owner;
-		CGObjectInstance * instance;
+		std::shared_ptr<CGObjectInstance> instance;
 		ObjectInstanceID id;
 		std::string jsonKey;//full id defined by map creator
 		JsonNode & configuration;
@@ -190,6 +214,11 @@ public:
 	 * Reads complete map.
 	 */
 	void readMap();
+	
+	/**
+	 * Reads texts and translations
+	 */
+	void readTranslations();
 
 	static void readTerrainTile(const std::string & src, TerrainTile & tile);
 
@@ -202,6 +231,10 @@ public:
 	 */
 	void readObjects();
 
+	/// Loads the map's `script.lua` archive entry, if present, into map->scriptSource.
+	void readScript();
+
+	bool isExistArchive(const std::string & archiveFilename);
 	JsonNode getFromArchive(const std::string & archiveFilename);
 
 private:
@@ -209,6 +242,8 @@ private:
 	std::shared_ptr<CIOApi> ioApi;
 
 	CZipLoader loader;///< object to handle zip archive operations
+
+	bool runningInMapEditor = false; ///< local flag replacing global isRunningInMapEditor
 };
 
 class DLL_LINKAGE CMapSaverJson : public CMapFormatJson, public IMapSaver
@@ -237,6 +272,11 @@ public:
 	 * Saves header to zip archive
 	 */
 	void writeHeader();
+	
+	/**
+	 * Saves texts and translations to zip archive
+	 */
+	void writeTranslations();
 
 	/**
 	 * Encodes one tile into string
@@ -259,6 +299,9 @@ public:
 	 * Saves all map objects into zip archive
 	 */
 	void writeObjects();
+
+	/// Saves map->scriptSource as the `script.lua` archive entry, if non-empty.
+	void writeScript();
 
 private:
 	CInputOutputStream * buffer;

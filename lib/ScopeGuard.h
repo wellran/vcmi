@@ -31,11 +31,12 @@ namespace vstd
 
 		explicit ScopeGuard(Func && f):
 			fire(true),
-			f(std::forward<Func>(f))
+			f(std::move(f))
 		{}
 		~ScopeGuard()
 		{
-			f();
+			if(fire)
+				f();
 		}
 	};
 

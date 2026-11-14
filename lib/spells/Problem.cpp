@@ -8,33 +8,25 @@
  *
  */
 #include "StdInc.h"
-
 #include "Problem.h"
+
+#include "../GameLibrary.h"
+#include "../texts/MetaString.h"
 
 namespace spells
 {
 namespace detail
 {
 
-ProblemImpl::ProblemImpl()
-{
-
-}
-
-ProblemImpl::~ProblemImpl()
-{
-
-}
-
 void ProblemImpl::add(MetaString && description, Severity severity)
 {
-	data.push_back(std::make_pair(description, severity));
+	data.emplace_back(description, severity);
 }
 
 void ProblemImpl::getAll(std::vector<std::string> & target) const
 {
 	for(const auto & p : data)
-		target.push_back(p.first.toString());
+		target.push_back(p.first.toString(LIBRARY->staticTexts()));
 }
 
 //void ProblemImpl::getMostSevere(std::vector<std::string> & target) const

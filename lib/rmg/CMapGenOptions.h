@@ -11,48 +11,25 @@
 #pragma once
 
 #include "../GameConstants.h"
-#include "../CRandomGenerator.h"
+#include "../serializer/Serializeable.h"
+#include "../texts/MetaString.h"
+#include "CRmgTemplate.h"
 
-class CRmgTemplate;
-
-namespace EWaterContent
+namespace vstd
 {
-	enum EWaterContent
-	{
-		RANDOM = -1,
-		NONE,
-		NORMAL,
-		ISLANDS
-	};
+class RNG;
 }
 
-namespace EMonsterStrength
+enum class EPlayerType
 {
-	enum EMonsterStrength
-	{
-		RANDOM = -2,
-		ZONE_WEAK = -1,
-		ZONE_NORMAL = 0,
-		ZONE_STRONG = 1,
-		GLOBAL_WEAK = 2,
-		GLOBAL_NORMAL = 3,
-		GLOBAL_STRONG = 4
-	};
-}
-
-namespace EPlayerType
-{
-	enum EPlayerType
-	{
-		HUMAN,
-		AI,
-		COMP_ONLY
-	};
-}
+	HUMAN,
+	AI,
+	COMP_ONLY
+};
 
 /// The map gen options class holds values about general map generation settings
 /// e.g. the size of the map, the count of players,...
-class DLL_LINKAGE CMapGenOptions
+class DLL_LINKAGE CMapGenOptions : public Serializeable
 {
 public:
 	/// The player settings class maps the player color, starting town and human player flag.
@@ -64,36 +41,47 @@ public:
 		/// The color of the player ranging from 0 to PlayerColor::PLAYER_LIMIT - 1.
 		/// The default value is 0.
 		PlayerColor getColor() const;
-		void setColor(PlayerColor value);
+		void setColor(const PlayerColor & value);
 
 		/// The starting town of the player ranging from 0 to town max count or RANDOM_TOWN.
 		/// The default value is RANDOM_TOWN.
-		si32 getStartingTown() const;
-		void setStartingTown(si32 value);
+		FactionID getStartingTown() const;
+		void setStartingTown(FactionID value);
+
+		/// The starting hero of the player ranging from 0 to hero max count or RANDOM_HERO.
+		/// The default value is RANDOM_HERO
+		HeroTypeID getStartingHero() const;
+		void setStartingHero(HeroTypeID value);
 
 		/// The default value is EPlayerType::AI.
-		EPlayerType::EPlayerType getPlayerType() const;
-		void setPlayerType(EPlayerType::EPlayerType value);
-
-		/// Constant for a random town selection.
-		static const si32 RANDOM_TOWN = -1;
+		EPlayerType getPlayerType() const;
+		void setPlayerType(EPlayerType value);
+		
+		/// Team id for this player. TeamID::NO_TEAM by default - team will be randomly assigned
+		TeamID getTeam() const;
+		void setTeam(const TeamID & value);
 
 	private:
 		PlayerColor color;
-		si32 startingTown;
-		EPlayerType::EPlayerType playerType;
+		FactionID startingTown;
+		HeroTypeID startingHero;
+		EPlayerType playerType;
+		TeamID team;
 
 	public:
 		template <typename Handler>
-		void serialize(Handler & h, const int version)
+		void serialize(Handler & h)
 		{
 			h & color;
 			h & startingTown;
 			h & playerType;
+			h & team;
+			h & startingHero;
 		}
 	};
 
 	CMapGenOptions();
+	CMapGenOptions(const CMapGenOptions&) = delete;
 
 	si32 getWidth() const;
 	void setWidth(si32 value);
@@ -101,13 +89,17 @@ public:
 	si32 getHeight() const;
 	void setHeight(si32 value);
 
-	bool getHasTwoLevels() const;
-	void setHasTwoLevels(bool value);
+	int getLevels() const;
+	void setLevels(int value);
 
 	/// The count of all (human or computer) players ranging from 1 to PlayerColor::PLAYER_LIMIT or RANDOM_SIZE for random. If you call
 	/// this method, all player settings are reset to default settings.
-	si8 getPlayerCount() const;
-	void setPlayerCount(si8 value);
+	si8 getHumanOrCpuPlayerCount() const;
+	void setHumanOrCpuPlayerCount(si8 value);
+
+	si8 getMinPlayersCount(bool withTemplateLimit = true) const;
+	si8 getMaxPlayersCount(bool withTemplateLimit = true) const;
+	si8 getPlayerLimit() const;
 
 	/// The count of the teams ranging from 0 to <players count - 1> or RANDOM_SIZE for random.
 	si8 getTeamCount() const;
@@ -127,63 +119,122 @@ public:
 
 	EMonsterStrength::EMonsterStrength getMonsterStrength() const;
 	void setMonsterStrength(EMonsterStrength::EMonsterStrength value);
+	
+	bool isRoadEnabled(const RoadId & roadType) const;
+	bool isRoadEnabled() const;
+	void setRoadEnabled(const RoadId & roadType, bool enable);
 
 	/// The first player colors belong to standard players and the last player colors belong to comp only players.
 	/// All standard players are by default of type EPlayerType::AI.
 	const std::map<PlayerColor, CPlayerSettings> & getPlayersSettings() const;
-	void setStartingTownForPlayer(PlayerColor color, si32 town);
+	const std::map<PlayerColor, CPlayerSettings> & getSavedPlayersMap() const;
+	/// Returns the number of players currently configured to be controlled by the computer.
+	int getComputerPlayerCount() const;
+	void setStartingTownForPlayer(const PlayerColor & color, FactionID town);
+	void setStartingHeroForPlayer(const PlayerColor & color, HeroTypeID hero);
 	/// Sets a player type for a standard player. A standard player is the opposite of a computer only player. The
 	/// values which can be chosen for the player type are EPlayerType::AI or EPlayerType::HUMAN.
-	void setPlayerTypeForStandardPlayer(PlayerColor color, EPlayerType::EPlayerType playerType);
+	void setPlayerTypeForStandardPlayer(const PlayerColor & color, EPlayerType playerType);
+
+	void setPlayerTeam(const PlayerColor & color, const TeamID & team = TeamID::NO_TEAM);
 
 	/// The random map template to generate the map with or empty/not set if the template should be chosen randomly.
 	/// Default: Not set/random.
 	const CRmgTemplate * getMapTemplate() const;
 	void setMapTemplate(const CRmgTemplate * value);
+	void setMapTemplate(const std::string & name);
+	MetaString getMapName() const;
 
-	const std::map<std::string, CRmgTemplate *> & getAvailableTemplates() const;
+	std::vector<const CRmgTemplate *> getPossibleTemplates() const;
+
+	/// Per-level map layer IDs. Always sized to match getLevels() - setLevels() pads/truncates it as needed.
+	/// Defaults are set based on level count: SURFACE for level 0, UNDERGROUND for level 1, UNKNOWN for the rest.
+	void setLevelMapLayers(const std::vector<MapLayerId> & value);
+	const std::vector<MapLayerId> & getLevelMapLayers() const;
+
+	/// Reset per-level map layers to defaults based on current level count.
+	/// SURFACE for level 0, UNDERGROUND for level 1, UNKNOWN for the rest.
+	void resetLevelMapLayers();
+
+	/// Get the default MapLayerId for a given level index.
+	/// Level 0\t→ SURFACE, level 1 → UNDERGROUND, 2+ → UNKNOWN.
+	static MapLayerId getDefaultLayerForLevel(int levelIndex);
 
 	/// Finalizes the options. All random sizes for various properties will be overwritten by numbers from
 	/// a random number generator by keeping the options in a valid state. Check options should return true, otherwise
 	/// this function fails.
-	void finalize(CRandomGenerator & rand);
+	void finalize(vstd::RNG & rand);
 
 	/// Returns false if there is no template available which fits to the currently selected options.
 	bool checkOptions() const;
+	/// Returns true if player colors or teams were set in game GUI
+	bool arePlayersCustomized() const;
 
 	static const si8 RANDOM_SIZE = -1;
 
 private:
+	void initPlayersMap();
 	void resetPlayersMap();
+	void savePlayersMap();
 	int countHumanPlayers() const;
 	int countCompOnlyPlayers() const;
 	PlayerColor getNextPlayerColor() const;
 	void updateCompOnlyPlayers();
 	void updatePlayers();
-	const CRmgTemplate * getPossibleTemplate(CRandomGenerator & rand) const;
+	const CRmgTemplate * getPossibleTemplate(vstd::RNG & rand) const;
+	/// Pads/truncates levelMapLayers to match the current level count, preserving already configured layers.
+	void syncLevelMapLayersSize();
 
-	si32 width, height;
-	bool hasTwoLevels;
-	si8 playerCount, teamCount, compOnlyPlayerCount, compOnlyTeamCount;
+	si32 width;
+	si32 height;
+	si32 levels;
+	si8 humanOrCpuPlayerCount;
+	si8 teamCount;
+	si8 compOnlyPlayerCount;
+	si8 compOnlyTeamCount;
 	EWaterContent::EWaterContent waterContent;
 	EMonsterStrength::EMonsterStrength monsterStrength;
 	std::map<PlayerColor, CPlayerSettings> players;
+	std::map<PlayerColor, CPlayerSettings> savedPlayerSettings;
+	std::set<RoadId> enabledRoads;
+	bool customizedPlayers;
+	
 	const CRmgTemplate * mapTemplate;
+	
+	std::vector<MapLayerId> levelMapLayers;
 
 public:
 	template <typename Handler>
-	void serialize(Handler & h, const int version)
+	void serialize(Handler & h)
 	{
 		h & width;
 		h & height;
-		h & hasTwoLevels;
-		h & playerCount;
+		h & levels;
+		h & humanOrCpuPlayerCount;
 		h & teamCount;
 		h & compOnlyPlayerCount;
 		h & compOnlyTeamCount;
 		h & waterContent;
 		h & monsterStrength;
 		h & players;
-		//TODO add name of template to class, enables selection of a template by a user
+		std::string templateName;
+		if(mapTemplate && h.saving)
+		{
+			templateName = mapTemplate->getId();
+		}
+		h & templateName;
+		if(!h.saving)
+		{
+			setMapTemplate(templateName);
+		}
+
+		h & enabledRoads;
+
+		if (h.version >= Handler::Version::MAP_GEN_LEVEL_MAP_LAYERS)
+			h & levelMapLayers;
+		else if (!h.saving)
+			resetLevelMapLayers(); // Old settings without levelMapLayers - derive defaults from level count
 	}
+
+	void serializeJson(JsonSerializeFormat & handler);
 };

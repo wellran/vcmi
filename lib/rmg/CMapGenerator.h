@@ -10,122 +10,115 @@
 
 #pragma once
 
-#include "../GameConstants.h"
-#include "../CRandomGenerator.h"
 #include "CMapGenOptions.h"
-#include "../int3.h"
-#include "CRmgTemplate.h"
+#include "ZonePlacementConfig.h"
+#include "../LoadProgress.h"
 
-class CMap;
+class MetaString;
 class CRmgTemplate;
-class CRmgTemplateZone;
 class CMapGenOptions;
-class CTerrainViewPatternConfig;
-class CMapEditManager;
 class JsonNode;
-class CMapGenerator;
-class CTileInfo;
+class RmgMap;
+class CMap;
+class Zone;
+class CZonePlacer;
+class IGameInfoCallback;
 
-typedef std::vector<JsonNode> JsonVector;
-
-class rmgException : public std::exception
-{
-	std::string msg;
-public:
-	explicit rmgException(const std::string& _Message) : msg(_Message)
-	{
-	}
-
-	virtual ~rmgException() throw ()
-	{
-	};
-
-	const char *what() const throw () override
-	{
-		return msg.c_str();
-	}
-};
+using JsonVector = std::vector<JsonNode>;
 
 /// The map generator creates a map randomly.
-class DLL_LINKAGE CMapGenerator
+class DLL_LINKAGE CMapGenerator: public Load::Progress
 {
 public:
-	using Zones = std::map<TRmgTemplateZoneId, std::shared_ptr<CRmgTemplateZone>>;
-
-	explicit CMapGenerator();
+	struct Config
+	{
+		std::vector<CTreasureInfo> waterTreasure;
+		int shipyardGuard;
+		int mineExtraResources;
+		int minGuardStrength;
+		std::string defaultRoadType;
+		std::string secondaryRoadType;
+		int treasureValueLimit;
+		std::vector<int> prisonExperience;
+		std::vector<int> prisonValues;
+		std::vector<int> scrollValues;
+		int pandoraMultiplierGold;
+		int pandoraMultiplierExperience;
+		int pandoraMultiplierSpells;
+		int pandoraSpellSchool;
+		int pandoraSpell60;
+		std::vector<int> pandoraCreatureValues;
+		std::vector<int> questValues;
+		std::vector<int> questRewardValues;
+		int seerHutValue;
+		bool singleThread;
+		ZonePlacementConfig zonePlacement;
+	};
+	
+	explicit CMapGenerator(CMapGenOptions& mapGenOptions, IGameInfoCallback * cb, int RandomSeed);
 	~CMapGenerator(); // required due to std::unique_ptr
+	
+	const Config & getConfig() const;
+	
+	const CMapGenOptions& getMapGenOptions() const;
+	
+	std::unique_ptr<CMap> generate();
 
-	std::unique_ptr<CMap> generate(CMapGenOptions * mapGenOptions, int RandomSeed = std::time(nullptr));
-
-	CMapGenOptions * mapGenOptions;
-	std::unique_ptr<CMap> map;
-	CRandomGenerator rand;
-	int randomSeed;
-	CMapEditManager * editManager;
-
-	Zones & getZones();
-	void createDirectConnections();
-	void createConnections2();
-	void findZonesForQuestArts();
-	void foreach_neighbour(const int3 &pos, std::function<void(int3& pos)> foo);
-	void foreachDirectNeighbour(const int3 &pos, std::function<void(int3& pos)> foo);
-	void foreachDiagonaltNeighbour(const int3& pos, std::function<void(int3& pos)> foo);
-
-	bool isBlocked(const int3 &tile) const;
-	bool shouldBeBlocked(const int3 &tile) const;
-	bool isPossible(const int3 &tile) const;
-	bool isFree(const int3 &tile) const;
-	bool isUsed(const int3 &tile) const;
-	bool isRoad(const int3 &tile) const;
-
-	void setOccupied(const int3 &tile, ETileType::ETileType state);
-	void setRoad(const int3 &tile, ERoadType::ERoadType roadType);
-
-	CTileInfo getTile(const int3 & tile) const;
-	bool isAllowedSpell(SpellID sid) const;
-
-	float getNearestObjectDistance(const int3 &tile) const;
-	void setNearestObjectDistance(int3 &tile, float value);
-
+	/// Next unused two-way monolith subtype. Thread-safe; called from the parallel connection-placement phase.
 	int getNextMonlithIndex();
-	int getPrisonsRemaning() const;
-	void decreasePrisonsRemaining();
-	std::vector<ArtifactID> getQuestArtsRemaning() const;
-	void banQuestArt(ArtifactID id);
 
-	void registerZone (TFaction faction);
-	ui32 getZoneCount(TFaction faction);
-	ui32 getTotalZoneCount() const;
+	/// True if a subterranean gate pair at the given tiles would keep every gate paired with its intended
+	/// partner. For use while searching; the answer may go stale once another thread reserves.
+	bool canReserveGatePair(const int3 & posA, const int3 & posB) const;
 
-	TRmgTemplateZoneId getZoneID(const int3& tile) const;
-	void setZoneID(const int3& tile, TRmgTemplateZoneId zid);
+	/// Commit a subterranean gate pair at the given final map positions, false if it would break some
+	/// pairing. Gates pair by nearest 2D distance (CGSubterraneanGate::postInit), so a pair must stay
+	/// each other's nearest gate. Thread-safe; called from the parallel connection-placement phase.
+	bool reserveGatePair(const int3 & posA, const int3 & posB);
 
+	int getPrisonsRemaining() const;
+	std::shared_ptr<CZonePlacer> getZonePlacer() const;
+	const std::vector<ArtifactID> & getAllPossibleQuestArtifacts() const;
+	const std::vector<HeroTypeID> getAllPossibleHeroes() const;
+	void banQuestArt(const ArtifactID & id);
+	void unbanQuestArt(const ArtifactID & id);
+	Zone * getZoneWater() const;
+	void addWaterTreasuresInfo();
+
+	int getRandomSeed() const;
+	
 private:
-	std::list<rmg::ZoneConnection> connectionsLeft;
-	Zones zones;
-	std::map<TFaction, ui32> zonesPerFaction;
-	ui32 zonesTotal; //zones that have their main town only
+	std::unique_ptr<vstd::RNG> rand;
+	int randomSeed;
+	CMapGenOptions& mapGenOptions;
+	Config config;
+	std::unique_ptr<RmgMap> map;
+	std::shared_ptr<CZonePlacer> placer;
 
-	CTileInfo*** tiles;
-	boost::multi_array<TRmgTemplateZoneId, 3> zoneColouring; //[z][x][y]
-
-	int prisonsRemaining;
-	//int questArtsRemaining;
+	std::vector<rmg::ZoneConnection> connectionsLeft;
+	
 	int monolithIndex;
+	std::mutex monolithIndexMutex;
+
+	// Placed subterranean gates, each with the squared 2D distance to its committed partner (see reserveGatePair)
+	struct ReservedGate { int3 pos; int pairingDistanceSqr; };
+	std::vector<ReservedGate> reservedGates;
+	mutable std::mutex gateReservationMutex;
+
+	/// canReserveGatePair without taking the lock.
+	bool canReserveGatePairLocked(const int3 & posA, const int3 & posB) const;
+
 	std::vector<ArtifactID> questArtifacts;
-	void checkIsOnMap(const int3 &tile) const; //throws
 
 	/// Generation methods
-	std::string getMapDescription() const;
+	void loadConfig();
+	
+	MetaString getMapDescription() const;
 
 	void initPrisonsRemaining();
 	void initQuestArtsRemaining();
 	void addPlayerInfo();
 	void addHeaderInfo();
-	void initTiles();
 	void genZones();
 	void fillZones();
-	void createObstaclesCommon1();
-	void createObstaclesCommon2();
-
 };

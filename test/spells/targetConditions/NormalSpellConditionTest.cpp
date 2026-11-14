@@ -11,6 +11,10 @@
 
 #include "TargetConditionItemFixture.h"
 
+#include "../../../lib/GameLibrary.h"
+
+#include "../../../lib/bonuses/BonusParameters.h"
+
 namespace test
 {
 using namespace ::spells;
@@ -24,9 +28,10 @@ public:
 
 	void setDefaultExpectations()
 	{
-		EXPECT_CALL(unitMock, getAllBonuses(_, _, _, _)).Times(AtLeast(1));
+		EXPECT_CALL(unitMock, getAllBonuses(_, _)).Times(AtLeast(1));
 		EXPECT_CALL(unitMock, getTreeVersion()).Times(AtLeast(0));
 		EXPECT_CALL(mechanicsMock, getSpellIndex()).WillRepeatedly(Return(castSpell));
+		EXPECT_CALL(mechanicsMock, getSpellId()).WillRepeatedly(Return(SpellID(castSpell)));
 	}
 
 	void SetUp() override
@@ -36,15 +41,15 @@ public:
 		immuneSpell = ::testing::get<0>(GetParam());
 		castSpell = ::testing::get<1>(GetParam());
 
-		subject = TargetConditionItemFactory::getDefault()->createNormalSpell();
+		subject = TargetConditionItemFactory::create(*LIBRARY->identifiers())->createNormalSpell();
 	}
 };
 
 TEST_P(NormalSpellConditionTest, ChecksAbsoluteCase)
 {
 	setDefaultExpectations();
-	auto bonus = std::make_shared<Bonus>(Bonus::ONE_BATTLE, Bonus::SPELL_IMMUNITY, Bonus::OTHER, 4, 0, immuneSpell);
-	bonus->additionalInfo = 1;
+	auto bonus = std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::SPELL_IMMUNITY, BonusSource::OTHER, 4, BonusSourceID(), BonusSubtypeID(SpellID(immuneSpell)));
+	bonus->parameters = std::make_shared<BonusParameters>(1);
 
 	unitBonuses.addNewBonus(bonus);
 
@@ -57,7 +62,7 @@ TEST_P(NormalSpellConditionTest, ChecksAbsoluteCase)
 TEST_P(NormalSpellConditionTest, ChecksNormalCase)
 {
 	setDefaultExpectations();
-	auto bonus = std::make_shared<Bonus>(Bonus::ONE_BATTLE, Bonus::SPELL_IMMUNITY, Bonus::OTHER, 4, 0, immuneSpell);
+	auto bonus = std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::SPELL_IMMUNITY, BonusSource::OTHER, 4, BonusSourceID(), BonusSubtypeID(SpellID(immuneSpell)));
 	unitBonuses.addNewBonus(bonus);
 	if(immuneSpell == castSpell)
 		EXPECT_FALSE(subject->isReceptive(&mechanicsMock, &unitMock));
@@ -65,7 +70,7 @@ TEST_P(NormalSpellConditionTest, ChecksNormalCase)
 		EXPECT_TRUE(subject->isReceptive(&mechanicsMock, &unitMock));
 }
 
-INSTANTIATE_TEST_CASE_P
+INSTANTIATE_TEST_SUITE_P
 (
 	BySpells,
 	NormalSpellConditionTest,

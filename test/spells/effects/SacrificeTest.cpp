@@ -14,6 +14,8 @@
 #include <vstd/RNG.h>
 
 #include "../../../lib/battle/CUnitState.h"
+#include "../../../lib/CCreatureHandler.h"
+#include "../../../lib/json/JsonNode.h"
 
 #include "mock/mock_UnitEnvironment.h"
 
@@ -32,14 +34,24 @@ public:
 	{
 	}
 
+	/// The victim is not hypnotized, so the caster controls it
+	void expectControlledByCaster(battle::UnitFake & victim)
+	{
+		const PlayerColor caster(0);
+		EXPECT_CALL(victim, isHypnotized()).WillRepeatedly(Return(false));
+		EXPECT_CALL(*battleFake, getSidePlayer(BattleSide::ATTACKER)).WillRepeatedly(Return(caster));
+		EXPECT_CALL(mechanicsMock, getCasterColor()).WillRepeatedly(Return(caster));
+	}
+
 protected:
 	void SetUp() override
 	{
 		EffectFixture::setUp();
 
 		{
-			JsonNode config(JsonNode::JsonType::DATA_STRUCT);
+			JsonNode config;
 			config["healLevel"].String() = "resurrect";
+			config["healPower"].String() = "permanent";
 			EffectFixture::setupEffect(config);
 		}
 	}
@@ -53,12 +65,15 @@ TEST_F(SacrificeTest, ApplicableForTwoTargets)
 	EXPECT_CALL(unit, isValidTarget(Eq(false))).WillRepeatedly(Return(false));
 	EXPECT_CALL(unit, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
 
-	EXPECT_CALL(unit, getTotalHealth()).WillRepeatedly(Return(0));
-	EXPECT_CALL(unit, getAvailableHealth()).WillRepeatedly(Return(200));
+	unit.makeDead();
+	EXPECT_CALL(unit, unitId()).WillRepeatedly(Return(1));
+	EXPECT_CALL(unit, getTotalHealth()).WillRepeatedly(Return(200));
+	EXPECT_CALL(unit, getAvailableHealth()).WillRepeatedly(Return(0));
 
 	auto & victim = unitsFake.add(BattleSide::ATTACKER);
 
 	victim.makeAlive();
+	EXPECT_CALL(victim, unitId()).WillRepeatedly(Return(2));
 
 	EXPECT_CALL(victim, getPosition()).WillRepeatedly(Return(BattleHex(5,10)));
 	EXPECT_CALL(victim, isValidTarget(_)).WillRepeatedly(Return(true));
@@ -67,6 +82,7 @@ TEST_F(SacrificeTest, ApplicableForTwoTargets)
 
 	EXPECT_CALL(mechanicsMock, isSmart()).WillRepeatedly(Return(true));
 	EXPECT_CALL(mechanicsMock, isMassive()).WillRepeatedly(Return(false));
+	EXPECT_CALL(mechanicsMock, isNegativeSpell()).WillRepeatedly(Return(false));
 	EXPECT_CALL(mechanicsMock, alwaysHitFirstTarget()).WillRepeatedly(Return(false));
 
 	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&unit))).Times(AtLeast(1)).WillRepeatedly(Return(true));
@@ -74,83 +90,400 @@ TEST_F(SacrificeTest, ApplicableForTwoTargets)
 
 	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&victim))).Times(AtLeast(1)).WillRepeatedly(Return(true));
 	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&victim))).Times(AtLeast(1)).WillRepeatedly(Return(true));
+	expectControlledByCaster(victim);
 
 
-	EffectTarget aimPoint;
+	Target aimPoint;
 	aimPoint.emplace_back(&unit, BattleHex());
-	aimPoint.emplace_back(&victim, BattleHex());
+	aimPoint.emplace_back(BattleHex(5,10));
 
-	EffectTarget spellTarget;
+	Target spellTarget;
 	spellTarget.emplace_back(&unit, BattleHex());
 
-	EffectTarget transformed = subject->transformTarget(&mechanicsMock, aimPoint, spellTarget);
+	Target transformed = subject->transformTarget(&mechanicsMock, aimPoint, spellTarget);
 
-	EXPECT_TRUE(subject->applicable(problemMock, &mechanicsMock, transformed));
+	EXPECT_TRUE(subject->applicableTarget(problemMock, &mechanicsMock, transformed));
 }
 
-#if 0
-
-TEST_F(SacrificeTest, NotApplicableWithoutVictim)
+TEST_F(SacrificeTest, NotApplicableWhenVictimHexIsEmpty)
 {
-	{
-		JsonNode config(JsonNode::JsonType::DATA_STRUCT);
-		config["healLevel"].String() = "resurrect";
-		EffectFixture::setupEffect(config);
-	}
-
 	auto & unit = unitsFake.add(BattleSide::ATTACKER);
-
+	unit.makeDead();
 	EXPECT_CALL(unit, getPosition()).WillRepeatedly(Return(BattleHex(5,5)));
-	EXPECT_CALL(unit, isValidTarget(Eq(false))).WillRepeatedly(Return(false));
-	EXPECT_CALL(unit, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
-
-	EXPECT_CALL(unit, getTotalHealth()).WillRepeatedly(Return(0));
-	EXPECT_CALL(unit, getAvailableHealth()).WillRepeatedly(Return(200));
+	EXPECT_CALL(unit, isValidTarget(_)).WillRepeatedly(Return(true));
+	EXPECT_CALL(unit, getTotalHealth()).WillRepeatedly(Return(200));
+	EXPECT_CALL(unit, getAvailableHealth()).WillRepeatedly(Return(0));
 
 	EXPECT_CALL(mechanicsMock, isSmart()).WillRepeatedly(Return(true));
 	EXPECT_CALL(mechanicsMock, isMassive()).WillRepeatedly(Return(false));
 	EXPECT_CALL(mechanicsMock, alwaysHitFirstTarget()).WillRepeatedly(Return(false));
-
 	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&unit))).WillRepeatedly(Return(true));
 	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&unit))).WillRepeatedly(Return(true));
 
-	EffectTarget aimPoint;
+	Target aimPoint;
 	aimPoint.emplace_back(&unit, BattleHex());
+	aimPoint.emplace_back(BattleHex(5,10));
 
-	EffectTarget transformed = subject->transformTarget(&mechanicsMock, aimPoint, aimPoint);
+	Target spellTarget;
+	spellTarget.emplace_back(&unit, BattleHex());
 
-	EXPECT_FALSE(subject->applicable(problemMock, &mechanicsMock, transformed));
+	Target transformed = subject->transformTarget(&mechanicsMock, aimPoint, spellTarget);
+
+	EXPECT_FALSE(subject->applicableTarget(problemMock, &mechanicsMock, transformed));
 }
 
-#endif
+struct AdjustTargetTypesParam
+{
+	std::vector<TargetType> input;
+	std::vector<TargetType> expected;
+};
 
-class SacrificeApplyTest : public Test, public EffectFixture
+class SacrificeAdjustTargetTypesTest : public SacrificeTest, public WithParamInterface<AdjustTargetTypesParam>
+{
+};
+
+TEST_P(SacrificeAdjustTargetTypesTest, AdjustsCorrectly)
+{
+	auto types = GetParam().input;
+	subject->adjustTargetTypes(types, &mechanicsMock);
+	EXPECT_EQ(types, GetParam().expected);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+	Cases,
+	SacrificeAdjustTargetTypesTest,
+	Values(
+		AdjustTargetTypesParam{{}, {}},
+		AdjustTargetTypesParam{{AimType::LOCATION}, {}},
+		AdjustTargetTypesParam{{AimType::CREATURE}, {AimType::CREATURE, AimType::CREATURE}},
+		AdjustTargetTypesParam{{AimType::CREATURE, AimType::CREATURE}, {AimType::CREATURE, AimType::CREATURE}},
+		AdjustTargetTypesParam{{AimType::CREATURE, AimType::LOCATION}, {}}
+	)
+);
+
+class SacrificeApplicableGeneralTest : public SacrificeTest
+{
+};
+
+TEST_F(SacrificeApplicableGeneralTest, ReturnsFalseWhenNoValidTargets)
+{
+	EXPECT_CALL(mechanicsMock, adaptProblem(_, _)).WillOnce(Return(false));
+	EXPECT_FALSE(subject->applicableGeneral(problemMock, &mechanicsMock));
+}
+
+TEST_F(SacrificeApplicableGeneralTest, ReturnsFalseWhenNoInjuredUnits)
+{
+	auto & unit = unitsFake.add(BattleSide::ATTACKER);
+	unit.makeAlive();
+	EXPECT_CALL(unit, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(unit, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(unit, getAvailableHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(unit, isInvincible()).WillRepeatedly(Return(false));
+	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&unit))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&unit))).WillRepeatedly(Return(true));
+
+	auto & unit2 = unitsFake.add(BattleSide::ATTACKER);
+	unit2.makeAlive();
+	EXPECT_CALL(unit2, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(unit2, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(unit2, getAvailableHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(unit2, isInvincible()).WillRepeatedly(Return(false));
+	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&unit2))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&unit2))).WillRepeatedly(Return(true));
+
+	EXPECT_CALL(mechanicsMock, isSmart()).WillRepeatedly(Return(false));
+	EXPECT_CALL(mechanicsMock, adaptProblem(_, _)).WillOnce(Return(false));
+	EXPECT_FALSE(subject->applicableGeneral(problemMock, &mechanicsMock));
+}
+
+TEST_F(SacrificeApplicableGeneralTest, ReturnsFalseWithLoneInjuredUnit)
+{
+	auto & unit = unitsFake.add(BattleSide::ATTACKER);
+	unit.makeAlive();
+	EXPECT_CALL(unit, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(unit, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(unit, getAvailableHealth()).WillRepeatedly(Return(50));
+	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&unit))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&unit))).WillRepeatedly(Return(true));
+
+	EXPECT_CALL(mechanicsMock, isSmart()).WillRepeatedly(Return(false));
+	// a unit can not be sacrificed to heal itself
+	EXPECT_CALL(mechanicsMock, adaptProblem(_, _)).WillOnce(Return(false));
+	EXPECT_FALSE(subject->applicableGeneral(problemMock, &mechanicsMock));
+}
+
+TEST_F(SacrificeApplicableGeneralTest, ReturnsTrueWithTwoInjuredUnits)
+{
+	auto & injuredUnit1 = unitsFake.add(BattleSide::ATTACKER);
+	injuredUnit1.makeAlive();
+	EXPECT_CALL(injuredUnit1, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(injuredUnit1, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(injuredUnit1, getAvailableHealth()).WillRepeatedly(Return(50));
+	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&injuredUnit1))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&injuredUnit1))).WillRepeatedly(Return(true));
+
+	auto & injuredUnit2 = unitsFake.add(BattleSide::ATTACKER);
+	injuredUnit2.makeAlive();
+	EXPECT_CALL(injuredUnit2, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(injuredUnit2, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(injuredUnit2, getAvailableHealth()).WillRepeatedly(Return(50));
+	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&injuredUnit2))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&injuredUnit2))).WillRepeatedly(Return(true));
+
+	EXPECT_CALL(mechanicsMock, isSmart()).WillRepeatedly(Return(false));
+
+	EXPECT_TRUE(subject->applicableGeneral(problemMock, &mechanicsMock));
+}
+
+TEST_F(SacrificeApplicableGeneralTest, ReturnsTrueWithDeadAndAliveUnits)
+{
+	auto & deadUnit = unitsFake.add(BattleSide::ATTACKER);
+	deadUnit.makeDead();
+	EXPECT_CALL(deadUnit, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(deadUnit, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(deadUnit, getAvailableHealth()).WillRepeatedly(Return(0));
+	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&deadUnit))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&deadUnit))).WillRepeatedly(Return(true));
+
+	auto & aliveUnit = unitsFake.add(BattleSide::ATTACKER);
+	aliveUnit.makeAlive();
+	EXPECT_CALL(aliveUnit, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(aliveUnit, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(aliveUnit, getAvailableHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&aliveUnit))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&aliveUnit))).WillRepeatedly(Return(true));
+
+	EXPECT_CALL(mechanicsMock, isSmart()).WillRepeatedly(Return(false));
+
+	EXPECT_TRUE(subject->applicableGeneral(problemMock, &mechanicsMock));
+}
+
+TEST_F(SacrificeApplicableGeneralTest, ReturnsFalseWhenOnlyCorpseIsCovered)
+{
+	auto & deadUnit = unitsFake.add(BattleSide::ATTACKER);
+	deadUnit.makeDead();
+	EXPECT_CALL(deadUnit, getPosition()).WillRepeatedly(Return(BattleHex(5,5)));
+	EXPECT_CALL(deadUnit, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(deadUnit, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(deadUnit, getAvailableHealth()).WillRepeatedly(Return(0));
+	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&deadUnit))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&deadUnit))).WillRepeatedly(Return(true));
+
+	auto & aliveUnit = unitsFake.add(BattleSide::ATTACKER);
+	aliveUnit.makeAlive();
+	EXPECT_CALL(aliveUnit, getPosition()).WillRepeatedly(Return(BattleHex(5,5)));
+	EXPECT_CALL(aliveUnit, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(aliveUnit, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(aliveUnit, getAvailableHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&aliveUnit))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&aliveUnit))).WillRepeatedly(Return(true));
+
+	EXPECT_CALL(mechanicsMock, isSmart()).WillRepeatedly(Return(false));
+	EXPECT_CALL(mechanicsMock, adaptProblem(_, _)).WillOnce(Return(false));
+	EXPECT_FALSE(subject->applicableGeneral(problemMock, &mechanicsMock));
+}
+
+class SacrificeApplicableTargetTest : public SacrificeTest
+{
+};
+
+TEST_F(SacrificeApplicableTargetTest, ReturnsFalseWhenTargetIsNotInjured)
+{
+	auto & unit = unitsFake.add(BattleSide::ATTACKER);
+	EXPECT_CALL(unit, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(unit, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(unit, getAvailableHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(mechanicsMock, isSmart()).WillRepeatedly(Return(false));
+
+	Target target;
+	target.emplace_back(&unit, BattleHex());
+
+	EXPECT_FALSE(subject->applicableTarget(problemMock, &mechanicsMock, target));
+}
+
+TEST_F(SacrificeApplicableTargetTest, ReturnsFalseWhenVictimIsDead)
+{
+	auto & deadTarget = unitsFake.add(BattleSide::ATTACKER);
+	EXPECT_CALL(deadTarget, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(deadTarget, getAvailableHealth()).WillRepeatedly(Return(0));
+	EXPECT_CALL(deadTarget, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, isSmart()).WillRepeatedly(Return(false));
+
+	auto & deadVictim = unitsFake.add(BattleSide::ATTACKER);
+	EXPECT_CALL(deadVictim, alive()).WillRepeatedly(Return(false));
+
+	Target target;
+	target.emplace_back(&deadTarget, BattleHex());
+	target.emplace_back(&deadVictim, BattleHex());
+
+	EXPECT_FALSE(subject->applicableTarget(problemMock, &mechanicsMock, target));
+}
+
+TEST_F(SacrificeApplicableTargetTest, ReturnsFalseWhenVictimNotReceptive)
+{
+	auto & deadTarget = unitsFake.add(BattleSide::ATTACKER);
+	EXPECT_CALL(deadTarget, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(deadTarget, getAvailableHealth()).WillRepeatedly(Return(0));
+	EXPECT_CALL(deadTarget, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, isSmart()).WillRepeatedly(Return(false));
+
+	auto & victim = unitsFake.add(BattleSide::ATTACKER);
+	victim.makeAlive();
+	EXPECT_CALL(victim, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&victim))).WillRepeatedly(Return(false));
+	
+	Target target;
+	target.emplace_back(&deadTarget, BattleHex());
+	target.emplace_back(&victim, BattleHex());
+
+	EXPECT_FALSE(subject->applicableTarget(problemMock, &mechanicsMock, target));
+}
+
+TEST_F(SacrificeApplicableTargetTest, ReturnsFalseWhenCorpseIsCovered)
+{
+	auto & deadTarget = unitsFake.add(BattleSide::ATTACKER);
+	deadTarget.makeDead();
+	EXPECT_CALL(deadTarget, getPosition()).WillRepeatedly(Return(BattleHex(5,5)));
+	EXPECT_CALL(deadTarget, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(deadTarget, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(deadTarget, getAvailableHealth()).WillRepeatedly(Return(0));
+
+	auto & blocker = unitsFake.add(BattleSide::ATTACKER);
+	blocker.makeAlive();
+	EXPECT_CALL(blocker, getPosition()).WillRepeatedly(Return(BattleHex(5,5)));
+
+	Target target;
+	target.emplace_back(&deadTarget, BattleHex());
+
+	EXPECT_FALSE(subject->applicableTarget(problemMock, &mechanicsMock, target));
+}
+
+TEST_F(SacrificeApplicableTargetTest, ReturnsTrueForInjuredTargetAndOtherVictim)
+{
+	auto & injuredTarget = unitsFake.add(BattleSide::ATTACKER);
+	injuredTarget.makeAlive();
+	EXPECT_CALL(injuredTarget, unitId()).WillRepeatedly(Return(1));
+	EXPECT_CALL(injuredTarget, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(injuredTarget, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(injuredTarget, getAvailableHealth()).WillRepeatedly(Return(50));
+
+	auto & victim = unitsFake.add(BattleSide::ATTACKER);
+	victim.makeAlive();
+	EXPECT_CALL(victim, unitId()).WillRepeatedly(Return(2));
+	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&victim))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&victim))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, isSmart()).WillRepeatedly(Return(true));
+	expectControlledByCaster(victim);
+
+	Target target;
+	target.emplace_back(&injuredTarget, BattleHex());
+	target.emplace_back(&victim, BattleHex());
+
+	EXPECT_TRUE(subject->applicableTarget(problemMock, &mechanicsMock, target));
+}
+
+TEST_F(SacrificeApplicableTargetTest, ReturnsFalseWhenVictimIsTheTarget)
+{
+	auto & injuredTarget = unitsFake.add(BattleSide::ATTACKER);
+	injuredTarget.makeAlive();
+	EXPECT_CALL(injuredTarget, unitId()).WillRepeatedly(Return(1));
+	EXPECT_CALL(injuredTarget, isValidTarget(Eq(true))).WillRepeatedly(Return(true));
+	EXPECT_CALL(injuredTarget, getTotalHealth()).WillRepeatedly(Return(100));
+	EXPECT_CALL(injuredTarget, getAvailableHealth()).WillRepeatedly(Return(50));
+	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&injuredTarget))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, ownerMatches(Eq(&injuredTarget))).WillRepeatedly(Return(true));
+	EXPECT_CALL(mechanicsMock, isSmart()).WillRepeatedly(Return(true));
+
+	Target target;
+	target.emplace_back(&injuredTarget, BattleHex());
+	target.emplace_back(&injuredTarget, BattleHex());
+
+	EXPECT_FALSE(subject->applicableTarget(problemMock, &mechanicsMock, target));
+}
+
+class SacrificeGetHealthChangeTest : public SacrificeTest
 {
 public:
 	UnitEnvironmentMock unitEnvironmentMock;
+};
 
-	SacrificeApplyTest()
-		: EffectFixture("core:sacrifice")
-	{
-	}
+TEST_F(SacrificeGetHealthChangeTest, EmptyTargetReturnsZero)
+{
+	Target target;
+	auto result = subject->getHealthChange(&mechanicsMock, target);
 
-	void setDefaultExpectations()
-	{
+	EXPECT_EQ(result.hpDelta, 0);
+	EXPECT_EQ(result.unitsDelta, 0);
+	EXPECT_EQ(result.unitType, nullptr);
+}
 
-	}
+TEST_F(SacrificeGetHealthChangeTest, DeadTargetReturnsMaxResurrectionValue)
+{
+	const int32_t baseAmount = 5;
+	const int32_t unitHP = 200;
+	const uint32_t unitId = 42;
 
-protected:
-	void SetUp() override
-	{
-		EffectFixture::setUp();
+	auto & unit = unitsFake.add(BattleSide::ATTACKER);
+	EXPECT_CALL(unit, unitBaseAmount()).WillRepeatedly(Return(baseAmount));
+	EXPECT_CALL(unit, creatureId()).WillRepeatedly(Return(CreatureID(unitId)));
+	unit.addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::STACK_HEALTH, BonusSource::CREATURE_ABILITY, unitHP, BonusSourceID()));
+	unitsFake.setDefaultBonusExpectations();
 
-		{
-			JsonNode config(JsonNode::JsonType::DATA_STRUCT);
-			config["healLevel"].String() = "resurrect";
-			config["healPower"].String() = "permanent";
-			EffectFixture::setupEffect(config);
-		}
-	}
+	auto unitState = std::make_shared<::battle::CUnitStateDetached>(&unit, &unit);
+	unitState->localInit(&unitEnvironmentMock);
+	int64_t fullHealth = unitState->getAvailableHealth();
+	unitState->damage(fullHealth);
+	EXPECT_CALL(unit, acquireState()).WillRepeatedly(Return(unitState));
+
+	Target target;
+	target.emplace_back(&unit, BattleHex());
+
+	auto result = subject->getHealthChange(&mechanicsMock, target);
+
+	EXPECT_EQ(result.hpDelta, 1000);
+	EXPECT_EQ(result.unitsDelta, 5);
+	EXPECT_EQ(result.unitType, static_cast<const Creature *>(CreatureID(unitId).toCreature()));
+}
+
+TEST_F(SacrificeGetHealthChangeTest, VictimSetsHealOfTarget)
+{
+	const uint32_t unitId = 42;
+
+	auto & unit = unitsFake.add(BattleSide::ATTACKER);
+	EXPECT_CALL(unit, unitBaseAmount()).WillRepeatedly(Return(10));
+	EXPECT_CALL(unit, creatureId()).WillRepeatedly(Return(CreatureID(unitId)));
+	unit.addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::STACK_HEALTH, BonusSource::CREATURE_ABILITY, 100, BonusSourceID()));
+
+	auto & victim = unitsFake.add(BattleSide::ATTACKER);
+	EXPECT_CALL(victim, getCount()).WillRepeatedly(Return(2));
+	victim.addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::STACK_HEALTH, BonusSource::CREATURE_ABILITY, 100, BonusSourceID()));
+	unitsFake.setDefaultBonusExpectations();
+
+	auto unitState = std::make_shared<::battle::CUnitStateDetached>(&unit, &unit);
+	unitState->localInit(&unitEnvironmentMock);
+	int64_t fullHealth = unitState->getAvailableHealth();
+	unitState->damage(fullHealth);
+	EXPECT_CALL(unit, acquireState()).WillRepeatedly(Return(unitState));
+
+	// (10 power + 100 victim HP + 90 raw) * 2 victims = 400 HP, i.e. 4 of 10 units
+	EXPECT_CALL(mechanicsMock, getEffectPower()).WillRepeatedly(Return(10));
+	EXPECT_CALL(mechanicsMock, calculateRawEffectValue(Eq(0), Eq(1))).WillRepeatedly(Return(90));
+
+	Target target;
+	target.emplace_back(&unit, BattleHex());
+	target.emplace_back(&victim, BattleHex());
+
+	auto result = subject->getHealthChange(&mechanicsMock, target);
+
+	EXPECT_EQ(result.hpDelta, 400);
+	EXPECT_EQ(result.unitsDelta, 4);
+	EXPECT_EQ(result.unitType, static_cast<const Creature *>(CreatureID(unitId).toCreature()));
+}
+
+class SacrificeApplyTest : public SacrificeTest
+{
+public:
+	UnitEnvironmentMock unitEnvironmentMock;
 };
 
 TEST_F(SacrificeApplyTest, ResurrectsTarget)
@@ -166,26 +499,28 @@ TEST_F(SacrificeApplyTest, ResurrectsTarget)
 	const uint32_t victimId = 4242;
 	const int32_t victimCount = 5;
 	const int32_t victimUnitHP = 100;
+	const auto pikeman = CreatureID(unitId).toCreature();
 
 	const int64_t expectedHealValue = (effectPower + victimUnitHP + effectValue) * victimCount;
 
 	auto & targetUnit = unitsFake.add(BattleSide::ATTACKER);
 	EXPECT_CALL(targetUnit, unitBaseAmount()).WillRepeatedly(Return(unitAmount));
 	EXPECT_CALL(targetUnit, unitId()).WillRepeatedly(Return(unitId));
+	EXPECT_CALL(targetUnit, unitType()).WillRepeatedly(Return(pikeman));
+	EXPECT_CALL(targetUnit, creatureId()).WillRepeatedly(Return(CreatureID(unitId)));
 
 	EXPECT_CALL(mechanicsMock, getEffectPower()).Times(AtLeast(1)).WillRepeatedly(Return(effectPower));
-	EXPECT_CALL(mechanicsMock, applySpellBonus(_, Eq(&targetUnit))).WillOnce(ReturnArg<0>());
 	EXPECT_CALL(mechanicsMock, calculateRawEffectValue(_,_)).WillOnce(Return(effectValue));
 
-	targetUnit.addNewBonus(std::make_shared<Bonus>(Bonus::PERMANENT, Bonus::STACK_HEALTH, Bonus::CREATURE_ABILITY, unitHP, 0));
+	targetUnit.addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::STACK_HEALTH, BonusSource::CREATURE_ABILITY, unitHP, BonusSourceID()));
 
 	auto & victim = unitsFake.add(BattleSide::ATTACKER);
 	EXPECT_CALL(victim, unitId()).Times(AtLeast(1)).WillRepeatedly(Return(victimId));
 	EXPECT_CALL(victim, getCount()).Times(AtLeast(1)).WillRepeatedly(Return(victimCount));
 
-	victim.addNewBonus(std::make_shared<Bonus>(Bonus::PERMANENT, Bonus::STACK_HEALTH, Bonus::CREATURE_ABILITY, victimUnitHP, 0));
+	victim.addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::STACK_HEALTH, BonusSource::CREATURE_ABILITY, victimUnitHP, BonusSourceID()));
 
-	EXPECT_CALL(*battleFake, setUnitState(Eq(unitId), _, Eq(expectedHealValue))).Times(1);
+	EXPECT_CALL(*battleFake, updateUnit(Eq(unitId), _, Eq(expectedHealValue))).Times(1);
 
 	EXPECT_CALL(*battleFake, removeUnit(Eq(victimId))).Times(1);
 
@@ -200,11 +535,12 @@ TEST_F(SacrificeApplyTest, ResurrectsTarget)
 
 	EXPECT_CALL(targetUnit, acquire()).WillOnce(Return(targetUnitState));
 
-	EXPECT_CALL(serverMock, apply(Matcher<BattleUnitsChanged *>(_))).Times(AtLeast(1));
+	EXPECT_CALL(serverMock, apply(Matcher<BattleUnitsChanged &>(_))).Times(AtLeast(1));
+	EXPECT_CALL(serverMock, apply(Matcher<BattleLogMessage &>(_))).Times(AtLeast(1));
 
 	setupDefaultRNG();
 
-	EffectTarget target;
+	Target target;
 	target.emplace_back(&targetUnit, BattleHex());
 	target.emplace_back(&victim, BattleHex());
 

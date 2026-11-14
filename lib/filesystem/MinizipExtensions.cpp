@@ -11,88 +11,196 @@
 #include "MinizipExtensions.h"
 
 #include "CMemoryBuffer.h"
-#include "FileStream.h"
+#include "../texts/TextOperations.h"
 
-template <class _Stream> inline uLong streamRead(voidpf opaque, voidpf stream, void * buf, uLong size)
+#include <mutex>
+
+template<class Stream>
+inline uLong streamRead(voidpf opaque, voidpf stream, void * buf, uLong size)
 {
 	assert(opaque != nullptr);
 	assert(stream != nullptr);
 
-	_Stream * actualStream = static_cast<_Stream *>(stream);
+	auto * actualStream = static_cast<Stream *>(stream);
 
-	return (uLong)actualStream->read((ui8 *)buf, (uLong)size);
+	return static_cast<uLong>(actualStream->read(static_cast<ui8 *>(buf), size));
 }
 
-template <class _Stream> inline ZPOS64_T streamTell(voidpf opaque, voidpf stream)
+template<class Stream>
+inline ZPOS64_T streamTell(voidpf opaque, voidpf stream)
 {
 	assert(opaque != nullptr);
 	assert(stream != nullptr);
 
-	_Stream * actualStream = static_cast<_Stream *>(stream);
-    return actualStream->tell();
+	auto * actualStream = static_cast<Stream *>(stream);
+	return actualStream->tell();
 }
 
-template <class _Stream> inline long streamSeek(voidpf opaque, voidpf stream, ZPOS64_T offset, int origin)
+template<class Stream>
+inline long streamSeek(voidpf opaque, voidpf stream, ZPOS64_T offset, int origin)
 {
 	assert(opaque != nullptr);
 	assert(stream != nullptr);
 
-	_Stream * actualStream = static_cast<_Stream *>(stream);
+	auto * actualStream = static_cast<Stream *>(stream);
 
-    long ret = 0;
-    switch (origin)
-    {
-    case ZLIB_FILEFUNC_SEEK_CUR :
-        if(actualStream->skip(offset) != offset)
-			ret = -1;
-        break;
-    case ZLIB_FILEFUNC_SEEK_END:
-    	{
-    		const si64 pos = actualStream->getSize() - offset;
-    		if(actualStream->seek(pos) != pos)
+	long ret = 0;
+	switch(origin)
+	{
+		case ZLIB_FILEFUNC_SEEK_CUR:
+			if(actualStream->skip(offset) != offset)
 				ret = -1;
-    	}
-        break;
-    case ZLIB_FILEFUNC_SEEK_SET :
-		if(actualStream->seek(offset) != offset)
+			break;
+		case ZLIB_FILEFUNC_SEEK_END:
+		{
+			const si64 pos = actualStream->getSize() + offset;
+			if(actualStream->seek(pos) != pos)
+				ret = -1;
+		}
+		break;
+		case ZLIB_FILEFUNC_SEEK_SET:
+			if(actualStream->seek(offset) != offset)
+				ret = -1;
+			break;
+		default:
 			ret = -1;
-        break;
-    default: ret = -1;
-    }
-    if(ret == -1)
+	}
+	if(ret == -1)
 		logGlobal->error("Stream seek failed");
-    return ret;
+	return 0;
 }
 
-template <class _Stream> inline int streamProxyClose(voidpf opaque, voidpf stream)
+template<class Stream>
+inline int streamProxyClose(voidpf opaque, voidpf stream)
 {
 	assert(opaque != nullptr);
 	assert(stream != nullptr);
 
-	_Stream * actualStream = static_cast<_Stream *>(stream);
+	auto * actualStream = static_cast<Stream *>(stream);
 
 	logGlobal->trace("Proxy stream closed");
 
 	actualStream->seek(0);
 
-    return 0;
+	return 0;
 }
 
 ///CDefaultIOApi
-CDefaultIOApi::CDefaultIOApi()
-{
+#define GETFILE static_cast<std::FILE*>(filePtr)
 
+#ifdef VCMI_WINDOWS
+	#ifndef _CRT_SECURE_NO_WARNINGS
+		#define _CRT_SECURE_NO_WARNINGS
+	#endif
+	#include <cwchar>
+	#define CHAR_LITERAL(s) L##s
+	using CharType = wchar_t;
+#else
+	#define CHAR_LITERAL(s) s
+	using CharType = char;
+#endif
+
+static inline FILE* do_open(const CharType* name, const CharType* mode)
+{
+	#ifdef VCMI_WINDOWS
+		return _wfopen(name, mode);
+	#else
+		return std::fopen(name, mode);
+	#endif
 }
 
-CDefaultIOApi::~CDefaultIOApi()
+static voidpf ZCALLBACK MinizipOpenFunc(voidpf opaque, const void* filename, int mode)
 {
+	const CharType* mode_fopen = [mode]() -> const CharType*
+	{
+		if ((mode & ZLIB_FILEFUNC_MODE_READWRITEFILTER) == ZLIB_FILEFUNC_MODE_READ)
+			return CHAR_LITERAL("rb");
+		else if (mode & ZLIB_FILEFUNC_MODE_EXISTING)
+			return CHAR_LITERAL("r+b");
+		else if (mode & ZLIB_FILEFUNC_MODE_CREATE)
+			return CHAR_LITERAL("wb");
+		return nullptr;
+	}();
 
+	if (filename != nullptr && mode_fopen != nullptr)
+		return do_open(static_cast<const CharType*>(filename), mode_fopen);
+	else
+		return nullptr;
 }
 
+static uLong ZCALLBACK MinizipReadFunc(voidpf opaque, voidpf filePtr, void * buf, uLong size)
+{
+	return static_cast<uLong>(std::fread(buf, 1, size, GETFILE));
+}
+
+static uLong ZCALLBACK MinizipWriteFunc(voidpf opaque, voidpf filePtr, const void * buf, uLong size)
+{
+	return static_cast<uLong>(std::fwrite(buf, 1, size, GETFILE));
+}
+
+static ZPOS64_T ZCALLBACK MinizipTellFunc(voidpf opaque, voidpf filePtr)
+{
+#ifdef VCMI_WINDOWS
+	return _ftelli64(GETFILE);
+#else
+	return ftello(GETFILE); // 64-bit off_t: ioapi.h sets _FILE_OFFSET_BITS=64 on Linux, native on Apple
+#endif
+}
+
+static long ZCALLBACK MinizipSeekFunc(voidpf opaque, voidpf filePtr, ZPOS64_T offset, int origin)
+{
+	const int whence = origin == ZLIB_FILEFUNC_SEEK_CUR ? SEEK_CUR
+	                 : origin == ZLIB_FILEFUNC_SEEK_END ? SEEK_END
+	                 : origin == ZLIB_FILEFUNC_SEEK_SET ? SEEK_SET : -1;
+	if (whence == -1)
+		return -1;
+#ifdef VCMI_WINDOWS
+	return _fseeki64(GETFILE, offset, whence);
+#else
+	return fseeko(GETFILE, offset, whence);
+#endif
+}
+
+static int ZCALLBACK MinizipCloseFunc(voidpf opaque, voidpf filePtr)
+{
+	return std::fclose(GETFILE);
+}
+
+static int ZCALLBACK MinizipErrorFunc(voidpf opaque, voidpf filePtr)
+{
+	return std::ferror(GETFILE);
+}
+
+// Populate every callback ourselves instead of relying on fill_fopen64_filefunc:
+// despite advertising minizip compatibility, minizip-ng's compat layer stubs that
+// function out to a no-op (undocumented), which would leave read/seek/etc NULL
 zlib_filefunc64_def CDefaultIOApi::getApiStructure()
 {
-	return * FileStream::GetMinizipFilefunc();
+	zlib_filefunc64_def api;
+	api.opaque       = nullptr;
+	api.zopen64_file = &MinizipOpenFunc;
+	api.zread_file   = &MinizipReadFunc;
+	api.zwrite_file  = &MinizipWriteFunc;
+	api.ztell64_file = &MinizipTellFunc;
+	api.zseek64_file = &MinizipSeekFunc;
+	api.zclose_file  = &MinizipCloseFunc;
+	api.zerror_file  = &MinizipErrorFunc;
+	return api;
 }
+
+#if MINIZIP_NEEDS_32BIT_FUNCS
+zlib_filefunc_def CDefaultIOApi::getApiStructure32()
+{
+	static zlib_filefunc_def MinizipFilefunc;
+	static std::once_flag flag;
+	std::call_once(flag, []
+	{
+		fill_fopen_filefunc(&MinizipFilefunc);
+		MinizipFilefunc.zopen_file = reinterpret_cast<void*(*)(void*, const char*, int)>(&MinizipOpenFunc);
+	});
+	return MinizipFilefunc;
+}
+#endif
 
 ///CProxyIOApi
 CProxyIOApi::CProxyIOApi(CInputOutputStream * buffer):
@@ -100,11 +208,8 @@ CProxyIOApi::CProxyIOApi(CInputOutputStream * buffer):
 {
 
 }
-
-CProxyIOApi::~CProxyIOApi()
-{
-
-}
+//must be instantiated in .cpp file for access to complete types of all member fields
+CProxyIOApi::~CProxyIOApi() = default;
 
 zlib_filefunc64_def CProxyIOApi::getApiStructure()
 {
@@ -130,7 +235,7 @@ voidpf ZCALLBACK CProxyIOApi::openFileProxy(voidpf opaque, const void * filename
 	if(filename != nullptr)
 		path =  static_cast<const boost::filesystem::path::value_type *>(filename);
 
-	return ((CProxyIOApi *)opaque)->openFile(path, mode);
+	return (static_cast<CProxyIOApi *>(opaque))->openFile(path, mode);
 }
 
 uLong ZCALLBACK CProxyIOApi::readFileProxy(voidpf opaque, voidpf stream, void * buf, uLong size)
@@ -143,8 +248,8 @@ uLong ZCALLBACK CProxyIOApi::writeFileProxy(voidpf opaque, voidpf stream, const 
 	assert(opaque != nullptr);
 	assert(stream != nullptr);
 
-	CInputOutputStream * actualStream = static_cast<CInputOutputStream *>(stream);
-    return (uLong)actualStream->write((const ui8 *)buf, size);
+	auto * actualStream = static_cast<CInputOutputStream *>(stream);
+	return static_cast<uLong>(actualStream->write(static_cast<const ui8 *>(buf), size));
 }
 
 ZPOS64_T ZCALLBACK CProxyIOApi::tellFileProxy(voidpf opaque, voidpf stream)
@@ -164,12 +269,12 @@ int ZCALLBACK CProxyIOApi::closeFileProxy(voidpf opaque, voidpf stream)
 
 int ZCALLBACK CProxyIOApi::errorFileProxy(voidpf opaque, voidpf stream)
 {
-    return 0;
+	return 0;
 }
 
 CInputOutputStream * CProxyIOApi::openFile(const boost::filesystem::path & filename, int mode)
 {
-	logGlobal->trace("CProxyIOApi: stream opened for %s with mode %d", filename.string(), mode);
+	logGlobal->trace("CProxyIOApi: stream opened for %s with mode %d", TextOperations::filesystemPathToUtf8(filename), mode);
 
 	data->seek(0);
 	return data;
@@ -182,10 +287,8 @@ CProxyROIOApi::CProxyROIOApi(CInputStream * buffer):
 
 }
 
-CProxyROIOApi::~CProxyROIOApi()
-{
-
-}
+//must be instantiated in .cpp file for access to complete types of all member fields
+CProxyROIOApi::~CProxyROIOApi() = default;
 
 zlib_filefunc64_def CProxyROIOApi::getApiStructure()
 {
@@ -204,7 +307,7 @@ zlib_filefunc64_def CProxyROIOApi::getApiStructure()
 
 CInputStream * CProxyROIOApi::openFile(const boost::filesystem::path& filename, int mode)
 {
-	logGlobal->trace("CProxyROIOApi: stream opened for %s with mode %d", filename.string(), mode);
+	logGlobal->trace("CProxyROIOApi: stream opened for %s with mode %d", TextOperations::filesystemPathToUtf8(filename), mode);
 
 	data->seek(0);
 	return data;
@@ -219,7 +322,7 @@ voidpf ZCALLBACK CProxyROIOApi::openFileProxy(voidpf opaque, const void* filenam
 	if(filename != nullptr)
 		path =  static_cast<const boost::filesystem::path::value_type *>(filename);
 
-	return ((CProxyROIOApi *)opaque)->openFile(path, mode);
+	return (static_cast<CProxyROIOApi *>(opaque))->openFile(path, mode);
 }
 
 uLong ZCALLBACK CProxyROIOApi::readFileProxy(voidpf opaque, voidpf stream, void * buf, uLong size)

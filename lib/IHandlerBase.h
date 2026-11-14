@@ -9,73 +9,84 @@
  */
 #pragma once
 
-#include "../lib/ConstTransitivePtr.h"
-#include "VCMI_Lib.h"
-
 class JsonNode;
 class Entity;
+class LibraryLoadContext;
 
 /// base class for all handlers that can be accessed from mod system
-class DLL_LINKAGE IHandlerBase
+class DLL_LINKAGE IHandlerBase : boost::noncopyable
 {
 protected:
-	/// Calls modhandler. Mostly needed to avoid large number of includes in headers
-	void registerObject(std::string scope, std::string type_name, std::string name, si32 index);
-	std::string normalizeIdentifier(const std::string & scope, const std::string & remoteScope, const std::string & identifier) const;
+	static std::string getScopeBuiltin();
 
+	/// Calls modhandler. Mostly needed to avoid large number of includes in headers
+	void registerObject(LibraryLoadContext & context, const std::string & scope, const std::string & typeName, const std::string & name, const JsonNode & data, si32 index);
+	void registerObject(LibraryLoadContext & context, const std::string & scope, const std::vector<std::string> & typeNames, const std::string & name, const JsonNode & data, si32 index);
+
+	std::optional<int32_t> resolveIdentifier(const std::string & scope, const std::string & typeName, const std::string & name) const;
 public:
 	/// loads all original game data in vector of json nodes
 	/// dataSize - is number of items that must be loaded (normally - constant from GameConstants)
-	virtual std::vector<JsonNode> loadLegacyData(size_t dataSize) = 0;
+	virtual std::vector<JsonNode> loadLegacyData(LibraryLoadContext & context) = 0;
 
 	/// loads single object into game. Scope is namespace of this object, same as name of source mod
-	virtual void loadObject(std::string scope, std::string name, const JsonNode & data) = 0;
-	virtual void loadObject(std::string scope, std::string name, const JsonNode & data, size_t index) = 0;
+	virtual void loadObject(LibraryLoadContext & context, const std::string & scope, const std::string & name, const JsonNode & data) = 0;
+	virtual void loadObject(LibraryLoadContext & context, const std::string & scope, const std::string & name, const JsonNode & data, size_t index) = 0;
 
 	/// allows handlers to alter object configuration before validation and actual load
 	virtual void beforeValidate(JsonNode & object){};
 
 	/// allows handler to load some custom internal data before identifier finalization
-	virtual void loadCustom(){};
+	virtual void loadCustom(LibraryLoadContext & context){};
 
 	/// allows handler to do post-loading step for validation or integration of loaded data
-	virtual void afterLoadFinalization(){};
+	virtual void afterLoadFinalization(LibraryLoadContext & context){};
 
-	/**
-	 * Gets a list of objects that are allowed by default on maps
-	 *
-	 * @return a list of allowed objects, the index is the object id
-	 */
-	virtual std::vector<bool> getDefaultAllowed() const = 0;
-
-	virtual ~IHandlerBase(){}
+	virtual ~IHandlerBase() = default;
 };
 
-template <class _ObjectID, class _ObjectBase, class _Object, class _ServiceBase> class CHandlerBase : public _ServiceBase, public IHandlerBase
+template <class _ObjectID, class _ObjectBase, class _Object, class _ServiceBase>
+class CHandlerBase : public _ServiceBase, public IHandlerBase
 {
-public:
-	virtual ~CHandlerBase()
+	_Object * getObjectImpl(const int32_t index) const
 	{
-		for(auto & o : objects)
+		try
 		{
-			o.dellNull();
+			return objects.at(index).get();
 		}
-
+		catch (const std::out_of_range&)
+		{
+			logMod->error("%s id %d is invalid", getTypeNames()[0], index);
+			throw std::runtime_error("Attempt to access invalid index " + std::to_string(index) + " of type " + getTypeNames().front());
+		}
 	}
+
+public:
+	using ObjectPtr = std::shared_ptr<_Object>;
 
 	const Entity * getBaseByIndex(const int32_t index) const override
 	{
-		return getByIndex(index);
+		return getObjectImpl(index);
 	}
 
 	const _ObjectBase * getById(const _ObjectID & id) const override
 	{
-		return (*this)[id].get();
+		return getObjectImpl(id.getNum());
 	}
 
 	const _ObjectBase * getByIndex(const int32_t index) const override
 	{
-		return (*this)[_ObjectID(index)].get();
+		return getObjectImpl(index);
+	}
+
+	const _ObjectBase * getByName(const std::string & name) const override
+	{
+		// TODO: provide actual scope? Perhaps pass it as json node?
+		auto index = resolveIdentifier("game", getTypeNames().front(), name);
+		if (index)
+			return getByIndex(*index);
+		else
+			return nullptr;
 	}
 
 	void forEachBase(const std::function<void(const Entity * entity, bool & stop)> & cb) const override
@@ -88,54 +99,28 @@ public:
 		forEachT(cb);
 	}
 
-	void loadObject(std::string scope, std::string name, const JsonNode & data) override
+	void loadObject(LibraryLoadContext & context, const std::string & scope, const std::string & name, const JsonNode & data) override
 	{
-		auto object = loadFromJson(scope, data, normalizeIdentifier(scope, "core", name), objects.size());
-
-		objects.push_back(object);
-
-		for(auto type_name : getTypeNames())
-			registerObject(scope, type_name, name, object->getIndex());
+		objects.push_back(loadFromJson(context, scope, data, name, objects.size()));
+		registerObject(context, scope, getTypeNames(), name, data, objects.back()->getIndex());
 	}
 
-	void loadObject(std::string scope, std::string name, const JsonNode & data, size_t index) override
+	void loadObject(LibraryLoadContext & context, const std::string & scope, const std::string & name, const JsonNode & data, size_t index) override
 	{
-		auto object = loadFromJson(scope, data, normalizeIdentifier(scope, "core", name), index);
-
-		assert(objects[index] == nullptr); // ensure that this id was not loaded before
-		objects[index] = object;
-
-		for(auto type_name : getTypeNames())
-			registerObject(scope, type_name, name, object->getIndex());
+		if(objects[index] != nullptr)
+			logMod->debug("Replacing existing object at index %d with '%s'", index, name); // required for war machines in demo (uses ids from conflux creatures)
+		objects[index] = loadFromJson(context, scope, data, name, index);
+		registerObject(context, scope, getTypeNames(), name, data, index);
 	}
 
-	ConstTransitivePtr<_Object> operator[] (const _ObjectID id) const
+	const _Object * operator[] (const _ObjectID id) const
 	{
-		const int32_t raw_id = id.getNum();
-		return operator[](raw_id);
+		return getObjectImpl(id.getNum());
 	}
 
-	ConstTransitivePtr<_Object> operator[] (int32_t index) const
+	const _Object * operator[] (int32_t index) const
 	{
-		if(index < 0 || index >= objects.size())
-		{
-			logMod->error("%s id %d is invalid", getTypeNames()[0], index);
-			throw std::runtime_error("internal error");
-		}
-
-		return objects[index];
-	}
-
-	void updateEntity(int32_t index, const JsonNode & data)
-	{
-		if(index < 0 || index >= objects.size())
-		{
-			logMod->error("%s id %d is invalid", getTypeNames()[0], index);
-		}
-		else
-		{
-			objects.at(index)->updateFrom(data);
-		}
+		return getObjectImpl(index);
 	}
 
 	size_t size() const
@@ -143,8 +128,20 @@ public:
 		return objects.size();
 	}
 
+	/// Returns all objects of this handler, indexed by their numeric identifiers. Entries may be null
+	auto getObjects() const
+	{
+		return objects | std::views::transform([](const ObjectPtr & object) -> const _Object * { return object.get(); });
+	}
+
+	/// Returns modifiable object, for handlers that complete objects of other handlers during library loading
+	_Object * getObjectForLoading(const _ObjectID & id)
+	{
+		return getObjectImpl(id.getNum());
+	}
+
 protected:
-	virtual _Object * loadFromJson(const std::string & scope, const JsonNode & json, const std::string & identifier, size_t index) = 0;
+	virtual ObjectPtr loadFromJson(LibraryLoadContext & context, const std::string & scope, const JsonNode & json, const std::string & identifier, size_t index) = 0;
 	virtual const std::vector<std::string> & getTypeNames() const = 0;
 
 	template<typename ItemType>
@@ -160,6 +157,5 @@ protected:
 		}
 	}
 
-public: //todo: make private
-	std::vector<ConstTransitivePtr<_Object>> objects;
+	std::vector<ObjectPtr> objects;
 };

@@ -5,8 +5,17 @@
 		"level": 1,
 		"faction": "necropolis",
 		"upgrades": ["skeletonWarrior"],
+		"abilities" :
+		{
+			"undead" :
+			{
+				"type" : "UNDEAD"
+			}
+		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:112",
+			"mapAttackFromLeft": "AvWattak.def:0:113",
 			"animation": "CSKELE.DEF"
 		},
 		"sound" :
@@ -23,8 +32,17 @@
 		"index": 57,
 		"level": 1,
 		"faction": "necropolis",
+		"abilities" :
+		{
+			"undead" :
+			{
+				"type" : "UNDEAD"
+			}
+		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:114",
+			"mapAttackFromLeft": "AvWattak.def:0:115",
 			"animation": "CWSKEL.DEF"
 		},
 		"sound" :
@@ -40,11 +58,20 @@
 	{
 		"index": 58,
 		"level": 2,
-		"extraNames": [ "zombie" ], //FIXME: zombie is a name of upgrade but not in HOTRAITS
+		"compatibilityIdentifiers": [ "zombie" ], //FIXME: zombie is a name of upgrade but not in HOTRAITS
 		"faction" : "necropolis",
 		"upgrades": ["zombieLord"],
+		"abilities" :
+		{
+			"undead" :
+			{
+				"type" : "UNDEAD"
+			}
+		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:116",
+			"mapAttackFromLeft": "AvWattak.def:0:117",
 			"animation": "CZOMBI.DEF"
 		},
 		"sound" :
@@ -63,6 +90,8 @@
 		"faction": "necropolis",
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:118",
+			"mapAttackFromLeft": "AvWattak.def:0:119",
 			"animation": "CZOMLO.DEF"
 		},
 		"sound" :
@@ -75,10 +104,14 @@
 		},
 		"abilities":
 		{
-			"castDisease" : 
+			"undead" :
+			{
+				"type" : "UNDEAD"
+			},
+			"castDisease" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.disease",
+				"subtype" : "disease",
 				"val" : 20
 			}
 		}
@@ -90,16 +123,26 @@
 		"faction": "necropolis",
 		"abilities":
 		{
-			"regenerate" : 
+			"undead" :
 			{
-				"type" : "FULL_HP_REGENERATION",
-				"subtype" : 1
+				"type" : "UNDEAD"
+			},
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
+			"regenerate" :
+			{
+				"type" : "HP_REGENERATION",
+				"val" : 50
 			}
 		},
 		"upgrades": ["wraith"],
 		"hasDoubleWeek": true,
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:120",
+			"mapAttackFromLeft": "AvWattak.def:0:121",
 			"animation": "CWIGHT.DEF"
 		},
 		"sound" :
@@ -118,10 +161,18 @@
 		"faction": "necropolis",
 		"abilities":
 		{
-			"regenerate" : 
+			"undead" :
 			{
-				"type" : "FULL_HP_REGENERATION",
-				"subtype" : 1
+				"type" : "UNDEAD"
+			},
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
+			"regenerate" :
+			{
+				"type" : "HP_REGENERATION",
+				"val" : 50
 			},
 			"drainsMana" :
 			{
@@ -131,6 +182,8 @@
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:122",
+			"mapAttackFromLeft": "AvWattak.def:0:123",
 			"animation": "CWRAIT.DEF"
 		},
 		"sound" :
@@ -149,15 +202,24 @@
 		"faction": "necropolis",
 		"abilities":
 		{
-			"noRetalitation" : 
+			"undead" :
 			{
-				"type" : "BLOCKS_RETALIATION",
-				"subtype" : 1
+				"type" : "UNDEAD"
+			},
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
+			"noRetalitation" :
+			{
+				"type" : "BLOCKS_RETALIATION"
 			}
 		},
 		"upgrades": ["vampireLord"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:124",
+			"mapAttackFromLeft": "AvWattak.def:0:125",
 			"animation": "CVAMP.DEF"
 		},
 		"sound" :
@@ -178,19 +240,29 @@
 		"faction": "necropolis",
 		"abilities":
 		{
-			"noRetalitation" : 
+			"undead" :
 			{
-				"type" : "BLOCKS_RETALIATION",
-				"subtype" : 1
+				"type" : "UNDEAD"
+			},
+			"canFly" :
+			{
+				"type" : "FLYING"
+			},
+			"noRetalitation" :
+			{
+				"type" : "BLOCKS_RETALIATION"
 			},
 			"drainsLife" :
 			{
-				"type" : "LIFE_DRAIN",
+				"type" : "COMBAT_EVENT_TRIGGER",
+				"subtype" : "lifeDrain",
 				"val" : 100
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:126",
+			"mapAttackFromLeft": "AvWattak.def:0:127",
 			"animation": "CNOSFE.DEF"
 		},
 		"sound" :
@@ -210,17 +282,28 @@
 		"index": 64,
 		"level": 5,
 		"faction": "necropolis",
+		"shots" : 12,
 		"abilities":
 		{
+			"undead" :
+			{
+				"type" : "UNDEAD"
+			},
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			},
 			"deathCloud" :
 			{
 				"type" : "SPELL_LIKE_ATTACK",
-				"subtype" : "spell.deathCloud"
+				"subtype" : "deathCloud"
 			}
 		},
 		"upgrades": ["powerLich"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:128",
+			"mapAttackFromLeft": "AvWattak.def:0:129",
 			"animation": "CLICH.DEF",
 			"missile" :
 			{
@@ -242,16 +325,27 @@
 		"index": 65,
 		"level": 5,
 		"faction": "necropolis",
+		"shots" : 24,
 		"abilities":
 		{
+			"undead" :
+			{
+				"type" : "UNDEAD"
+			},
+			"shooter" :
+			{
+				"type" : "SHOOTER"
+			},
 			"deathCloud" :
 			{
 				"type" : "SPELL_LIKE_ATTACK",
-				"subtype" : "spell.deathCloud"
+				"subtype" : "deathCloud"
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:130",
+			"mapAttackFromLeft": "AvWattak.def:0:131",
 			"animation": "CPLICH.DEF",
 			"missile" :
 			{
@@ -273,18 +367,25 @@
 		"index": 66,
 		"level": 6,
 		"faction": "necropolis",
+		"doubleWide" : true,
 		"abilities":
 		{
+			"undead" :
+			{
+				"type" : "UNDEAD"
+			},
 			"curses" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.curse",
-				"val" : 20
+				"subtype" : "curse",
+				"val" : 25
 			}
 		},
 		"upgrades": ["dreadKnight"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:132",
+			"mapAttackFromLeft": "AvWattak.def:0:133",
 			"animation": "CBKNIG.DEF"
 		},
 		"sound" :
@@ -301,13 +402,18 @@
 		"index": 67,
 		"level": 6,
 		"faction": "necropolis",
+		"doubleWide" : true,
 		"abilities":
 		{
+			"undead" :
+			{
+				"type" : "UNDEAD"
+			},
 			"curses" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.curse",
-				"val" : 20
+				"subtype" : "curse",
+				"val" : 25
 			},
 			"deathStrike" :
 			{
@@ -317,6 +423,8 @@
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:134",
+			"mapAttackFromLeft": "AvWattak.def:0:135",
 			"animation": "CBLORD.DEF"
 		},
 		"sound" :
@@ -333,20 +441,42 @@
 		"index": 68,
 		"level": 7,
 		"faction": "necropolis",
+		"doubleWide" : true,
 		"abilities" :
 		{
+			"undead" :
+			{
+				"type" : "UNDEAD"
+			},
 			"dragon" :
 			{
 				"type" : "DRAGON_NATURE"
 			},
-			"const_lowers_morale" :
+			"canFly" :
 			{
-				"stacking" : "Undead Dragons"
+				"type" : "FLYING"
+			},
+			"decreaseMorale" :
+			{
+				"type" : "MORALE",
+				"val" : -1,
+				"stacking" : "Undead Dragons",
+				"propagator": "BATTLE_WIDE",
+				"propagationUpdater" : "BONUS_OWNER_UPDATER",
+				"description" : "PLACEHOLDER",
+				"limiters" : [ "OPPOSITE_SIDE" ]
+			},
+			"KING_1" : // Will be affected by Slayer with no expertise
+			{
+				"type" : "KING",
+				"val" : 0
 			}
 		},
 		"upgrades": ["ghostDragon"],
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:136",
+			"mapAttackFromLeft": "AvWattak.def:0:137",
 			"animation": "CNDRGN.DEF"
 		},
 		"sound" :
@@ -363,25 +493,47 @@
 		"index": 69,
 		"level": 7,
 		"faction": "necropolis",
+		"doubleWide" : true,
 		"abilities":
 		{
+			"undead" :
+			{
+				"type" : "UNDEAD"
+			},
 			"dragon" :
 			{
 				"type" : "DRAGON_NATURE"
 			},
-			"const_lowers_morale" :
+			"canFly" :
 			{
-				"stacking" : "Undead Dragons"
+				"type" : "FLYING"
 			},
 			"age" :
 			{
 				"type" : "SPELL_AFTER_ATTACK",
-				"subtype" : "spell.age",
+				"subtype" : "age",
 				"val" : 20
+			},
+			"decreaseMorale" :
+			{
+				"type" : "MORALE",
+				"val" : -1,
+				"stacking" : "Undead Dragons",
+				"propagator": "BATTLE_WIDE",
+				"propagationUpdater" : "BONUS_OWNER_UPDATER",
+				"description" : "@creatures.core.boneDragon.bonus.decreaseMorale",
+				"limiters" : [ "OPPOSITE_SIDE" ]
+			},
+			"KING_1" : // Will be affected by Slayer with no expertise
+			{
+				"type" : "KING",
+				"val" : 0
 			}
 		},
 		"graphics" :
 		{
+			"mapAttackFromRight": "AvWattak.def:0:138",
+			"mapAttackFromLeft": "AvWattak.def:0:139",
 			"animation": "CHDRGN.DEF"
 		},
 		"sound" :

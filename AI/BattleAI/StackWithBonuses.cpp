@@ -12,17 +12,18 @@
 
 #include <vcmi/events/EventBus.h>
 
-#include "../../lib/NetPacks.h"
+#include "../../lib/battle/BattleLayout.h"
 #include "../../lib/CStack.h"
-#include "../../lib/ScriptHandler.h"
-
-using scripting::Pool;
+#include "../../lib/gameState/GameStatePackVisitor.h"
+#include "../../lib/networkPacks/PacksForClient.h"
+#include "../../lib/networkPacks/PacksForClientBattle.h"
+#include "../../lib/networkPacks/SetStackEffect.h"
 
 void actualizeEffect(TBonusListPtr target, const Bonus & ef)
 {
 	for(auto & bonus : *target) //TODO: optimize
 	{
-		if(bonus->source == Bonus::SPELL_EFFECT && bonus->type == ef.type && bonus->subtype == ef.subtype)
+		if(bonus->source == BonusSource::SPELL_EFFECT && bonus->type == ef.type && bonus->subtype == ef.subtype)
 		{
 			if(bonus->turnsRemain < ef.turnsRemain)
 			{
@@ -34,20 +35,39 @@ void actualizeEffect(TBonusListPtr target, const Bonus & ef)
 	}
 }
 
-StackWithBonuses::StackWithBonuses(const HypotheticBattle * Owner, const CStack * Stack)
+StackWithBonuses::StackWithBonuses(const HypotheticBattle * Owner, const battle::CUnitState * Stack)
 	: battle::CUnitState(),
-	origBearer(Stack),
+	origBearer(Stack->getBonusBearer()),
 	owner(Owner),
 	type(Stack->unitType()),
 	baseAmount(Stack->unitBaseAmount()),
 	id(Stack->unitId()),
 	side(Stack->unitSide()),
 	player(Stack->unitOwner()),
-	slot(Stack->unitSlot())
+	slot(Stack->unitSlot()),
+	treeVersionLocal(0)
 {
 	localInit(Owner);
 
 	battle::CUnitState::operator=(*Stack);
+}
+
+StackWithBonuses::StackWithBonuses(const HypotheticBattle * Owner, const battle::Unit * Stack)
+	: battle::CUnitState(),
+	origBearer(Stack->getBonusBearer()),
+	owner(Owner),
+	type(Stack->unitType()),
+	baseAmount(Stack->unitBaseAmount()),
+	id(Stack->unitId()),
+	side(Stack->unitSide()),
+	player(Stack->unitOwner()),
+	slot(Stack->unitSlot()),
+	treeVersionLocal(0)
+{
+	localInit(Owner);
+
+	auto state = Stack->acquireState();
+	battle::CUnitState::operator=(*state);
 }
 
 StackWithBonuses::StackWithBonuses(const HypotheticBattle * Owner, const battle::UnitInfo & info)
@@ -57,7 +77,8 @@ StackWithBonuses::StackWithBonuses(const HypotheticBattle * Owner, const battle:
 	baseAmount(info.count),
 	id(info.id),
 	side(info.side),
-	slot(SlotID::SUMMONED_SLOT_PLACEHOLDER)
+	slot(SlotID::SUMMONED_SLOT_PLACEHOLDER),
+	treeVersionLocal(0)
 {
 	type = info.type.toCreature();
 	origBearer = type;
@@ -93,7 +114,7 @@ uint32_t StackWithBonuses::unitId() const
 	return id;
 }
 
-ui8 StackWithBonuses::unitSide() const
+BattleSide StackWithBonuses::unitSide() const
 {
 	return side;
 }
@@ -108,11 +129,10 @@ SlotID StackWithBonuses::unitSlot() const
 	return slot;
 }
 
-TConstBonusListPtr StackWithBonuses::getAllBonuses(const CSelector & selector, const CSelector & limit,
-	const CBonusSystemNode * root, const std::string & cachingStr) const
+TConstBonusListPtr StackWithBonuses::getAllBonuses(const CSelector & selector, const std::string & cachingStr) const
 {
-	TBonusListPtr ret = std::make_shared<BonusList>();
-	TConstBonusListPtr originalList = origBearer->getAllBonuses(selector, limit, root, cachingStr);
+	auto ret = std::make_shared<BonusList>();
+	TConstBonusListPtr originalList = origBearer->getAllBonuses(selector, cachingStr);
 
 	vstd::copy_if(*originalList, std::back_inserter(*ret), [this](const std::shared_ptr<Bonus> & b)
 	{
@@ -122,9 +142,9 @@ TConstBonusListPtr StackWithBonuses::getAllBonuses(const CSelector & selector, c
 
 	for(const Bonus & bonus : bonusesToUpdate)
 	{
-		if(selector(&bonus) && (!limit || !limit(&bonus)))
+		if(selector(&bonus))
 		{
-			if(ret->getFirst(Selector::source(Bonus::SPELL_EFFECT, bonus.sid).And(Selector::typeSubtype(bonus.type, bonus.subtype))))
+			if(ret->getFirst(Selector::source(BonusSource::SPELL_EFFECT, bonus.sid).And(Selector::typeSubtype(bonus.type, bonus.subtype))))
 			{
 				actualizeEffect(ret, bonus);
 			}
@@ -139,21 +159,27 @@ TConstBonusListPtr StackWithBonuses::getAllBonuses(const CSelector & selector, c
 	for(auto & bonus : bonusesToAdd)
 	{
 		auto b = std::make_shared<Bonus>(bonus);
-		if(selector(b.get()) && (!limit || !limit(b.get())))
+		if(selector(b.get()))
 			ret->push_back(b);
 	}
 	//TODO limiters?
 	return ret;
 }
 
-int64_t StackWithBonuses::getTreeVersion() const
+int32_t StackWithBonuses::getTreeVersion() const
 {
-	return owner->getTreeVersion();
+	auto result = owner->getTreeVersion();
+
+	if(bonusesToAdd.empty() && bonusesToUpdate.empty() && bonusesToRemove.empty())
+		return result;
+	else
+		return result + treeVersionLocal;
 }
 
 void StackWithBonuses::addUnitBonus(const std::vector<Bonus> & bonus)
 {
 	vstd::concatenate(bonusesToAdd, bonus);
+	treeVersionLocal++;
 }
 
 void StackWithBonuses::updateUnitBonus(const std::vector<Bonus> & bonus)
@@ -161,6 +187,7 @@ void StackWithBonuses::updateUnitBonus(const std::vector<Bonus> & bonus)
 	//TODO: optimize, actualize to last value
 
 	vstd::concatenate(bonusesToUpdate, bonus);
+	treeVersionLocal++;
 }
 
 void StackWithBonuses::removeUnitBonus(const std::vector<Bonus> & bonus)
@@ -177,9 +204,7 @@ void StackWithBonuses::removeUnitBonus(const std::vector<Bonus> & bonus)
 				&& one.val == b->val
 				&& one.sid == b->sid
 				&& one.valType == b->valType
-				&& one.additionalInfo == b->additionalInfo
-				&& one.effectRange == b->effectRange
-				&& one.description == b->description;
+				&& one.effectRange == b->effectRange;
 		});
 
 		removeUnitBonus(selector);
@@ -195,6 +220,23 @@ void StackWithBonuses::removeUnitBonus(const CSelector & selector)
 
 	vstd::erase_if(bonusesToAdd, [&](const Bonus & b){return selector(&b);});
 	vstd::erase_if(bonusesToUpdate, [&](const Bonus & b){return selector(&b);});
+
+	treeVersionLocal++;
+}
+
+std::string StackWithBonuses::getDescription() const
+{
+	std::ostringstream oss;
+	oss << unitOwner().toString();
+	oss << " battle stack [" << unitId() << "]: " << getCount() << " of ";
+	if(type)
+		oss << type->getJsonKey();
+	else
+		oss << "[UNDEFINED TYPE]";
+
+	oss << " from slot " << slot;
+
+	return oss.str();
 }
 
 void StackWithBonuses::spendMana(ServerCallback * server, const int spellCost) const
@@ -212,12 +254,8 @@ HypotheticBattle::HypotheticBattle(const Environment * ENV, Subject realBattle)
 
 	nextId = 0x00F00000;
 
-	eventBus.reset(new events::EventBus());
-
 	localEnvironment.reset(new HypotheticEnvironment(this, env));
 	serverCallback.reset(new HypotheticServerCallback(this));
-
-	pool.reset(new scripting::PoolImpl(localEnvironment.get(), serverCallback.get()));
 }
 
 bool HypotheticBattle::unitHasAmmoCart(const battle::Unit * unit) const
@@ -237,7 +275,7 @@ std::shared_ptr<StackWithBonuses> HypotheticBattle::getForUpdate(uint32_t id)
 
 	if(iter == stackStates.end())
 	{
-		const CStack * s = subject->battleGetStackByID(id, false);
+		const battle::Unit * s = subject->battleGetUnitByID(id);
 
 		auto ret = std::make_shared<StackWithBonuses>(this, s);
 		stackStates[id] = ret;
@@ -249,7 +287,7 @@ std::shared_ptr<StackWithBonuses> HypotheticBattle::getForUpdate(uint32_t id)
 	}
 }
 
-battle::Units HypotheticBattle::getUnitsIf(battle::UnitFilter predicate) const
+battle::Units HypotheticBattle::getUnitsIf(const battle::UnitFilter & predicate) const
 {
 	battle::Units proxyed = BattleProxy::getUnitsIf(predicate);
 
@@ -272,15 +310,19 @@ battle::Units HypotheticBattle::getUnitsIf(battle::UnitFilter predicate) const
 	return ret;
 }
 
+BattleID HypotheticBattle::getBattleID() const
+{
+	return subject->getBattle()->getBattleID();
+}
+
 int32_t HypotheticBattle::getActiveStackID() const
 {
 	return activeUnitId;
 }
 
-void HypotheticBattle::nextRound(int32_t roundNr)
+void HypotheticBattle::nextRound()
 {
 	//TODO:HypotheticBattle::nextRound
-
 	for(auto unit : battleAliveUnits())
 	{
 		auto forUpdate = getForUpdate(unit->unitId());
@@ -289,31 +331,31 @@ void HypotheticBattle::nextRound(int32_t roundNr)
 	}
 }
 
-void HypotheticBattle::nextTurn(uint32_t unitId)
+void HypotheticBattle::nextTurn(uint32_t unitId, BattleUnitTurnReason reason)
 {
 	activeUnitId = unitId;
 	auto unit = getForUpdate(unitId);
 
 	unit->removeUnitBonus(Bonus::UntilGetsTurn);
 
-	unit->afterGetsTurn();
+	unit->afterGetsTurn(reason);
 }
 
 void HypotheticBattle::addUnit(uint32_t id, const JsonNode & data)
 {
 	battle::UnitInfo info;
 	info.load(id, data);
-	std::shared_ptr<StackWithBonuses> newUnit = std::make_shared<StackWithBonuses>(this, info);
+	auto newUnit = std::make_shared<StackWithBonuses>(this, info);
 	stackStates[newUnit->unitId()] = newUnit;
 }
 
-void HypotheticBattle::moveUnit(uint32_t id, BattleHex destination)
+void HypotheticBattle::moveUnit(uint32_t id, const BattleHex & destination)
 {
 	std::shared_ptr<StackWithBonuses> changed = getForUpdate(id);
 	changed->position = destination;
 }
 
-void HypotheticBattle::setUnitState(uint32_t id, const JsonNode & data, int64_t healthDelta)
+void HypotheticBattle::updateUnit(uint32_t id, const JsonNode & data, int64_t healthDelta)
 {
 	std::shared_ptr<StackWithBonuses> changed = getForUpdate(id);
 
@@ -362,11 +404,6 @@ void HypotheticBattle::removeUnit(uint32_t id)
 	}
 }
 
-void HypotheticBattle::updateUnit(uint32_t id, const JsonNode & data)
-{
-	//TODO:
-}
-
 void HypotheticBattle::addUnitBonus(uint32_t id, const std::vector<Bonus> & bonus)
 {
 	getForUpdate(id)->addUnitBonus(bonus);
@@ -385,9 +422,14 @@ void HypotheticBattle::removeUnitBonus(uint32_t id, const std::vector<Bonus> & b
 	bonusTreeVersion++;
 }
 
-void HypotheticBattle::setWallState(int partOfWall, si8 state)
+EWallState HypotheticBattle::getWallState(EWallPart partOfWall) const
 {
-	//TODO:HypotheticBattle::setWallState
+	return vstd::find_or(wallStates, partOfWall, BattleProxy::getWallState(partOfWall));
+}
+
+void HypotheticBattle::setWallState(EWallPart partOfWall, EWallState state)
+{
+	wallStates[partOfWall] = state;
 }
 
 void HypotheticBattle::addObstacle(const ObstacleChanges & changes)
@@ -410,19 +452,31 @@ uint32_t HypotheticBattle::nextUnitId() const
 	return nextId++;
 }
 
-int64_t HypotheticBattle::getActualDamage(const TDmgRange & damage, int32_t attackerCount, vstd::RNG & rng) const
+int64_t HypotheticBattle::getActualDamage(const DamageRange & damage, int32_t attackerCount, vstd::RNG & rng) const
 {
-	return (damage.first + damage.second) / 2;
+	return (damage.min + damage.max) / 2;
 }
 
-int64_t HypotheticBattle::getTreeVersion() const
+std::vector<SpellID> HypotheticBattle::getUsedSpells(BattleSide side) const
 {
-	return getBattleNode()->getTreeVersion() + bonusTreeVersion;
+	// TODO
+	return {};
 }
 
-Pool * HypotheticBattle::getContextPool() const
+int3 HypotheticBattle::getLocation() const
 {
-	return pool.get();
+	// TODO
+	return int3(-1, -1, -1);
+}
+
+BattleLayout HypotheticBattle::getLayout() const
+{
+	return subject->getBattle()->getLayout();
+}
+
+int32_t HypotheticBattle::getTreeVersion() const
+{
+	return getBonusBearer()->getTreeVersion() + bonusTreeVersion;
 }
 
 ServerCallback * HypotheticBattle::getServerCallback()
@@ -430,10 +484,22 @@ ServerCallback * HypotheticBattle::getServerCallback()
 	return serverCallback.get();
 }
 
+const scripting::Pool & HypotheticBattle::getScriptContextPool() const
+{
+	return subject->getBattle()->getScriptContextPool();
+}
+
+void HypotheticBattle::makeWait(const battle::Unit * activeStack)
+{
+	auto unit = getForUpdate(activeStack->unitId());
+
+	resetActiveUnit();
+	unit->setTurnStatus(battle::UnitTurnStatus::WAITING);
+}
+
 HypotheticBattle::HypotheticServerCallback::HypotheticServerCallback(HypotheticBattle * owner_)
 	:owner(owner_)
 {
-
 }
 
 void HypotheticBattle::HypotheticServerCallback::complain(const std::string & problem)
@@ -451,44 +517,61 @@ vstd::RNG * HypotheticBattle::HypotheticServerCallback::getRNG()
 	return &rngStub;
 }
 
-void HypotheticBattle::HypotheticServerCallback::apply(CPackForClient * pack)
+bool HypotheticBattle::HypotheticServerCallback::rollCombatAbility(const IBattleInfoCallback &, const battle::Unit &, int percentageChance)
 {
+	// same averaging the RNG stub does - the hypothetical battle must stay deterministic
+	return percentageChance >= 50;
+}
+
+void HypotheticBattle::HypotheticServerCallback::apply(CPackForClient & pack)
+{
+	// battle-wide bonuses from combat scripts rely on limiters, which hypothetical units do not evaluate
+	if(dynamic_cast<GiveBonus *>(&pack))
+		return;
+
 	logAi->error("Package of type %s is not allowed in battle evaluation", typeid(pack).name());
 }
 
-void HypotheticBattle::HypotheticServerCallback::apply(BattleLogMessage * pack)
+void HypotheticBattle::HypotheticServerCallback::apply(BattleLogMessage & pack)
 {
-	pack->applyBattle(owner);
+	BattleStatePackVisitor visitor(*owner);
+	pack.visit(visitor);
 }
 
-void HypotheticBattle::HypotheticServerCallback::apply(BattleStackMoved * pack)
+void HypotheticBattle::HypotheticServerCallback::apply(BattleStackMoved & pack)
 {
-	pack->applyBattle(owner);
+	BattleStatePackVisitor visitor(*owner);
+	pack.visit(visitor);
 }
 
-void HypotheticBattle::HypotheticServerCallback::apply(BattleUnitsChanged * pack)
+void HypotheticBattle::HypotheticServerCallback::apply(BattleUnitsChanged & pack)
 {
-	pack->applyBattle(owner);
+	BattleStatePackVisitor visitor(*owner);
+	pack.visit(visitor);
 }
 
-void HypotheticBattle::HypotheticServerCallback::apply(SetStackEffect * pack)
+void HypotheticBattle::HypotheticServerCallback::apply(SetStackEffect & pack)
 {
-	pack->applyBattle(owner);
+	BattleStatePackVisitor visitor(*owner);
+	pack.visit(visitor);
 }
 
-void HypotheticBattle::HypotheticServerCallback::apply(StacksInjured * pack)
+void HypotheticBattle::HypotheticServerCallback::apply(StacksInjured & pack)
 {
-	pack->applyBattle(owner);
+	BattleStatePackVisitor visitor(*owner);
+	pack.visit(visitor);
 }
 
-void HypotheticBattle::HypotheticServerCallback::apply(BattleObstaclesChanged * pack)
+void HypotheticBattle::HypotheticServerCallback::apply(BattleObstaclesChanged & pack)
 {
-	pack->applyBattle(owner);
+	BattleStatePackVisitor visitor(*owner);
+	pack.visit(visitor);
 }
 
-void HypotheticBattle::HypotheticServerCallback::apply(CatapultAttack * pack)
+void HypotheticBattle::HypotheticServerCallback::apply(CatapultAttack & pack)
 {
-	pack->applyBattle(owner);
+	BattleStatePackVisitor visitor(*owner);
+	pack.visit(visitor);
 }
 
 HypotheticBattle::HypotheticEnvironment::HypotheticEnvironment(HypotheticBattle * owner_, const Environment * upperEnvironment)
@@ -503,8 +586,9 @@ const Services * HypotheticBattle::HypotheticEnvironment::services() const
 	return env->services();
 }
 
-const Environment::BattleCb * HypotheticBattle::HypotheticEnvironment::battle() const
+const Environment::BattleCb * HypotheticBattle::HypotheticEnvironment::battle(const BattleID & battleID) const
 {
+	assert(battleID == owner->getBattleID());
 	return owner;
 }
 
@@ -512,14 +596,3 @@ const Environment::GameCb * HypotheticBattle::HypotheticEnvironment::game() cons
 {
 	return env->game();
 }
-
-vstd::CLoggerBase * HypotheticBattle::HypotheticEnvironment::logger() const
-{
-	return env->logger();
-}
-
-events::EventBus * HypotheticBattle::HypotheticEnvironment::eventBus() const
-{
-	return owner->eventBus.get();
-}
-

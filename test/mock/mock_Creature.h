@@ -12,17 +12,27 @@
 
 #include <vcmi/Creature.h>
 
+#include "../../lib/ResourceSet.h"
+
 class IBonusBearer;
+class FactionID;
 
 class CreatureMock : public Creature
 {
 public:
+	MOCK_CONST_METHOD0(getNameTranslated, std::string ());
+	MOCK_CONST_METHOD0(getNameTextID, std::string ());
+	MOCK_CONST_METHOD0(getNameSingularTranslated, std::string ());
+	MOCK_CONST_METHOD0(getNameSingularTextID, std::string ());
+	MOCK_CONST_METHOD0(getNamePluralTranslated, std::string ());
+	MOCK_CONST_METHOD0(getNamePluralTextID, std::string ());
 	MOCK_CONST_METHOD0(getIndex, int32_t());
 	MOCK_CONST_METHOD0(getIconIndex, int32_t());
-	MOCK_CONST_METHOD0(getJsonKey, const std::string &());
+	MOCK_CONST_METHOD0(getJsonKey, std::string ());
+	MOCK_CONST_METHOD0(getModScope, std::string ());
 	MOCK_CONST_METHOD0(getName, const std::string &());
 	MOCK_CONST_METHOD0(getId, CreatureID());
-	MOCK_CONST_METHOD0(accessBonuses, const IBonusBearer *());
+	MOCK_CONST_METHOD0(getBonusBearer, const IBonusBearer *());
 	MOCK_CONST_METHOD1(registerIcons, void(const IconRegistar &));
 
 	MOCK_CONST_METHOD0(getPluralName, const std::string &());
@@ -36,7 +46,7 @@ public:
 	MOCK_CONST_METHOD0(getLevel, int32_t());
 	MOCK_CONST_METHOD0(getGrowth, int32_t());
 	MOCK_CONST_METHOD0(getHorde, int32_t());
-	MOCK_CONST_METHOD0(getFactionIndex, int32_t());
+	MOCK_CONST_METHOD0(getFactionID, FactionID());
 
 	MOCK_CONST_METHOD0(getBaseAttack, int32_t());
 	MOCK_CONST_METHOD0(getBaseDefense, int32_t());
@@ -49,4 +59,8 @@ public:
 
 	MOCK_CONST_METHOD1(getCost, int32_t(int32_t));
 	MOCK_CONST_METHOD0(isDoubleWide, bool());
+
+	MOCK_CONST_METHOD1(getRecruitCost, int32_t(GameResID));
+	MOCK_CONST_METHOD0(getFullRecruitCost, const ResourceSet &());
+	MOCK_CONST_METHOD0(hasUpgrades, bool());
 };

@@ -1,9 +1,12 @@
 {
 	"stoneGaze" : {
 		"index" : 70,
+		"level" : 3,
 		"targetType": "NO_TARGET",
 		"animation":{
-			//need special animation
+			"affect":[ {
+				"effectName" : "petrification"
+			} ]
 		},
 		"sounds": {
 			"cast": "PARALYZE"
@@ -12,33 +15,38 @@
 			"base":{
 				"range" : "0",
 				"targetModifier":{"smart":true},
-				"effects" : {
-					"notActive" : {
-						"val" : 0,
-						"type" : "NOT_ACTIVE",
-						"subtype" : "spell.stoneGaze",
-						"duration" : [
-							"UNTIL_BEING_ATTACKED",
-							"N_TURNS"
-						]
-					},
-					"noRetaliation" : {
-						"val" : 0,
-						"type" : "NO_RETALIATION",
-						"duration" : [
-							"UNTIL_BEING_ATTACKED",
-							"N_TURNS"
-						]
-					},
-					"defenceBoost" : {
-						"type" : "PRIMARY_SKILL",
-						"subtype" : "primSkill.defence",
-						"val" : 50,
-						"valueType" : "PERCENT_TO_ALL",
-						"duration" : [
-						    "UNTIL_BEING_ATTACKED",
-						    "N_TURNS"
-						]
+				"battleEffects" : {
+					"petrification" : {
+						"type" : "timed",
+						"battleLogSingular" : "@core.genrltxt.558",
+						"battleLogPlural" : "@core.genrltxt.559",
+						"bonus" : {
+							"notActive" : {
+								"val" : 0,
+								"type" : "NOT_ACTIVE",
+								"subtype" : "spell.stoneGaze",
+								"duration" : [
+									"UNTIL_BEING_ATTACKED",
+									"N_TURNS"
+								]
+							},
+							"noRetaliation" : {
+								"val" : 0,
+								"type" : "NO_RETALIATION",
+								"duration" : [
+									"UNTIL_BEING_ATTACKED",
+									"N_TURNS"
+								]
+							},
+							"generalDamageReduction" : {
+								"type" : "GENERAL_DAMAGE_REDUCTION",
+								"val" : 50,
+								"duration" : [
+									"UNTIL_BEING_ATTACKED",
+									"N_TURNS"
+								]
+							}
+						}
 					}
 				}
 			}
@@ -54,6 +62,9 @@
 	},
 	"poison" : {
 		"index" : 71,
+		// H3 poison has no level: dragon immunities block it as level 1, but Cape of Silence (HotA) does not
+		// (blocked here) and neither does Cursed Ground (blocked here by BLOCK_CREATURE_MAGIC)
+		"level" : 1,
 		"targetType": "NO_TARGET",
 
 		"animation":{
@@ -66,18 +77,25 @@
 			"base":{
 				"range" : "0",
 				"targetModifier":{"smart":true},
-				"effects" : {
-					"poison" : {
-						"val" : 30,
-						"type" : "POISON",
-						"valueType" : "INDEPENDENT_MAX",
-						"duration" : "N_TURNS"
-					},
-					"stackHealth" : {
-						"val" : -10,
-						"type" : "STACK_HEALTH",
-						"valueType" : "PERCENT_TO_ALL",
-						"duration" : "N_TURNS"
+				"battleEffects" : {
+					"poisoning" : {
+						"type" : "timed",
+						"battleLogSingular" : "@core.genrltxt.561",
+						"battleLogPlural" : "@core.genrltxt.562",
+						"bonus" : {
+							"poison" : {
+								"val" : 30,
+								"type" : "POISON",
+								"valueType" : "AT_LEAST",
+								"duration" : "N_TURNS"
+							},
+							"stackHealth" : {
+								"val" : -10,
+								"type" : "STACK_HEALTH",
+								"valueType" : "PERCENT_TO_ALL",
+								"duration" : "N_TURNS"
+							}
+						}
 					}
 				}
 			}
@@ -88,6 +106,7 @@
 		"targetCondition" : {
 			"noneOf" : {
 				"bonus.NON_LIVING" : "absolute",
+				"bonus.MECHANICAL" : "absolute",
 				"bonus.SIEGE_WEAPON" : "absolute",
 				"bonus.UNDEAD" : "absolute",
 				"bonus.GARGOYLE" : "absolute"
@@ -107,23 +126,31 @@
 		"levels" : {
 			"base":{
 				"range" : "0",
-				//no cumulative effect even with mods here
-				"effects" : {
-					"bindEffect" : {
-						"val" : 0,
-						"type" : "BIND_EFFECT",
-						"duration" : "PERMANENT",
-						"addInfo" : -1
+				"battleEffects" : {
+					"binding" : {
+						"type" : "timed",
+						"battleLogSingular" : "@core.genrltxt.560",
+						"battleLogPlural" : "@core.genrltxt.560",
+						"bonus" : {
+							"bindEffect" : {
+								"val" : 0,
+								"type" : "BIND_EFFECT",
+								"duration" : "PERMANENT",
+								"addInfo" : -1
+							}
+						}
 					}
 				}
 			}
 		},
 		"flags" : {
+			"nonMagical" : true,
 			"indifferent": true
 		}
 	},
 	"disease" : {
 		"index" : 73,
+		"level" : 2,
 		"targetType": "NO_TARGET",
 
 		"animation":{
@@ -136,18 +163,25 @@
 			"base":{
 				"range" : "0",
 				"targetModifier":{"smart":true},
-				"effects" : {
-					"attack" : {
-						"val" : -2,
-						"type" : "PRIMARY_SKILL",
-						"subtype" : "primSkill.attack",
-						"duration" : "N_TURNS"
-					},
-					"defence" : {
-						"val" : -2,
-						"type" : "PRIMARY_SKILL",
-						"subtype" : "primSkill.defence",
-						"duration" : "N_TURNS"
+				"battleEffects" : {
+					"illness" : {
+						"type" : "timed",
+						"battleLogSingular" : "@core.genrltxt.553",
+						"battleLogPlural" : "@core.genrltxt.554",
+						"bonus" : {
+							"attack" : {
+								"val" : -2,
+								"type" : "PRIMARY_SKILL",
+								"subtype" : "attack",
+								"duration" : "N_TURNS"
+							},
+							"defence" : {
+								"val" : -2,
+								"type" : "PRIMARY_SKILL",
+								"subtype" : "defence",
+								"duration" : "N_TURNS"
+							}
+						}
 					}
 				}
 			}
@@ -158,6 +192,7 @@
 		"targetCondition" : {
 			"noneOf" : {
 				"bonus.NON_LIVING" : "normal",
+				"bonus.MECHANICAL" : "normal",
 				"bonus.SIEGE_WEAPON" : "absolute",
 				"bonus.UNDEAD" : "normal"
 			}
@@ -165,10 +200,11 @@
 	},
 	"paralyze" : {
 		"index" : 74,
+		"level" : 4,
 		"targetType": "NO_TARGET",
 
 		"animation":{
-			//missing
+			"affect":["SP10_"]
 		},
 		"sounds": {
 			"cast": "PARALYZE"
@@ -177,23 +213,39 @@
 			"base":{
 				"range" : "0",
 				"targetModifier":{"smart":true},
-				"effects" : {
-					"notActive" : {
-						"val" : 0,
-						"type" : "NOT_ACTIVE",
-						"subtype" : "spell.paralyze",
-						"duration" : [
-							"UNTIL_BEING_ATTACKED",
-							"N_TURNS"
-						]
-					},
-					"noRetaliation" : {
-						"val" : 0,
-						"type" : "NO_RETALIATION",
-						"duration" : [
-							"UNTIL_BEING_ATTACKED",
-							"N_TURNS"
-						]
+				"battleEffects" : {
+					"paralysis" : {
+						"type" : "timed",
+						"battleLogSingular" : "@core.genrltxt.563",
+						"battleLogPlural" : "@core.genrltxt.564",
+						"bonus" : {
+							"notActive" : {
+								"val" : 0,
+								"type" : "NOT_ACTIVE",
+								"subtype" : "spell.paralyze",
+								"duration" : [
+									"UNTIL_BEING_ATTACKED",
+									"N_TURNS"
+								]
+							},
+							"noRetaliation" : {
+								"val" : 0,
+								"type" : "NO_RETALIATION",
+								"duration" : [
+									"UNTIL_BEING_ATTACKED",
+									"N_TURNS"
+								]
+							},
+							"generalAttackReduction" : {
+								"val" : 75,
+								"type" : "GENERAL_ATTACK_REDUCTION",
+								"duration" : [
+									"UNTIL_AFTER_ATTACK_SEQUENCE",
+									"UNTIL_TAKING_INDIRECT_DAMAGE",
+									"N_TURNS"
+								]
+							}
+						}
 					}
 				}
 			}
@@ -209,6 +261,7 @@
 	},
 	"age" : {
 		"index" : 75,
+		"level" : 5,
 		"targetType": "NO_TARGET",
 
 		"animation":{
@@ -221,12 +274,19 @@
 			"base":{
 				"range" : "0",
 				"targetModifier":{"smart":true},
-				"effects" : {
-					"stackHealth" : {
-						"val" : -50,
-						"type" : "STACK_HEALTH",
-						"valueType" : "PERCENT_TO_ALL",
-						"duration" : "N_TURNS"
+				"battleEffects" : {
+					"age" : {
+						"type" : "timed",
+						"battleLogSingular" : "@core.genrltxt.551",
+						"battleLogPlural" : "@core.genrltxt.552",
+						"bonus" : {
+							"stackHealth" : {
+								"val" : -50,
+								"type" : "STACK_HEALTH",
+								"valueType" : "PERCENT_TO_ALL",
+								"duration" : "N_TURNS"
+							}
+						}
 					}
 				}
 			}
@@ -237,6 +297,7 @@
 		"targetCondition" : {
 			"noneOf" : {
 				"bonus.NON_LIVING" : "absolute",
+				"bonus.MECHANICAL" : "absolute",
 				"bonus.SIEGE_WEAPON" : "absolute",
 				"bonus.UNDEAD" : "absolute",
 				"bonus.GARGOYLE" : "absolute"
@@ -248,7 +309,7 @@
 		"targetType": "NO_TARGET",
 
 		"animation":{
-			"hit":["SP04_"]
+			"hit":[{ "defName" : "SP04_", "transparency" : 0.5}]
 		},
 		"sounds": {
 			"cast": "DEATHCLD"
@@ -258,17 +319,20 @@
 				"range" : "0-1",
 				"battleEffects":{
 					"damage":{
-						"type":"core:damage"
+						"type":"damage"
 					}
 				}
 			}
 		},
 		"flags" : {
-			"indifferent": true
+			"damage": true,
+			"negative": true,
+			"nonMagical": true
 		},
 		"targetCondition" : {
 			"noneOf" : {
 				"bonus.NON_LIVING" : "absolute",
+				"bonus.MECHANICAL" : "absolute",
 				"bonus.SIEGE_WEAPON" : "absolute",
 				"bonus.UNDEAD" : "absolute",
 				"bonus.GARGOYLE" : "absolute"
@@ -277,10 +341,11 @@
 	},
 	"thunderbolt" : {
 		"index" : 77,
+		"level" : 2,
 		"targetType": "NO_TARGET",
 
 		"animation":{
-			"affect":[{"defName":"C03SPA0", "verticalPosition":"bottom"}, "C11SPA1"]
+			"affect":[{"defName":"C03SPA0", "verticalPosition":"bottom"}, "C03SPA1"]
 		},
 		"sounds": {
 			"cast": "LIGHTBLT"
@@ -290,7 +355,7 @@
 				"range" : "0",
 				"battleEffects":{
 					"damage":{
-						"type":"core:damage"
+						"type":"damage"
 					}
 				}
 			}
@@ -314,7 +379,7 @@
 			"base":{
 				"battleEffects":{
 					"dispel":{
-						"type":"core:dispel",
+						"type":"dispel",
 						"ignoreImmunity" : true,
 						"dispelNegative":false,
 						"dispelNeutral":false,
@@ -343,7 +408,7 @@
 			"base":{
 				"battleEffects":{
 					"destruction":{
-						"type":"core:damage",
+						"type":"damage",
 						"killByCount": true
 					}
 				},
@@ -356,6 +421,7 @@
 		"targetCondition" : {
 			"noneOf" : {
 				"bonus.NON_LIVING" : "absolute",
+				"bonus.MECHANICAL" : "absolute",
 				"bonus.SIEGE_WEAPON" : "absolute",
 				"bonus.UNDEAD" : "absolute",
 				"bonus.GARGOYLE" : "absolute"
@@ -367,7 +433,7 @@
 		"targetType": "NO_TARGET",
 
 		"animation":{
-			"affect":["C17SPW0"]
+			"affect":["C0ACID"]
 		},
 		"sounds": {
 			"cast": "ACID"
@@ -376,14 +442,14 @@
 			"base":{
 				"battleEffects":{
 					"timed":{
-						"type":"core:timed",
+						"type":"timed",
 						"cumulative":true,
 						"ignoreImmunity" : true,
 						"bonus" :{
 							"primarySkill" : {
 								"val" : -3,
 								"type" : "PRIMARY_SKILL",
-								"subtype" : "primSkill.defence",
+								"subtype" : "defence",
 								"duration" : "PERMANENT",
 								"valueType" : "ADDITIVE_VALUE"
 							}
@@ -395,7 +461,8 @@
 			}
 		},
 		"flags" : {
-			"indifferent": true
+			"indifferent": true,
+			"persistent" : true
 		}
 	},
 	"acidBreathDamage" : {
@@ -403,7 +470,7 @@
 		"targetType": "NO_TARGET",
 
 		"animation":{
-			"affect":["C17SPW0"]
+			"affect":["C0ACID"]
 		},
 		"sounds": {
 			"cast": "ACID"
@@ -412,7 +479,7 @@
 			"base":{
 				"battleEffects":{
 					"damage":{
-						"type":"core:damage",
+						"type":"damage",
 						"ignoreImmunity" : true
 					}
 				},
@@ -424,9 +491,33 @@
 			"indifferent": true
 		},
 		"targetCondition" : {
-			"noneOf" : {
-				"bonus.DIRECT_DAMAGE_IMMUNITY" : "normal"
-			}
 		}
-	}
+	},
+	"fireballAbility" : {
+		"type": "ability",
+		"targetType": "LOCATION",
+
+		"animation":{
+			"hit":["C13SPF"] //C13SPF0 ???
+		},
+		"sounds": {
+			"cast": "SPONTCOMB"
+		},
+		"level": 0,
+		"levels" : {
+			"none": {
+				"range" : "0-1",
+				"battleEffects":{
+					"damage":{
+						"type":"damage"
+					}
+				}
+			}
+		},
+		"flags" : {
+			"damage": true,
+			"negative": true,
+			"nonMagical": true
+		}
+	},
 }

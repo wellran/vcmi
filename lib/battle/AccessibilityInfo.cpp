@@ -9,21 +9,41 @@
  */
 #include "StdInc.h"
 #include "AccessibilityInfo.h"
+#include "BattleHex.h"
 #include "Unit.h"
 #include "../GameConstants.h"
 
-bool AccessibilityInfo::accessible(BattleHex tile, const battle::Unit * stack) const
+bool AccessibilityInfo::tileAccessibleWithGate(const BattleHex & tile, bool canUseGate) const
 {
-	return accessible(tile, stack->doubleWide(), stack->unitSide());
+	const auto & accessibility = at(tile.toInt());
+
+	if(accessibility == EAccessibility::ALIVE_STACK)
+	{
+		if(!destructibleEnemyTurns)
+			return false;
+
+		return destructibleEnemyTurns->at(tile.toInt()) >= 0;
+	}
+
+	if(accessibility != EAccessibility::ACCESSIBLE)
+		if(accessibility != EAccessibility::GATE || !canUseGate)
+			return false;
+
+	return true;
 }
 
-bool AccessibilityInfo::accessible(BattleHex tile, bool doubleWide, ui8 side) const
+bool AccessibilityInfo::accessible(const BattleHex & tile, const battle::Unit * stack) const
+{
+	return accessible(tile, stack->doubleWide(), stack->unitSide(), stack->controllingSide() == BattleSide::DEFENDER);
+}
+
+bool AccessibilityInfo::accessible(const BattleHex & tile, bool doubleWide, BattleSide side, bool canUseGate) const
 {
 	// All hexes that stack would cover if standing on tile have to be accessible.
 	//do not use getHexes for speed reasons
 	if(!tile.isValid())
 		return false;
-	if(at(tile) != EAccessibility::ACCESSIBLE && !(at(tile) == EAccessibility::GATE && side == BattleSide::DEFENDER))
+	if(!tileAccessibleWithGate(tile, canUseGate))
 		return false;
 
 	if(doubleWide)
@@ -31,7 +51,7 @@ bool AccessibilityInfo::accessible(BattleHex tile, bool doubleWide, ui8 side) co
 		auto otherHex = battle::Unit::occupiedHex(tile, doubleWide, side);
 		if(!otherHex.isValid())
 			return false;
-		if(at(otherHex) != EAccessibility::ACCESSIBLE && !(at(otherHex) == EAccessibility::GATE && side == BattleSide::DEFENDER))
+		if(!tileAccessibleWithGate(otherHex, canUseGate))
 			return false;
 	}
 

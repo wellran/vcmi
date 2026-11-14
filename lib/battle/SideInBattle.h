@@ -8,32 +8,59 @@
  *
  */
 #pragma once
+
 #include "../GameConstants.h"
+#include "../callback/GameCallbackHolder.h"
 
 class CGHeroInstance;
+class CGTownInstance;
 class CArmedInstance;
 
-struct DLL_LINKAGE SideInBattle
+/// Charges of an artifact worn by hero at start of battle, used to undo charges spent in a cancelled battle
+struct DLL_LINKAGE InitialArtifactCharges
 {
-	PlayerColor color;
-	const CGHeroInstance * hero; //may be NULL if army is not commanded by hero
-	const CArmedInstance * armyObject; //adv. map object with army that participates in battle; may be same as hero
+	ArtifactInstanceID artifactID;
+	ArtifactPosition position;
+	uint16_t charges = 0;
 
-	uint32_t castSpellsCount; //how many spells each side has been cast this turn
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & artifactID;
+		h & position;
+		h & charges;
+	}
+};
+
+struct DLL_LINKAGE SideInBattle : public GameCallbackHolder
+{
+	using GameCallbackHolder::GameCallbackHolder;
+
+	PlayerColor color = PlayerColor::CANNOT_DETERMINE;
+	ObjectInstanceID heroID; //may be empty if army is not commanded by hero
+	ObjectInstanceID armyObjectID; //adv. map object with army that participates in battle; may be same as hero
+
+	uint32_t castSpellsCount = 0; //how many spells each side has been cast this turn
 	std::vector<SpellID> usedSpellsHistory; //every time hero casts spell, it's inserted here -> eagle eye skill
-	int32_t enchanterCounter; //tends to pass through 0, so sign is needed
+	int32_t enchanterCounter = 0; //tends to pass through 0, so sign is needed
+	int32_t initialMana = 0;
+	int32_t additionalMana = 0;
+	std::vector<InitialArtifactCharges> initialArtifactCharges;
 
-	SideInBattle();
-	void init(const CGHeroInstance * Hero, const CArmedInstance * Army);
+	void init(const CGHeroInstance * Hero, const CArmedInstance * Army, const CGTownInstance * town);
+	const CArmedInstance * getArmy() const;
+	const CGHeroInstance * getHero() const;
 
-
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & color;
-		h & hero;
-		h & armyObject;
+		h & heroID;
+		h & armyObjectID;
 		h & castSpellsCount;
 		h & usedSpellsHistory;
 		h & enchanterCounter;
+		h & initialMana;
+		h & additionalMana;
+		if (h.hasFeature(Handler::Version::BATTLE_RESTORE_ARTIFACT_CHARGES))
+			h & initialArtifactCharges;
 	}
 };
